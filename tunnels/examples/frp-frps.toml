@@ -1,0 +1,20 @@
+# frps — server config (Foreign node)
+#
+# Run with:  frps -c frp-frps.toml
+# Mirrors what the panel generates (see packages/tunnel-core/src/config/frp.ts).
+
+bindPort = 7000
+# optional UDP over the same control channel
+bindUdpPort = 7001
+
+auth.token = "REPLACE_WITH_PANEL_GENERATED_TOKEN"
+
+# optional dashboard (bind to localhost only)
+[webServer]
+addr = "127.0.0.1"
+port = 17500
+user = "admin"
+password = "REPLACE_WITH_DASHBOARD_PASSWORD"
+
+# restrict which remote ports proxies may claim
+# allowPorts = ["2000-3000", "8080"]

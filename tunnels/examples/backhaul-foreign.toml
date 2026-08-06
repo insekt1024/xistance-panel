@@ -1,0 +1,22 @@
+# Backhaul — server (Foreign node, public listener)
+#
+# Run with:  backhaul -c backhaul-foreign.toml
+# This file mirrors what the panel generates for a Foreign node.
+# The panel also requires sha256 verification of the binary before use.
+
+[server]
+listen = "0.0.0.0:3080"
+
+token = "REPLACE_WITH_PANEL_GENERATED_TOKEN"
+transport = "tcp"
+accept_mux = true
+tcp_nodelay = true
+keepalive_period = 75
+heartbeat = 40
+channel_size = 2048
+
+# Public-facing portmap (local service -> public remote port)
+portmap = [
+  { local = "127.0.0.1:8080", remote = "0.0.0.0:8080" },
+  { local = "127.0.0.1:9000", remote = "0.0.0.0:9000" },
+]

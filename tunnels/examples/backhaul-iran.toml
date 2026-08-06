@@ -1,0 +1,22 @@
+# Backhaul — client (Iran node, dials out)
+#
+# Run with:  backhaul -c backhaul-iran.toml
+# Mirrors what the panel generates for an Iran node. The client always dials
+# OUT (no inbound listeners), so it works behind NAT.
+
+[client]
+remote_addr = "PUBLIC_IP_OF_FOREIGN_NODE:3080"
+
+token = "REPLACE_WITH_PANEL_GENERATED_TOKEN"
+transport = "tcp"
+reset_mux = false
+tcp_nodelay = true
+keepalive_period = 75
+heartbeat = 40
+channel_size = 2048
+
+# local service on this node -> public remote port on the server
+portmap = [
+  { local = "127.0.0.1:8080", remote = "0.0.0.0:8080" },
+  { local = "127.0.0.1:9000", remote = "0.0.0.0:9000" },
+]

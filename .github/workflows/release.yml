@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version bump type (major, minor, patch)'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release v${{ github.event.inputs.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Bump version, commit and tag
+        run: node scripts/version.mjs ${{ github.event.inputs.version }} --commit
+
+      - name: Read new version
+        id: version
+        run: echo "version=$(node scripts/version.mjs --show)" >> "$GITHUB_OUTPUT"
+
+      - name: Push commit + tag
+        run: |
+          git push origin HEAD:${{ github.ref }}
+          git push origin tag v${{ steps.version.outputs.version }}
+
+      - name: Typecheck + lint + build
+        run: |
+          npm run build:packages
+          npm run typecheck
+          npm run lint
+          npm run build
+
+      - name: Package standalone artifact
+        run: |
+          mkdir -p dist
+          cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+          tar -czf dist/xistance-panel-v${{ steps.version.outputs.version }}.tar.gz \
+            -C apps/web/.next standalone
+          tar -czf dist/xistance-panel-v${{ steps.version.outputs.version }}-static.tar.gz \
+            -C apps/web/.next static
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          PRETAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PRETAG" ]; then
+            git log --oneline --no-merges "$PRETAG"..HEAD
+          else
+            git log --oneline --no-merges
+          fi | sed 's/^/- /' > RELEASE_NOTES.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Xistance Panel v${{ steps.version.outputs.version }}
+          body_path: RELEASE_NOTES.txt
+          files: |
+            dist/*.tar.gz

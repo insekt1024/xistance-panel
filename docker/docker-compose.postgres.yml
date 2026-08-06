@@ -1,0 +1,35 @@
+# Optional PostgreSQL for Xistance Panel.
+#
+# The panel defaults to a zero-config SQLite file (recommended for a single
+# VPS). If you prefer PostgreSQL, run this compose file, then point the panel
+# at it:
+#
+#   docker compose -f docker/docker-compose.postgres.yml up -d
+#   DATABASE_URL="postgresql://xistance:<password>@localhost:5432/xistance?schema=public"
+#
+# Note: the Prisma schema ships with `provider = "sqlite"`. To use Postgres,
+# generate a `schema.postgres.prisma` (same models, `provider = "postgresql"`)
+# and run `npx prisma migrate deploy` / `npx prisma db push` against it.
+# See packages/db/prisma/schema.prisma header comment.
+#
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: xistance-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: xistance
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-strong-password}
+      POSTGRES_DB: xistance
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - xistance_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U xistance -d xistance"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  xistance_pgdata:

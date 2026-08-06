@@ -1,0 +1,33 @@
+# frpc — client config (Iran node)
+#
+# Run with:  frpc -c frp-frpc.toml
+# Mirrors what the panel generates (see packages/tunnel-core/src/config/frp.ts).
+
+serverAddr = "PUBLIC_IP_OF_FOREIGN_NODE"
+serverPort = 7000
+
+auth.token = "REPLACE_WITH_PANEL_GENERATED_TOKEN"
+
+# TCP: expose a local port on the foreign node's public IP
+[[proxies]]
+name = "web"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8080
+remotePort = 8080
+
+[proxies.transport]
+encryption = true
+compression = true
+
+# UDP: expose a local UDP service
+[[proxies]]
+name = "game"
+type = "udp"
+localIP = "127.0.0.1"
+localPort = 27015
+remotePort = 27015
+
+[proxies.transport]
+encryption = true
+compression = false

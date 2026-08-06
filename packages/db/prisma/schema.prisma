@@ -1,0 +1,198 @@
+// Xistance Panel — database schema
+//
+// Default provider is SQLite (zero-config, single file).
+// For PostgreSQL, create a schema.postgres.prisma with the same models and
+// `provider = "postgresql"`, then run `prisma migrate deploy` against it.
+// See README for the Docker Compose Postgres option.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Identity & access
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         String    @default("USER") // SUPER_ADMIN | ADMIN | USER
+  quota        Int       @default(5) // max active tunnels
+  locale       String    @default("en")
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  tunnels      Tunnel[]
+  portForwards PortForward[]
+  sessions     Session[]
+  apiKeys      ApiKey[]
+  auditLogs    AuditLog[]
+}
+
+model Session {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash    String
+  refreshHash  String
+  expiresAt    DateTime
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime @default(now())
+  revokedAt    DateTime?
+
+  @@index([userId])
+  @@index([refreshHash])
+}
+
+model ApiKey {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  keyHash   String   @unique
+  lastUsed  DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Infrastructure
+// ---------------------------------------------------------------------------
+
+model Node {
+  id                 String     @id @default(uuid())
+  name               String
+  type               String // IRAN | FOREIGN
+  host               String
+  sshPort            Int        @default(22)
+  sshUser            String     @default("root")
+  authMethod         String     @default("key") // key | password
+  // Secrets are stored AES-256-GCM encrypted (XTENC_KEY master key).
+  sshKeyEncrypted    String?
+  sshPasswordEnc     String?
+  apiTokenEncrypted  String?
+  status             String     @default("unknown") // online | offline | unknown
+  lastSeen           DateTime?
+  health             String? // JSON summary of last health probe
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  tunnels            Tunnel[]   @relation("clientNode")
+  tunnelsServer      Tunnel[]   @relation("serverNode")
+
+  @@unique([name, type])
+}
+
+// ---------------------------------------------------------------------------
+// Tunneling
+// ---------------------------------------------------------------------------
+
+model Tunnel {
+  id             String    @id @default(uuid())
+  name           String
+  method         String // BACKHAUL | FRP | GOST | SSH | PORT_FORWARD
+  // desired state (what the user wants)
+  status         String    @default("stopped") // stopped | starting | running | stopping
+  // actual state reported by the process supervisor
+  state          String    @default("stopped")
+  clientNodeId   String?
+  clientNode     Node?     @relation("clientNode", fields: [clientNodeId], references: [id], onDelete: SetNull)
+  serverNodeId   String?
+  serverNode     Node?     @relation("serverNode", fields: [serverNodeId], references: [id], onDelete: SetNull)
+  ownerId        String?
+  owner          User?     @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  config         Json
+  pid            Int?
+  port           Int? // primary exposure port (for quick display)
+  statusDetail   String?
+  errorMessage   String?
+  autostart      Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  trafficSamples TrafficSample[]
+
+  @@index([clientNodeId])
+  @@index([serverNodeId])
+  @@index([ownerId])
+}
+
+model TrafficSample {
+  id        String   @id @default(uuid())
+  tunnelId  String
+  tunnel    Tunnel   @relation(fields: [tunnelId], references: [id], onDelete: Cascade)
+  bytesIn   BigInt   @default(0)
+  bytesOut  BigInt   @default(0)
+  speedInBps   Int   @default(0)
+  speedOutBps  Int   @default(0)
+  ts        DateTime @default(now())
+
+  @@index([tunnelId, ts])
+}
+
+model PortForward {
+  id          String   @id @default(uuid())
+  name        String
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  nodeId      String?
+  direction   String // IRAN_TO_FOREIGN | FOREIGN_TO_IRAN
+  protocol    String @default("tcp") // tcp | udp
+  sourcePort  Int
+  destHost    String
+  destPort    Int
+  enabled     Boolean  @default(true)
+  status      String   @default("stopped")
+  pid         Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([nodeId])
+  @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Operations
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  action    String
+  target    String?
+  details   String?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([actorId])
+  @@index([createdAt])
+}
+
+model NotificationWebhook {
+  id        String   @id @default(uuid())
+  type      String // telegram | discord
+  name      String
+  url       String
+  events    String   @default("[]") // JSON array of event names
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

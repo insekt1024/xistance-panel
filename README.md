@@ -1,36 +1,140 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Xistance Panel
 
-## Getting Started
+Self-hosted control panel for managing cross-border tunnel servers —
+**Backhaul**, **FRP**, **GOST**, and **SSH** port forwards — with a bilingual
+(English / فارسی) web UI. Built with Next.js 16, React 19, and a shared
+TypeScript core that drives real processes over systemd (or child processes in
+dev).
 
-First, run the development server:
+پنل مدیریت سرویس‌های تانل (بک‌هال، FRP، GOST و SSH) با رابط کاربری دوزبانه
+(فارسی / انگلیسی) و پشتیبانی از کنترل کامل نودهای ایران و خارج.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Features
+
+- **Tunnels** — Backhaul, FRP, GOST and SSH port forwards; TCP & UDP; per-node roles (Iran / Foreign).
+- **Nodes** — register Foreign nodes, run the bundled installer remotely, and track status/traffic.
+- **Port forwarding** — quick relay rules (local forwarder, node-based).
+- **Tools** — privacy helpers (backup/restore, secrets, network info) and the bundled xistence CLI bridge.
+- **Bilingual UI** — `en` and `fa` locales with RTL layout.
+- **Traffic & status** — live line logs, bytes read/written per process, systemd or child-process lifecycle.
+
+## Architecture
+
+```
+apps/web              Next.js App Router UI + API routes (/api/*)
+packages/i18n         en / fa message catalogs
+packages/tunnel-core  engine + config builders (TOML / command lines) + process management
+packages/db           Prisma schema, seed (admin user), SQLite by default / Postgres optional
+packages/types        shared TypeScript types
+scripts/              install.sh, update.sh, backup.sh, uninstall.sh
+tunnels/              runtime data dir (binaries, configs, logs, dev.db)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`DATABASE_URL` defaults to a SQLite file at `$XT_DATA_DIR/xistance.db` (falls
+back to `.data/` in the repo). To use Postgres instead, see
+`docker/docker-compose.postgres.yml` and the note in
+`packages/db/prisma/schema.prisma`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Quick start (development)
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+cp apps/web/.env.local.example apps/web/.env.local   # or create your own
+npm run dev
+```
 
-## Learn More
+Dev server: `http://localhost:3000` (default admin `admin@xistance.local` /
+`xistance-admin`, seeded via `packages/db/prisma/seed.ts`; override with
+`XT_ADMIN_EMAIL` / `XT_ADMIN_PASSWORD`).
 
-To learn more about Next.js, take a look at the following resources:
+On a machine without systemd (e.g. WSL) the engine runs tunnel processes as
+plain child processes; on a Linux VPS it manages systemd units
+(`xt-tunnel-<id>.service`) automatically.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Install on a server (Ubuntu / Debian)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+git clone <this-repo> && cd xistance-panel
+sudo bash scripts/install.sh                  # panel only
+sudo bash scripts/install.sh --node iran     # + Iran-node dependencies (backhaul client, frpc, gost)
+sudo bash scripts/install.sh --node foreign  # + Foreign-node dependencies (backhaul server, frps, gost)
+```
 
-## Deploy on Vercel
+What the installer does:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Installs OS deps (`curl unzip jq sqlite3 openssh-client sshpass tar gnupg systemd ufw`), Node ≥ 22, and pinned `backhaul` / `frp` / `gost` binaries into `/var/lib/xistance/bin` with checksum verification.
+- Writes config to `/etc/xistance/xistance.env` (auto-generated `XTENC_KEY` and `JWT_SECRET`, mode 600).
+- Builds the panel with `npm ci && npm run build` and deploys it to `/opt/xistance` (standalone output).
+- Initializes the database and seeds the admin account.
+- Installs the `xistance.service` systemd unit and starts it.
+- Opens the panel port via `ufw` (skippable with `--skip-firewall`).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Options:
+
+| Flag | Meaning |
+| --- | --- |
+| `--port 8080` | Panel listen port (default 8080) |
+| `--skip-firewall` | Don't touch ufw |
+| `--rollback` | Restore the previous version before this install (if a backup exists) |
+| `--yes` | Non-interactive (no prompts) |
+
+Env overrides: `XT_ADMIN_EMAIL`, `XT_ADMIN_PASSWORD`, `XT_PORT`, `XT_DATA_DIR`,
+`XT_BIN_DIR`, `XT_MIRROR`, `BACKHAUL_VERSION`, `FRP_VERSION`, `GOST_VERSION`,
+`XT_INSTALL_DIR`.
+
+Other scripts: `scripts/update.sh` (pull + rebuild + restart),
+`scripts/backup.sh` (tar of data + config, kept under `/var/backups/xistance`),
+`scripts/uninstall.sh [--purge]`.
+
+## Running the production build manually
+
+The app uses `output: "standalone"`, so `next start` is **not** valid. Run the
+standalone server directly and pass env explicitly (standalone does not load
+`.env.local`):
+
+```bash
+DATABASE_URL="file:./.data/xistance.db" \
+XT_DATA_DIR="$PWD/.data" XT_FORCE_NODE=true \
+XTENC_KEY=... JWT_SECRET=... PORT=3000 HOSTNAME=0.0.0.0 \
+node apps/web/.next/standalone/apps/web/server.js
+```
+
+## Example configs
+
+Working TOML / command examples for each relay live in `tunnels/examples/`
+(`backhaul-foreign.toml`, `backhaul-iran.toml`, `frp-frps.toml`, `frp-frpc.toml`,
+`gost-relay.sh`, `ssh-tunnel.sh`). They mirror exactly what the panel generates.
+
+## Commands
+
+- `npm run dev` — dev server
+- `npm run build` — production build (runs typecheck)
+- `npm run lint` — ESLint
+- `npm run typecheck` — TypeScript only
+
+## Versioning
+
+The panel version is shown in the footer (`Xistance Panel vX.Y.Z`, linking to the
+GitHub repo) and is kept in sync across `package.json` files and
+`apps/web/src/lib/version.ts` by `scripts/version.mjs`:
+
+```bash
+npm run version:show                 # print current version
+npm run version:bump -- patch        # bump patch -> 1.0.1
+npm run version:bump -- minor        # 1.1.0
+npm run version:bump -- major        # 2.0.0
+node scripts/version.mjs set 1.2.3   # exact version
+node scripts/version.mjs patch --commit  # bump + git commit + tag vX.Y.Z
+```
+
+## CI/CD
+
+- **`.github/workflows/ci.yml`** — runs `lint`, `typecheck` and `build` on every
+  push/PR to `master`/`main`; uploads the standalone build as an artifact on push.
+- **`.github/workflows/release.yml`** — manual `workflow_dispatch` that takes
+  `patch`/`minor`/`major`, bumps the version, commits + tags `vX.Y.Z`, rebuilds,
+  packages the standalone + static bundles, and creates a GitHub Release with
+  auto-generated notes.
+
+Push the repo to `https://github.com/insektdotbin/xistance-panel` to activate the
+workflows.

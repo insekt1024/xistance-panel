@@ -1,26 +1,27 @@
 {
   "name": "xistance-panel",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint"
-  },
-  "dependencies": {
-    "next": "16.3.0",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "build:packages": "npm run build -w @xistance/types && npm run build -w @xistance/tunnel-core && npm run build -w @xistance/i18n && npm run build -w @xistance/db",
+    "dev": "npm run build:packages && npm run dev -w @xistance/web",
+    "build": "npm run build:packages && npm run build -w @xistance/web",
+    "start": "npm run start -w @xistance/web",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p apps/web && tsc --noEmit -p packages/types && tsc --noEmit -p packages/tunnel-core && tsc --noEmit -p packages/db",
+    "version:show": "node scripts/version.mjs --show",
+    "version:bump": "node scripts/version.mjs"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.3.0",
-    "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=20.9.0"
   }
 }
