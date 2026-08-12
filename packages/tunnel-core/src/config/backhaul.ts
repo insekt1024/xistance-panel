@@ -1,46 +1,62 @@
 import type { BackhaulConfig } from "@xistance/types";
 
 // ---------------------------------------------------------------------------
-// Backhaul (Musixal/Backhaul) config generation (TOML).
+// Backhaul (Musixal/Backhaul) v0.7.x config generation (TOML).
 //
-// Layout: the *server* runs on the Foreign node (public listener); the *client*
-// runs on the Iran node and dials out. portmap maps a local service to a public
-// remote port. The format below targets Backhaul v3.x; install.sh pins a tested
-// binary and validates the checksum.
+// Layout: the *server* runs on the Foreign node (public listener) and lists the
+// exposed ports (`ports = ["<remote>=<local>"]`); the *client* runs on the Iran
+// node, dials the server control channel and connects tunneled traffic to the
+// local service. `install.sh` pins a tested binary and validates the checksum.
 // ---------------------------------------------------------------------------
 
 function tomlQuote(s: string): string {
   return `"${s.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
-function bool(v: boolean): string {
-  return v ? "true" : "false";
+/** Map our transport to Backhaul's transport token (multiplexing -> *mux). */
+function transportName(cfg: BackhaulConfig): string {
+  const base: Record<string, string> = {
+    tcp: "tcp",
+    websocket: "ws",
+    quic: "tcp", // v0.7.x has no quic/udp transport; fall back to tcp.
+  };
+  const t = base[cfg.transport] ?? "tcp";
+  return cfg.multiplexing && t === "tcp" ? "tcpmux" : cfg.multiplexing && t === "ws" ? "wsmux" : t;
 }
 
-function portMapBlock(portMap: { local: number; remote: number }[]): string {
-  const entries = portMap
-    .map((p) => `  { local = ${tomlQuote(`127.0.0.1:${p.local}`)}, remote = ${tomlQuote(`0.0.0.0:${p.remote}`)} }`)
-    .join(",\n");
-  return `portmap = [\n${entries}\n]`;
+/** Server `ports` entries: "<exposedRemotePort>=<localServicePort>". */
+function portsBlock(portMap: { local: number; remote: number }[]): string {
+  const entries = portMap.map((p) => tomlQuote(`${p.remote}=${p.local}`));
+  return `ports = [${entries.join(", ")}]`;
 }
 
 export function buildBackhaulConfig(cfg: BackhaulConfig, role: "client" | "server"): string {
   const lines: string[] = [];
   if (role === "server") {
-    lines.push("[server]", `listen = ${tomlQuote(`${cfg.listenAddress}:${cfg.listenPort}`)}`);
+    lines.push(
+      "[server]",
+      `bind_addr = ${tomlQuote(`${cfg.listenAddress}:${cfg.listenPort}`)}`,
+    );
   } else {
-    lines.push("[client]", `remote_addr = ${tomlQuote(`${cfg.remoteHost ?? ""}:${cfg.listenPort}`)}`);
+    lines.push("[client]", `remote_addr = ${tomlQuote(`${cfg.remoteHost ?? "127.0.0.1"}:${cfg.listenPort}`)}`);
   }
+  lines.push(`transport = ${tomlQuote(transportName(cfg))}`);
   lines.push(`token = ${tomlQuote(cfg.token)}`);
-  lines.push(`transport = ${tomlQuote(cfg.transport)}`);
-  if (cfg.portMap.length) lines.push(portMapBlock(cfg.portMap));
-  lines.push("tcp_nodelay = true");
-  lines.push("keepalive_period = 75");
-  // multiplexing enabled via accept_mux on the server / reset_mux on the client
-  if (role === "server") lines.push(`accept_mux = ${bool(cfg.multiplexing)}`);
-  else lines.push(`reset_mux = ${bool(!cfg.multiplexing)}`);
-  lines.push(`heartbeat = ${cfg.heartbeat}`);
-  lines.push(`channel_size = ${cfg.channelSize}`);
+  if (role === "server") {
+    if (cfg.portMap.length) lines.push(portsBlock(cfg.portMap));
+    lines.push("nodelay = true");
+    lines.push("keepalive_period = 75");
+    lines.push(`heartbeat = ${cfg.heartbeat}`);
+    lines.push(`channel_size = ${cfg.channelSize}`);
+    if (cfg.muxConcurrency) lines.push(`mux_con = ${cfg.muxConcurrency}`);
+  } else {
+    lines.push("connection_pool = 8");
+    lines.push("keepalive_period = 75");
+    lines.push("nodelay = true");
+    lines.push("retry_interval = 3");
+    lines.push("dial_timeout = 10");
+  }
+  lines.push('log_level = "info"');
   return lines.join("\n") + "\n";
 }
 

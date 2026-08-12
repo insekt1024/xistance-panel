@@ -52,8 +52,8 @@ function proxyBlock(p: FrpProxy): string {
   }
   lines.push(
     "[proxies.transport]",
-    `encryption = ${p.transport.encryption}`,
-    `compression = ${p.transport.compression}`,
+    `useEncryption = ${p.transport.encryption}`,
+    `useCompression = ${p.transport.compression}`,
   );
   if (p.transport.bandwidthLimit) {
     lines.push(`bandwidthLimit = ${tomlQuote(p.transport.bandwidthLimit)}`);

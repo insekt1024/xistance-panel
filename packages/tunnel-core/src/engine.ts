@@ -169,6 +169,7 @@ export class TunnelEngine {
 
   async deploy(spec: TunnelDeploySpec): Promise<void> {
     const plan = await this.buildPlan(spec);
+    await this.ensureBinaries(spec);
     const procs: RunningProcess[] = [];
     for (const entry of plan) {
       for (const f of entry.files ?? []) {
@@ -222,6 +223,28 @@ export class TunnelEngine {
 
   // ---- status / stats ------------------------------------------------------
 
+  /** bytes read/written per process (cumulative) */
+  private recentIo = new Map<string, { at: number; bytesIn: number; bytesOut: number }>();
+  /** child-process handles that already have the engine log sink wired up */
+  private readonly logSinks = new WeakSet<ProcessHandle>();
+
+  private async ioSums(id: string): Promise<{ bytesIn: number; bytesOut: number; started: number }> {
+    const rt = this.runtimes.get(id);
+    if (!rt) return { bytesIn: 0, bytesOut: 0, started: 0 };
+    let bytesIn = 0;
+    let bytesOut = 0;
+    let started = 0;
+    for (const p of rt.processes) {
+      const io = await p.handle.ioCounters();
+      if (io) {
+        bytesIn += io.rchar;
+        bytesOut += io.wchar;
+      }
+      started = Math.max(started, p.startedAt);
+    }
+    return { bytesIn, bytesOut, started };
+  }
+
   async status(id: string): Promise<Status> {
     const rt = this.runtimes.get(id);
     if (!rt) return TunnelStatus.STOPPED;
@@ -235,23 +258,28 @@ export class TunnelEngine {
   async snapshot(id: string): Promise<TrafficSnapshot | null> {
     const rt = this.runtimes.get(id);
     if (!rt) return null;
-    let bytesIn = 0;
-    let bytesOut = 0;
-    let started = 0;
-    for (const p of rt.processes) {
-      const io = await p.handle.ioCounters();
-      if (io) {
-        bytesIn += io.rchar;
-        bytesOut += io.wchar;
+    const now = Date.now();
+    const { bytesIn, bytesOut, started } = await this.ioSums(id);
+
+    // Speed is a delta against the previous snapshot for this tunnel.
+    let speedInBps = 0;
+    let speedOutBps = 0;
+    const prev = this.recentIo.get(id);
+    if (prev && prev.at < now) {
+      const dt = (now - prev.at) / 1000;
+      if (dt > 0) {
+        speedInBps = Math.max(0, Math.round((bytesIn - prev.bytesIn) / dt));
+        speedOutBps = Math.max(0, Math.round((bytesOut - prev.bytesOut) / dt));
       }
-      started = Math.max(started, p.startedAt);
     }
+    this.recentIo.set(id, { at: now, bytesIn, bytesOut });
+
     return {
       bytesIn,
       bytesOut,
-      speedInBps: 0,
-      speedOutBps: 0,
-      uptimeMs: started ? Date.now() - started : 0,
+      speedInBps,
+      speedOutBps,
+      uptimeMs: started ? now - started : 0,
       status: await this.status(id),
     };
   }
@@ -262,8 +290,23 @@ export class TunnelEngine {
     if (!rt) return [];
     const out: string[] = [];
     for (const p of rt.processes) {
-      if (p.handle.recentLines) out.push(...p.handle.recentLines().slice(-maxLines));
-      else out.push(...(await readJournalctl(p.spec.unitName, maxLines, p.ctx)));
+      if (!p.handle.recentLines) {
+        out.push(...(await readJournalctl(p.spec.unitName, maxLines, p.ctx)));
+        continue;
+      }
+      const mem = p.handle.recentLines().slice(-maxLines);
+      const fileLines = await readLogTail(
+        path.join(p.ctx.dataDir, "logs", `${p.spec.id}.log`),
+        maxLines,
+      );
+      // Tail history first, then live in-memory lines. Drop exact duplicates at
+      // the seam (the file's end overlaps the memory buffer after a restart).
+      const all = [...fileLines, ...mem].slice(-maxLines);
+      const deduped: string[] = [];
+      for (const line of all) {
+        if (deduped[deduped.length - 1] !== line) deduped.push(line);
+      }
+      out.push(...deduped);
     }
     return out;
   }
@@ -277,15 +320,20 @@ export class TunnelEngine {
     });
     const cleanups: Array<() => void> = [];
     for (const p of rt.processes) {
-      if (p.handle.onLine) {
-        const prev = p.handle.onLine;
-        p.handle.onLine = (line: string) => {
-          prev?.(line);
-          this.bus.publish(id, { type: "log", stream: "stdout", line });
-        };
-        cleanups.push(() => {
-          p.handle.onLine = null;
-        });
+      if (typeof p.handle.recentLines === "function") {
+        // Child-process mode: install a single engine-owned sink that feeds the
+        // event bus (idempotent, so the first subscriber wires it up once and
+        // later subscribers just add a bus subscription). Previous code only
+        // wrapped when a listener already existed, so the first subscriber fell
+        // through to the journalctl branch and never received live lines.
+        if (!this.logSinks.has(p.handle)) {
+          const prev = p.handle.onLine;
+          p.handle.onLine = (line: string) => {
+            prev?.(line);
+            this.bus.publish(id, { type: "log", stream: "stdout", line });
+          };
+          this.logSinks.add(p.handle);
+        }
       } else {
         // systemd-managed process: tail via journalctl
         const unit = p.spec.unitName;
@@ -305,6 +353,50 @@ export class TunnelEngine {
   }
 
   // ---- plan builders -------------------------------------------------------
+
+  /** Verify required tunnel binaries exist on each participating node. */
+  private async ensureBinaries(spec: TunnelDeploySpec): Promise<void> {
+    const cfg = spec.config;
+    const needs: Array<{ ctx: NodeCtx; bin: string }> = [];
+    const add = (node: NodeEndpoint | null | undefined, bin: string) => {
+      const ctx = node ? this.ctxFor(node) : null;
+      if (ctx) needs.push({ ctx, bin });
+    };
+    switch (cfg.method) {
+      case "BACKHAUL":
+        add(spec.serverNode, "backhaul");
+        add(spec.clientNode, "backhaul");
+        break;
+      case "FRP":
+        add(spec.serverNode, "frps");
+        add(spec.clientNode, "frpc");
+        break;
+      case "GOST":
+        for (const node of [spec.clientNode, spec.serverNode]) {
+          const role = node === spec.clientNode ? "IRAN" : "FOREIGN";
+          if (buildGostCommand(cfg.gost, role)) add(node, "gost");
+        }
+        break;
+      case "PORT_FORWARD":
+        for (const node of [spec.clientNode, spec.serverNode]) {
+          const ctx = this.ctxFor(node);
+          if (ctx?.runner.kind === "remote") add(node, "gost");
+        }
+        break;
+      default:
+        break;
+    }
+    for (const { ctx, bin } of needs) {
+      const abs = this.binPath(ctx, bin);
+      const present = await ctx.runner.exists(abs);
+      if (!present) {
+        throw new Error(
+          `Required binary "${bin}" is missing on ${ctx.name} (${abs}). ` +
+            `Run scripts/install.sh (or: xistance install --bin ${bin}) on the node to install it.`,
+        );
+      }
+    }
+  }
 
   private async buildPlan(spec: TunnelDeploySpec): Promise<PlanEntry[]> {
     const cfg = spec.config;
@@ -379,7 +471,12 @@ export class TunnelEngine {
     for (const [node, role] of targets) {
       const ctx = this.ctxFor(node);
       if (!ctx) continue;
-      const args = buildGostCommand(c, role);
+      const peer =
+        role === "IRAN" ? spec.serverNode?.host : spec.clientNode?.host;
+      const args = buildGostCommand(c, role, {
+        peerHost: peer ?? c.forwardHost,
+        peerPort: c.listenPort,
+      });
       if (!args) continue;
       const [, ...rest] = args;
       plan.push({
@@ -509,4 +606,15 @@ async function readJournalctl(unitName: string, lines: number, ctx: NodeCtx): Pr
     /* journalctl may be unavailable */
   }
   return [];
+}
+
+/** Tail the last `lines` lines of a child-process log file (best effort). */
+async function readLogTail(filePath: string, lines: number): Promise<string[]> {
+  try {
+    const { promises: fs } = await import("node:fs");
+    const raw = await fs.readFile(filePath, "utf8");
+    return raw.split("\n").filter(Boolean).slice(-lines);
+  } catch {
+    return [];
+  }
 }

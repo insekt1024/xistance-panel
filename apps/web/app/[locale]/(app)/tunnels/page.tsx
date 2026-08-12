@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@xistance/db";
 import { getEngine } from "@/lib/engine";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/routing";
 import { Plus } from "lucide-react";
@@ -40,6 +41,7 @@ export default async function TunnelsPage() {
 
   return (
     <div className="space-y-6">
+      <AutoRefresh />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">{t("title")}</h1>

@@ -28,6 +28,9 @@ export async function GET(
       const unsubscribe = await engine.streamLogs(id, (line) =>
         send({ type: "log", line }),
       );
+      // Immediate ping so the client establishes right away instead of waiting
+      // for the first 15s heartbeat (idle/stopped tunnels otherwise look dead).
+      send({ type: "ping" });
       const heartbeat = setInterval(() => send({ type: "ping" }), 15_000);
       request.signal.addEventListener("abort", () => {
         clearInterval(heartbeat);

@@ -9,6 +9,7 @@ export async function register() {
       const { getEngine } = await import("@/lib/engine");
       const { buildDeploySpec } = await import("@/lib/tunnels");
       const { startTrafficSampler } = await import("@/lib/sampler");
+      const { reconcilePortForwards } = await import("@/lib/forward-supervisor");
 
       const tunnels = await prisma.tunnel.findMany({
         where: { OR: [{ state: "running" }, { state: "starting" }] },
@@ -27,6 +28,13 @@ export async function register() {
         } catch (err) {
           console.error(`[instrumentation] failed to rehydrate ${t.name}`, err);
         }
+      }
+      // Re-deploy enabled port-forward rules so they match their persisted state.
+      try {
+        await reconcilePortForwards();
+        console.log("[instrumentation] port-forward rules reconciled");
+      } catch (err) {
+        console.error("[instrumentation] port-forward reconcile failed", err);
       }
       startTrafficSampler();
       console.log("[instrumentation] traffic sampler started");

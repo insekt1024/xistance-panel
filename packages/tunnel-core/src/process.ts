@@ -151,6 +151,9 @@ export class ChildProcessHandle implements ProcessHandle {
   private manualStop = false;
   private logStream: import("node:fs").WriteStream | null = null;
   private tail: string[] = [];
+  private lastExitAt = 0;
+  private respawnDelay = 0;
+  private respawnTimer: NodeJS.Timeout | null = null;
   onLine: ((line: string) => void) | null = null;
 
   constructor(private readonly spec: ProcessSpec) {}
@@ -161,7 +164,12 @@ export class ChildProcessHandle implements ProcessHandle {
 
   async start(): Promise<void> {
     if (this.child) return;
+    if (this.respawnTimer) {
+      clearTimeout(this.respawnTimer);
+      this.respawnTimer = null;
+    }
     this.manualStop = false;
+    this.respawnDelay = 0;
     await fs.mkdir(this.spec.workdir ?? this.spec.dataDir, { recursive: true });
     const logPath = path.join(this.spec.dataDir, "logs", `${this.spec.id}.log`);
     await fs.mkdir(path.dirname(logPath), { recursive: true });
@@ -190,9 +198,18 @@ export class ChildProcessHandle implements ProcessHandle {
       this.child = null;
       this.logStream?.end();
       this.logStream = null;
-      // Auto-respawn unless intentionally stopped.
+      // Auto-respawn unless intentionally stopped, with an exponential backoff
+      // (2s -> 4s -> 8s ... capped at 30s) so a crash-looping command doesn't
+      // hammer the system.
       if (!this.manualStop && this.spec.autorestart !== false) {
-        void this.start();
+        const now = Date.now();
+        if (this.lastExitAt && now - this.lastExitAt < 60_000) {
+          this.respawnDelay = this.respawnDelay ? Math.min(this.respawnDelay * 2, 30_000) : 2_000;
+        } else {
+          this.respawnDelay = 2_000;
+        }
+        this.lastExitAt = now;
+        this.respawnTimer = setTimeout(() => void this.start(), this.respawnDelay);
       }
       void code;
     });
@@ -203,6 +220,10 @@ export class ChildProcessHandle implements ProcessHandle {
 
   async stop(): Promise<void> {
     this.manualStop = true;
+    if (this.respawnTimer) {
+      clearTimeout(this.respawnTimer);
+      this.respawnTimer = null;
+    }
     const c = this.child;
     if (!c) return;
     const exited = new Promise<void>((resolve) => c.once("exit", () => resolve()));
@@ -233,6 +254,10 @@ export class ChildProcessHandle implements ProcessHandle {
 
   async dispose(): Promise<void> {
     this.manualStop = true;
+    if (this.respawnTimer) {
+      clearTimeout(this.respawnTimer);
+      this.respawnTimer = null;
+    }
     this.child?.kill("SIGTERM");
     this.logStream?.end();
   }

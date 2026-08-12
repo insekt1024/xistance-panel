@@ -23,13 +23,11 @@ export async function POST(
     "StrictHostKeyChecking=accept-new",
     "-o",
     "ConnectTimeout=10",
-    "-o",
-    "BatchMode=yes",
   ];
+  const usePassword = ep.authMethod === "password" && Boolean(ep.password);
+  if (!usePassword) args.push("-o", "BatchMode=yes");
   if (ep.keyPath) args.push("-i", ep.keyPath);
-  if (ep.authMethod === "password" && ep.password) {
-    args.unshift("sshpass", "-p", ep.password);
-  }
+  if (usePassword) args.unshift("sshpass", "-p", ep.password!);
   args.push(`${ep.username ?? "root"}@${ep.host}`, "echo", "ok");
 
   const res = await runner.run(args);
