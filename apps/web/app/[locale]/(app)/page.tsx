@@ -7,6 +7,32 @@ import { AutoRefresh } from "@/components/auto-refresh";
 export const dynamic = "force-dynamic";
 
 const HOUR_MS = 3600_000;
+const CHART_BUCKET_MS = 30 * 60_000;
+
+/**
+ * Reduce raw 24h samples into fixed 30-minute buckets so the chart payload is a
+ * handful of points instead of ~2880 rows per tunnel. Summing buckets preserves
+ * the totals shown on the cards (sum over all buckets == sum over all rows).
+ */
+function aggregateTraffic(
+  rows: Array<{ bytesIn: bigint; bytesOut: bigint; ts: Date }>,
+): Array<{ ts: string; bytesIn: number; bytesOut: number }> {
+  const buckets = new Map<number, { ts: number; bytesIn: bigint; bytesOut: bigint }>();
+  for (const r of rows) {
+    const key = Math.floor(r.ts.getTime() / CHART_BUCKET_MS) * CHART_BUCKET_MS;
+    const b = buckets.get(key) ?? { ts: key, bytesIn: BigInt(0), bytesOut: BigInt(0) };
+    b.bytesIn += r.bytesIn;
+    b.bytesOut += r.bytesOut;
+    buckets.set(key, b);
+  }
+  return [...buckets.values()]
+    .sort((a, b) => a.ts - b.ts)
+    .map((b) => ({
+      ts: new Date(b.ts).toISOString(),
+      bytesIn: Number(b.bytesIn),
+      bytesOut: Number(b.bytesOut),
+    }));
+}
 
 export default async function DashboardPage() {
   const t = await getTranslations("dashboard");
@@ -37,11 +63,12 @@ export default async function DashboardPage() {
   );
 
   const since = new Date(Date.now() - 24 * HOUR_MS); // eslint-disable-line react-hooks/purity
-  const samples = await prisma.trafficSample.findMany({
+  const rawSamples = await prisma.trafficSample.findMany({
     where: { ts: { gte: since } },
-    select: { tunnelId: true, bytesIn: true, bytesOut: true, ts: true },
+    select: { bytesIn: true, bytesOut: true, ts: true },
     orderBy: { ts: "asc" },
   });
+  const samples = aggregateTraffic(rawSamples);
 
   const running = liveTunnels.filter((x) => x.liveState === "running").length;
 
@@ -70,11 +97,7 @@ export default async function DashboardPage() {
           clientNode: x.clientNode?.name ?? "—",
           serverNode: x.serverNode?.name ?? "—",
         }))}
-        samples={samples.map((s) => ({
-          ts: s.ts.toISOString(),
-          bytesIn: Number(s.bytesIn),
-          bytesOut: Number(s.bytesOut),
-        }))}
+        samples={samples}
         recentActivity={recentLogs.map((l) => ({
           action: l.action,
           target: l.target ?? "",

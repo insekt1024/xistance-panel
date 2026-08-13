@@ -78,19 +78,43 @@ export async function createSession(user: SafeUser): Promise<void> {
   });
 }
 
+/**
+ * getSession memoisation: RSC pages plus the 5s AutoRefresh re-run getSession on
+ * every render/poll. Cache the verified payload for a couple of seconds keyed by
+ * the access token so the users table isn't queried dozens of times per minute.
+ * Worst-case staleness is SESSION_CACHE_TTL; logout/rotation produce a new token
+ * and naturally miss the cache, and destroySession busts the entry explicitly.
+ */
+const SESSION_CACHE_TTL = 3_000;
+const MAX_CACHE_ITEMS = 2_000;
+const sessionCache = new Map<string, { at: number; user: SafeUser | null }>();
+
+function cacheSession(token: string, user: SafeUser | null): void {
+  sessionCache.set(token, { at: Date.now(), user });
+  if (sessionCache.size > MAX_CACHE_ITEMS) {
+    const now = Date.now();
+    for (const [k, v] of sessionCache) {
+      if (now - v.at >= SESSION_CACHE_TTL) sessionCache.delete(k);
+    }
+  }
+}
+
 /** Returns the authenticated user or null. */
 export async function getSession(): Promise<SafeUser | null> {
   const store = await cookies();
   const access = store.get(ACCESS_COOKIE)?.value;
   if (!access) return null;
+  const hit = sessionCache.get(access);
+  if (hit && Date.now() - hit.at < SESSION_CACHE_TTL) return hit.user;
   const payload = verifyJwt(access, getJwtSecret());
   if (!payload) return null;
   const user = await prisma.user.findUnique({
     where: { id: payload.sub },
     select: safeUserSelect,
   });
-  if (!user || !user.active) return null;
-  return user;
+  const result = user && user.active ? user : null;
+  cacheSession(access, result);
+  return result;
 }
 
 /** Server-component guard: returns the user or throws a redirect to login. */
@@ -133,6 +157,7 @@ export async function refreshSession(): Promise<SafeUser | null> {  const store 
 
 export async function destroySession(): Promise<void> {
   const store = await cookies();
+  const access = store.get(ACCESS_COOKIE)?.value;
   const token = store.get(REFRESH_COOKIE)?.value;
   if (token) {
     await prisma.session.updateMany({
@@ -140,6 +165,7 @@ export async function destroySession(): Promise<void> {
       data: { revokedAt: new Date() },
     });
   }
+  if (access) sessionCache.delete(access);
   store.delete(ACCESS_COOKIE);
   store.delete(REFRESH_COOKIE);
   store.delete(CSRF_COOKIE);

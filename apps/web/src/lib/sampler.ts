@@ -2,9 +2,16 @@ import { prisma } from "@xistance/db";
 import { getEngine } from "./engine";
 
 // ---------------------------------------------------------------------------
-// Traffic sampler: every 30s, snapshot every engine-managed tunnel and persist
+// Traffic sampler: every 60s, snapshot every engine-managed tunnel and persist
 // a TrafficSample row for the dashboard charts. Started from instrumentation.
+// Old samples are pruned once per hour (not on every tick) to keep per-tick
+// write load minimal.
 // ---------------------------------------------------------------------------
+
+const SAMPLE_INTERVAL_MS = 60_000;
+const PRUNE_INTERVAL_MS = 60 * 60_000;
+const RETAIN_MS = 7 * 24 * 3600_000;
+const MAX_BATCH = 50;
 
 let started = false;
 
@@ -16,28 +23,48 @@ export function startTrafficSampler(): void {
       const engine = getEngine();
       const tunnels = await prisma.tunnel.findMany({ select: { id: true } });
       const now = Date.now();
+      const rows: Array<{
+        tunnelId: string;
+        bytesIn: bigint;
+        bytesOut: bigint;
+        speedInBps: number;
+        speedOutBps: number;
+        ts: Date;
+      }> = [];
       for (const t of tunnels) {
         if (!engine.has(t.id)) continue;
         const snap = await engine.snapshot(t.id);
         if (!snap || snap.status !== "running") continue;
-        await prisma.trafficSample.create({
-          data: {
-            tunnelId: t.id,
-            bytesIn: BigInt(Math.floor(snap.bytesIn)),
-            bytesOut: BigInt(Math.floor(snap.bytesOut)),
-            speedInBps: Math.floor(snap.speedInBps),
-            speedOutBps: Math.floor(snap.speedOutBps),
-            ts: new Date(now),
-          },
+        rows.push({
+          tunnelId: t.id,
+          bytesIn: BigInt(Math.floor(snap.bytesIn)),
+          bytesOut: BigInt(Math.floor(snap.bytesOut)),
+          speedInBps: Math.floor(snap.speedInBps),
+          speedOutBps: Math.floor(snap.speedOutBps),
+          ts: new Date(now),
         });
       }
-      // prune samples older than 7 days
-      await prisma.trafficSample.deleteMany({
-        where: { ts: { lt: new Date(Date.now() - 7 * 24 * 3600_000) } },
-      });
+      // Batch inserts (chunked to satisfy parameter limits on any provider).
+      for (let i = 0; i < rows.length; i += MAX_BATCH) {
+        await prisma.trafficSample.createMany({
+          data: rows.slice(i, i + MAX_BATCH),
+        });
+      }
     } catch {
       /* sampler must never crash the server */
     }
-  }, 30_000);
+  }, SAMPLE_INTERVAL_MS);
   timer.unref();
+
+  // Prune retained samples once per hour (cheap, index-backed).
+  const pruneTimer = setInterval(async () => {
+    try {
+      await prisma.trafficSample.deleteMany({
+        where: { ts: { lt: new Date(Date.now() - RETAIN_MS) } },
+      });
+    } catch {
+      /* best effort */
+    }
+  }, PRUNE_INTERVAL_MS);
+  pruneTimer.unref();
 }

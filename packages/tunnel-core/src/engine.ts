@@ -98,6 +98,12 @@ export class TunnelEngine {
   private readonly mgrCache = new Map<string, ProcessManager>();
   readonly bus: EventBus;
 
+  // Short-lived status memoisation: page polls and the sampler call status()
+  // every few seconds; for remote nodes each check spawns an SSH session, so we
+  // coalesce reads within a small window. Invalidated on lifecycle changes.
+  private readonly statusCache = new Map<string, { at: number; status: Status }>();
+  private static readonly STATUS_CACHE_TTL = 1_500;
+
   constructor(private readonly opts: EngineOptions) {
     this.bus = new EventBus();
   }
@@ -186,6 +192,7 @@ export class TunnelEngine {
     }
     for (const p of procs) await p.handle.start();
     this.runtimes.set(spec.id, { processes: procs });
+    this.invalidateStatus(spec.id);
   }
 
   // ---- lifecycle -----------------------------------------------------------
@@ -194,18 +201,21 @@ export class TunnelEngine {
     const rt = this.runtimes.get(id);
     if (!rt) return;
     for (const p of rt.processes) await p.handle.start();
+    this.invalidateStatus(id);
   }
 
   async stop(id: string): Promise<void> {
     const rt = this.runtimes.get(id);
     if (!rt) return;
     await Promise.all(rt.processes.map((p) => p.handle.stop()));
+    this.invalidateStatus(id);
   }
 
   async restart(id: string): Promise<void> {
     const rt = this.runtimes.get(id);
     if (!rt) return;
     for (const p of rt.processes) await p.handle.restart();
+    this.invalidateStatus(id);
   }
 
   /** Stop processes and forget the runtime (tunnel delete). */
@@ -215,6 +225,7 @@ export class TunnelEngine {
       await Promise.all(rt.processes.map((p) => p.handle.dispose()));
       this.runtimes.delete(id);
     }
+    this.statusCache.delete(id);
   }
 
   has(id: string): boolean {
@@ -231,21 +242,27 @@ export class TunnelEngine {
   private async ioSums(id: string): Promise<{ bytesIn: number; bytesOut: number; started: number }> {
     const rt = this.runtimes.get(id);
     if (!rt) return { bytesIn: 0, bytesOut: 0, started: 0 };
+    const ios = await Promise.all(rt.processes.map((p) => p.handle.ioCounters()));
     let bytesIn = 0;
     let bytesOut = 0;
     let started = 0;
-    for (const p of rt.processes) {
-      const io = await p.handle.ioCounters();
+    for (let i = 0; i < rt.processes.length; i++) {
+      const io = ios[i];
       if (io) {
         bytesIn += io.rchar;
         bytesOut += io.wchar;
       }
-      started = Math.max(started, p.startedAt);
+      started = Math.max(started, rt.processes[i].startedAt);
     }
     return { bytesIn, bytesOut, started };
   }
 
-  async status(id: string): Promise<Status> {
+  /** Drop the memoised status for a tunnel (called after any lifecycle change). */
+  private invalidateStatus(id: string): void {
+    this.statusCache.delete(id);
+  }
+
+  private async computeStatus(id: string): Promise<Status> {
     const rt = this.runtimes.get(id);
     if (!rt) return TunnelStatus.STOPPED;
     const states = await Promise.all(rt.processes.map((p) => p.handle.isRunning()));
@@ -253,6 +270,17 @@ export class TunnelEngine {
     if (running === 0) return TunnelStatus.STOPPED;
     if (running < rt.processes.length) return TunnelStatus.DEGRADED;
     return TunnelStatus.RUNNING;
+  }
+
+  async status(id: string): Promise<Status> {
+    const now = Date.now();
+    const cached = this.statusCache.get(id);
+    if (cached && now - cached.at < TunnelEngine.STATUS_CACHE_TTL) {
+      return cached.status;
+    }
+    const status = await this.computeStatus(id);
+    this.statusCache.set(id, { at: now, status });
+    return status;
   }
 
   async snapshot(id: string): Promise<TrafficSnapshot | null> {

@@ -22,8 +22,22 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { TrafficChart } from "@/components/traffic-chart";
+import dynamic from "next/dynamic";
 import { StatusBadge } from "@/components/status-badge";
+
+// recharts is ~90KB (client-side); load it lazily so it doesn't block the first
+// paint of the dashboard, and skip SSR rendering of the chart entirely.
+const TrafficChart = dynamic(
+  () => import("@/components/traffic-chart").then((m) => m.TrafficChart),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
+        Loading…
+      </div>
+    ),
+  },
+);
 
 export interface DashboardTunnel {
   id: string;
