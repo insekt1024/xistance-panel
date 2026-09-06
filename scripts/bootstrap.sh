@@ -67,7 +67,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if [[ -x "$WORKDIR/scripts/install.sh" ]]; then
+if [[ -f "$WORKDIR/scripts/install.sh" ]]; then
   echo "Reusing existing checkout at $WORKDIR"
 else
   if need_cmd git; then
@@ -76,7 +76,7 @@ else
     git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$WORKDIR" \
       || { echo "git clone failed, falling back to tarball…" >&2; rm -rf "$WORKDIR"; mkdir -p "$WORKDIR"; }
   fi
-  if [[ ! -x "$WORKDIR/scripts/install.sh" ]]; then
+  if [[ ! -f "$WORKDIR/scripts/install.sh" ]]; then
     echo "Downloading tarball $REPO_TARBALL…"
     mkdir -p "$WORKDIR"
     curl -fL --retry 3 --connect-timeout 15 -o "$WORKDIR/src.tar.gz" "$REPO_TARBALL"
@@ -85,7 +85,7 @@ else
   fi
 fi
 
-[[ -x "$WORKDIR/scripts/install.sh" ]] \
+[[ -f "$WORKDIR/scripts/install.sh" ]] \
   || { echo "Could not obtain a valid checkout in $WORKDIR." >&2; exit 1; }
 
 export XP_BOOTSTRAP_DIR="$WORKDIR"
