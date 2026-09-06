@@ -40,7 +40,11 @@ async function ensureKeyFile(nodeId: string, pem: string): Promise<string> {
     process.env.XT_KEY_DIR ?? path.join(process.env.XT_DATA_DIR ?? path.resolve(process.cwd(), "..", "..", "tunnels"), "keys");
   await fs.mkdir(dir, { recursive: true });
   const file = path.join(dir, `node-${nodeId}.pem`);
-  await fs.writeFile(file, pem, { mode: 0o600 });
+  // Only write if file doesn't exist or content differs (avoid redundant I/O / race conditions)
+  const existing = await fs.readFile(file, "utf8").catch(() => null);
+  if (existing !== pem) {
+    await fs.writeFile(file, pem, { mode: 0o600 });
+  }
   return file;
 }
 
@@ -54,7 +58,9 @@ export function isPanelHost(host: string): boolean {
 }
 
 /** Build a tunnel-core NodeEndpoint from a DB node, decrypting secrets. */
-export async function nodeToEndpoint(node: DbNode): Promise<NodeEndpoint> {
+export async function nodeToEndpoint(
+  node: Pick<DbNode, "id" | "host" | "sshUser" | "sshPort" | "authMethod" | "sshKeyEncrypted" | "sshPasswordEnc">,
+): Promise<NodeEndpoint> {
   let keyPath: string | undefined;
   if (node.sshKeyEncrypted) {
     const pem = decryptSecret(node.sshKeyEncrypted);
@@ -73,9 +79,9 @@ export async function nodeToEndpoint(node: DbNode): Promise<NodeEndpoint> {
 }
 
 export async function buildDeploySpec(
-  tunnel: DbTunnel,
-  clientNode: DbNode | null,
-  serverNode: DbNode | null,
+  tunnel: Pick<DbTunnel, "id" | "name" | "method" | "config" | "clientNodeId" | "serverNodeId">,
+  clientNode: Pick<DbNode, "id" | "host" | "sshUser" | "sshPort" | "authMethod" | "sshKeyEncrypted" | "sshPasswordEnc"> | null,
+  serverNode: Pick<DbNode, "id" | "host" | "sshUser" | "sshPort" | "authMethod" | "sshKeyEncrypted" | "sshPasswordEnc"> | null,
 ): Promise<TunnelDeploySpec> {
   const config = loadTunnelConfig(tunnel.config);
   return buildSpec(
@@ -94,8 +100,8 @@ export async function buildSpec(
   name: string,
   method: TunnelDeploySpec["method"],
   config: TunnelConfig,
-  clientNode: DbNode | null,
-  serverNode: DbNode | null,
+  clientNode: Pick<DbNode, "id" | "host" | "sshUser" | "sshPort" | "authMethod" | "sshKeyEncrypted" | "sshPasswordEnc"> | null,
+  serverNode: Pick<DbNode, "id" | "host" | "sshUser" | "sshPort" | "authMethod" | "sshKeyEncrypted" | "sshPasswordEnc"> | null,
 ): Promise<TunnelDeploySpec> {
   return {
     id,

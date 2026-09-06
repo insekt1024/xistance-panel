@@ -62,6 +62,7 @@ interface Props {
 
 export function DashboardStats(props: Props) {
   const t = useTranslations("dashboard");
+  const tCommon = useTranslations("common");
   const tStatus = useTranslations("status");
   const router = useRouter();
 
@@ -75,15 +76,15 @@ export function DashboardStats(props: Props) {
     { label: t("portForwards"), value: props.portForwards, icon: ArrowRightLeft },
   ];
 
-  function start(tunnelId: string) {
+  function runAction(tunnelId: string, action: "start" | "stop") {
     void (async () => {
       const res = await fetch(`/api/tunnels/${tunnelId}/actions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf() },
-        body: JSON.stringify({ action: "start" }),
+        body: JSON.stringify({ action }),
       });
       if (res.ok) {
-        toast.success(tStatus("running"));
+        toast.success(action === "start" ? tStatus("running") : tStatus("stopped"));
         router.refresh();
       }
     })();
@@ -95,17 +96,17 @@ export function DashboardStats(props: Props) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="animate-fade-in space-y-6">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {cards.map((c) => (
-          <Card key={c.label}>
+        {cards.map((c, i) => (
+          <Card key={c.label} interactive className="animate-fade-in-up" style={{ "--stagger": i } as React.CSSProperties}>
             <CardContent className="flex items-center gap-4 p-5">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
-                <c.icon className="h-5 w-5 text-muted-foreground" />
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 transition-colors duration-200 group-hover:bg-primary/15">
+                <c.icon className="h-5 w-5 text-primary" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">{c.label}</p>
-                <p className="text-2xl font-bold">{c.value}</p>
+                <p className="text-2xl font-bold tabular-nums tracking-tight">{c.value}</p>
               </div>
             </CardContent>
           </Card>
@@ -113,9 +114,9 @@ export function DashboardStats(props: Props) {
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+        <Card interactive className="animate-fade-in-up lg:col-span-2" style={{ "--stagger": 4 } as React.CSSProperties}>
           <CardHeader>
-            <CardTitle>{t("trafficToday")}</CardTitle>
+            <CardTitle>{t("traffic")}</CardTitle>
             <CardDescription className="flex items-center gap-4">
               <span className="flex items-center gap-1">
                 <TrendingDown className="h-4 w-4 text-primary" />
@@ -132,7 +133,7 @@ export function DashboardStats(props: Props) {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card interactive className="animate-fade-in-up" style={{ "--stagger": 5 } as React.CSSProperties}>
           <CardHeader>
             <CardTitle>{t("recentActivity")}</CardTitle>
           </CardHeader>
@@ -141,14 +142,18 @@ export function DashboardStats(props: Props) {
               <p className="text-sm text-muted-foreground">{t("empty")}</p>
             )}
             {props.recentActivity.map((a, i) => (
-              <div key={i} className="flex items-center justify-between text-sm">
+              <div
+                key={i}
+                className="animate-fade-in-up flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted/50"
+                style={{ "--stagger": i } as React.CSSProperties}
+              >
                 <div className="min-w-0">
                   <p className="truncate font-medium">{a.action}</p>
                   <p className="truncate text-xs text-muted-foreground">
                     {a.actor} · {a.target}
                   </p>
                 </div>
-                <span className="shrink-0 text-xs text-muted-foreground">
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
                   {timeAgo(a.at)}
                 </span>
               </div>
@@ -166,7 +171,7 @@ export function DashboardStats(props: Props) {
         </CardHeader>
         <CardContent>
           {props.tunnels.length === 0 ? (
-            <div className="flex flex-col items-center gap-3 py-10 text-center">
+            <div className="animate-fade-in flex flex-col items-center gap-3 py-10 text-center">
               <Wifi className="h-10 w-10 text-muted-foreground/50" />
               <Button onClick={() => router.push("/tunnels/new")}>
                 {t("quickStart")}
@@ -186,19 +191,23 @@ export function DashboardStats(props: Props) {
               </TableHeader>
               <TableBody>
                 {props.tunnels.map((x) => (
-                  <TableRow key={x.id}>
+                  <TableRow key={x.id} className="animate-fade-in">
                     <TableCell className="font-medium">{x.name}</TableCell>
                     <TableCell>{x.method}</TableCell>
                     <TableCell className="text-muted-foreground">
                       {x.clientNode} → {x.serverNode}
                     </TableCell>
-                    <TableCell>{x.port ?? "—"}</TableCell>
+                    <TableCell className="tabular-nums">{x.port ?? "—"}</TableCell>
                     <TableCell>
                       <StatusBadge status={x.status} />
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button variant="ghost" size="sm" onClick={() => start(x.id)}>
-                        {x.status === "running" ? tStatus("running") : tStatus("stopped")}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => runAction(x.id, x.status === "running" ? "stop" : "start")}
+                      >
+                        {x.status === "running" ? tCommon("stop") : tCommon("start")}
                       </Button>
                     </TableCell>
                   </TableRow>

@@ -51,7 +51,7 @@ export class LocalRunner implements Runner {
         },
         (err, stdout, stderr) => {
           resolve({
-            exitCode: err ? (err as NodeJS.ErrnoException & { code?: number }).code ?? 1 : 0,
+            exitCode: err ? 1 : 0,
             stdout: String(stdout),
             stderr: String(stderr),
           });
@@ -113,9 +113,16 @@ export interface SshConnection {
   configDir?: string;
 }
 
+function sshPassEnv(conn: SshConnection): Record<string, string> | undefined {
+  if (conn.authMethod === "password" && conn.password) {
+    return { SSHPASS: conn.password };
+  }
+  return undefined;
+}
+
 function sshPassPrefix(conn: SshConnection): string[] {
   if (conn.authMethod === "password" && conn.password) {
-    return ["sshpass", "-p", conn.password];
+    return ["sshpass", "-e"];
   }
   return [];
 }
@@ -164,15 +171,16 @@ export class RemoteRunner implements Runner {
   ): Promise<RunResult> {
     const cmd = argv.map((a) => `'${a.replaceAll("'", `'\\''`)}'`).join(" ");
     const args = this.baseArgs(cmd);
-    // LocalRunner behavior reused over SSH
+    const passEnv = sshPassEnv(this.conn);
+    const env = passEnv ? { ...process.env, ...passEnv, ...opts?.env } : { ...process.env, ...opts?.env };
     return new Promise((resolve) => {
       execFile(
         args[0],
         args.slice(1),
-        { timeout: opts?.timeoutMs ?? 60_000, maxBuffer: 10 * 1024 * 1024 },
+        { timeout: opts?.timeoutMs ?? 60_000, maxBuffer: 10 * 1024 * 1024, env },
         (err, stdout, stderr) => {
           resolve({
-            exitCode: err ? (err as NodeJS.ErrnoException & { code?: number }).code ?? 1 : 0,
+            exitCode: err ? 1 : 0,
             stdout: String(stdout),
             stderr: String(stderr),
           });
@@ -189,9 +197,10 @@ export class RemoteRunner implements Runner {
     opts?: { env?: Record<string, string> },
   ): { kill: () => void } {
     const cmd = argv.map((a) => `'${a.replaceAll("'", `'\\''`)}'`).join(" ");
-    const child = spawn(this.baseArgs(cmd)[0], this.baseArgs(cmd).slice(1), {
-      env: opts?.env ? { ...process.env, ...opts.env } : process.env,
-    });
+    const args = this.baseArgs(cmd);
+    const passEnv = sshPassEnv(this.conn);
+    const env = passEnv ? { ...process.env, ...passEnv, ...opts?.env } : { ...process.env, ...opts?.env };
+    const child = spawn(args[0], args.slice(1), { env });
     child.stdout.on("data", (d: Buffer) => onStdout(d.toString()));
     child.stderr.on("data", (d: Buffer) => onStderr(d.toString()));
     child.on("exit", (code) => onExit(code));
@@ -228,7 +237,7 @@ export class RemoteRunner implements Runner {
 
 /** Best-effort hostname detection used to tell whether a node is the panel host. */
 export function isLoopback(host: string): boolean {
-  return ["127.0.0.1", "::1", "localhost", "local", "self"].includes(
+  return ["127.0.0.1", "::1", "localhost", "local", "self", "0.0.0.0"].includes(
     host.trim().toLowerCase(),
   );
 }

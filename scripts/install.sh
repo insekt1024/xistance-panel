@@ -159,6 +159,11 @@ install_deps() {
   apt-get install -y --no-install-recommends \
     ca-certificates curl unzip jq sqlite3 openssh-client sshpass tar gnupg \
     systemd ufw >/dev/null
+  # Verify critical commands
+  for cmd in curl jq node npm sshpass; do
+    command -v "$cmd" >/dev/null 2>&1 || die "Required command '$cmd' not found after install." \
+                                           "دستور مورد نیاز '$cmd' پس از نصب یافت نشد."
+  done
   ok "System packages installed." "بسته‌های سیستمی نصب شدند."
 }
 
@@ -408,6 +413,25 @@ firewall_wizard() {
 }
 
 # ---------------------------------------------------------------------------
+# Health check verification
+# ---------------------------------------------------------------------------
+verify_installation() {
+  info "Verifying installation…" "در حال بررسی نصب…"
+  local retries=10
+  local delay=3
+  for ((i=1; i<=retries; i++)); do
+    if curl -sf "http://127.0.0.1:${PANEL_PORT}/api/health" >/dev/null 2>&1; then
+      ok "Health check passed." "بررسی سلامت موفقیت‌آمیز بود."
+      return 0
+    fi
+    sleep "$delay"
+  done
+  warn "Health check failed after ${retries} attempts. Check logs: journalctl -u xistance -n 50" \
+       "بررسی سلامت پس از ${retries} تلاش ناموفق بود. لاگ‌ها را بررسی کنید."
+  return 1
+}
+
+# ---------------------------------------------------------------------------
 # Node mode (remote VPS bootstrap)
 # ---------------------------------------------------------------------------
 install_node_mode() {
@@ -451,6 +475,7 @@ main() {
       init_db
       install_systemd
       firewall_wizard
+      verify_installation
       say ""
       ok "Installation complete." "نصب با موفقیت کامل شد."
       say "  Panel:  http://<server-ip>:${PANEL_PORT}"

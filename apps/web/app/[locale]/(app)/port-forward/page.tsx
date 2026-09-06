@@ -8,6 +8,11 @@ export default async function PortForwardPage() {
   const t = await getTranslations("portForward");
   const rules = await prisma.portForward.findMany({
     orderBy: { createdAt: "desc" },
+    select: {
+      id: true, name: true, direction: true, protocol: true,
+      sourcePort: true, destHost: true, destPort: true,
+      enabled: true, status: true,
+    },
   });
   return (
     <div className="space-y-6">
@@ -15,7 +20,7 @@ export default async function PortForwardPage() {
         <h1 className="text-2xl font-bold tracking-tight">{t("title")}</h1>
         <p className="text-muted-foreground">{t("subtitle")}</p>
       </div>
-      <PortForwardView rules={rules as unknown as Parameters<typeof PortForwardView>[0]["rules"]} />
+      <PortForwardView rules={rules} />
     </div>
   );
 }

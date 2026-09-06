@@ -73,7 +73,7 @@ export function ToolsView() {
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       <div className="space-y-2">
-        {tools.map((tool) => (
+        {tools.map((tool, i) => (
           <button
             key={tool.id}
             type="button"
@@ -81,17 +81,22 @@ export function ToolsView() {
               setActive(tool.id);
               setResult(null);
             }}
-            className={`flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors ${
-              active === tool.id ? "border-primary bg-primary/5" : "hover:border-primary/50"
+            className={`animate-fade-in-up group flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${
+              active === tool.id
+                ? "border-primary bg-primary/5 shadow-sm"
+                : "hover:border-primary/50"
             }`}
+            style={{ "--stagger": i } as React.CSSProperties}
           >
-            {tool.icon}
+            <span className={`transition-transform duration-200 group-hover:scale-110 ${active === tool.id ? "text-primary" : ""}`}>
+              {tool.icon}
+            </span>
             <span className="text-sm font-medium">{tool.label}</span>
           </button>
         ))}
       </div>
 
-      <Card className="lg:col-span-2">
+      <Card interactive className="animate-fade-in-up lg:col-span-2" style={{ "--stagger": 2 } as React.CSSProperties}>
         <div className="space-y-4 p-6">
           {(active === "tcp" || active === "latency") && (
             <div className="grid gap-4 sm:grid-cols-2">
@@ -135,7 +140,7 @@ export function ToolsView() {
           </Button>
 
           {result && (
-            <div className="space-y-3">
+            <div className="animate-fade-in-up space-y-3">
               <div className="text-sm font-medium">{t("result")}</div>
               {result.tcp && (
                 <Badge variant={result.tcp.ok ? "success" : "destructive"}>
@@ -178,10 +183,11 @@ export function ToolsView() {
                     {result.censorship.likelyCensored ? t("censorshipLikely") : t("censorshipClean")}
                   </Badge>
                   <div className="grid gap-1 sm:grid-cols-2">
-                    {result.censorship.hosts.map((h) => (
+                    {result.censorship.hosts.map((h, i) => (
                       <div
                         key={h.host + h.port}
-                        className="flex items-center justify-between rounded border px-3 py-1.5 text-xs"
+                        className="animate-fade-in-up flex items-center justify-between rounded border px-3 py-1.5 text-xs transition-colors hover:bg-muted/50"
+                        style={{ "--stagger": i } as React.CSSProperties}
                       >
                         <span className="font-mono">{h.host}</span>
                         <Badge variant={h.ok ? "success" : "destructive"} className="ml-2">

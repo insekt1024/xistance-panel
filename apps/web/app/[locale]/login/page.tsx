@@ -10,7 +10,7 @@ export default async function LoginPage() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center px-4">
       <LoginForm />
-      <footer className="mt-8 pb-4 text-center text-xs text-muted-foreground">
+      <footer className="animate-fade-in mt-8 pb-4 text-center text-xs text-muted-foreground">
         <a
           href={APP_REPO_URL}
           target="_blank"

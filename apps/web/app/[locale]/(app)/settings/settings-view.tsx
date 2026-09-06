@@ -4,18 +4,27 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/routing";
 import { toast } from "sonner";
-import { Download, Loader2, RefreshCw, Upload } from "lucide-react";
+import { Download, ExternalLink, Loader2, Monitor, Moon, RefreshCw, Sun, Upload } from "lucide-react";
+import { useTheme } from "next-themes";
 import { apiFetch } from "@/lib/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export function SettingsView({ isAdmin }: { isAdmin: boolean }) {
   const t = useTranslations("settings");
   const tCommon = useTranslations("common");
   const router = useRouter();
+  const { theme, setTheme } = useTheme();
 
   const [currentPassword, setCurrentPassword] = React.useState("");
   const [newPassword, setNewPassword] = React.useState("");
@@ -79,15 +88,15 @@ export function SettingsView({ isAdmin }: { isAdmin: boolean }) {
   }
 
   return (
-    <Tabs defaultValue="security" className="space-y-6">
+    <Tabs defaultValue="security" className="animate-fade-in space-y-6">
       <TabsList>
         <TabsTrigger value="security">{t("security")}</TabsTrigger>
         {isAdmin && <TabsTrigger value="backup">{t("backup")}</TabsTrigger>}
         <TabsTrigger value="general">{t("general")}</TabsTrigger>
       </TabsList>
 
-      <TabsContent value="security">
-        <Card>
+      <TabsContent value="security" className="animate-scale-in">
+        <Card interactive>
           <CardHeader>
             <CardTitle>{t("changePassword")}</CardTitle>
           </CardHeader>
@@ -117,8 +126,8 @@ export function SettingsView({ isAdmin }: { isAdmin: boolean }) {
       </TabsContent>
 
       {isAdmin && (
-        <TabsContent value="backup">
-          <Card>
+        <TabsContent value="backup" className="animate-scale-in">
+          <Card interactive>
             <CardHeader>
               <CardTitle>{t("backup")}</CardTitle>
             </CardHeader>
@@ -162,12 +171,50 @@ export function SettingsView({ isAdmin }: { isAdmin: boolean }) {
         </TabsContent>
       )}
 
-      <TabsContent value="general">
-        <Card>
+      <TabsContent value="general" className="animate-scale-in">
+        <Card interactive>
           <CardHeader>
             <CardTitle>{t("general")}</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-6">
+            <div className="space-y-1.5">
+              <Label>{t("theme")}</Label>
+              <Select value={theme ?? "system"} onValueChange={setTheme}>
+                <SelectTrigger className="w-full max-w-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="light">
+                    <span className="flex items-center gap-2">
+                      <Sun className="h-4 w-4" />
+                      {t("themeLight")}
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="dark">
+                    <span className="flex items-center gap-2">
+                      <Moon className="h-4 w-4" />
+                      {t("themeDark")}
+                    </span>
+                  </SelectItem>
+                  <SelectItem value="system">
+                    <span className="flex items-center gap-2">
+                      <Monitor className="h-4 w-4" />
+                      {t("themeSystem")}
+                    </span>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>{t("apiDocs")}</Label>
+              <p className="text-sm text-muted-foreground">{t("apiDocsDescription")}</p>
+              <Button variant="outline" asChild>
+                <a href="/api/docs" target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="h-4 w-4" />
+                  {t("apiDocs")}
+                </a>
+              </Button>
+            </div>
             <div>
               <p className="text-sm text-muted-foreground">{t("selfUpdate")}</p>
               <div className="mt-3 flex items-center gap-3">

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { promises as fs } from "node:fs";
+import { promises as fsp, createWriteStream } from "node:fs";
 import path from "node:path";
 import type { Runner } from "./runner.js";
 
@@ -170,10 +170,10 @@ export class ChildProcessHandle implements ProcessHandle {
     }
     this.manualStop = false;
     this.respawnDelay = 0;
-    await fs.mkdir(this.spec.workdir ?? this.spec.dataDir, { recursive: true });
+    await fsp.mkdir(this.spec.workdir ?? this.spec.dataDir, { recursive: true });
     const logPath = path.join(this.spec.dataDir, "logs", `${this.spec.id}.log`);
-    await fs.mkdir(path.dirname(logPath), { recursive: true });
-    this.logStream = (await import("node:fs")).createWriteStream(logPath, {
+    await fsp.mkdir(path.dirname(logPath), { recursive: true });
+    this.logStream = createWriteStream(logPath, {
       flags: "a",
     });
 
@@ -187,7 +187,7 @@ export class ChildProcessHandle implements ProcessHandle {
     const sink = (stream: "stdout" | "stderr") => (chunk: Buffer) => {
       const line = chunk.toString();
       this.tail.push(line);
-      if (this.tail.length > 2000) this.tail.shift();
+      if (this.tail.length > 2000) this.tail = this.tail.slice(-2000);
       this.logStream?.write(`[${stream}] ${line}`);
       this.onLine?.(line);
     };
@@ -258,8 +258,20 @@ export class ChildProcessHandle implements ProcessHandle {
       clearTimeout(this.respawnTimer);
       this.respawnTimer = null;
     }
-    this.child?.kill("SIGTERM");
-    this.logStream?.end();
+    const c = this.child;
+    if (c) {
+      const exited = new Promise<void>((resolve) => c.once("exit", () => resolve()));
+      c.kill("SIGTERM");
+      const timer = setTimeout(() => c.kill("SIGKILL"), 8000);
+      await exited;
+      clearTimeout(timer);
+    }
+    if (this.logStream) {
+      await new Promise<void>((resolve) => {
+        this.logStream!.end(() => resolve());
+      });
+      this.logStream = null;
+    }
   }
 }
 
@@ -272,7 +284,7 @@ export async function readProcIo(
   pid: number,
 ): Promise<{ rchar: number; wchar: number } | null> {
   try {
-    const raw = await fs.readFile(`/proc/${pid}/io`, "utf8");
+    const raw = await fsp.readFile(`/proc/${pid}/io`, "utf8");
     const rchar = Number(/rchar:\s+(\d+)/.exec(raw)?.[1] ?? 0);
     const wchar = Number(/wchar:\s+(\d+)/.exec(raw)?.[1] ?? 0);
     return { rchar, wchar };

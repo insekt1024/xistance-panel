@@ -32,7 +32,6 @@ export function LoginForm() {
     if (res.ok) {
       toast.success(t("welcomeBack"));
       router.push("/");
-      router.refresh();
     } else {
       const data = await res.json().catch(() => ({}));
       setError(data.error ?? t("invalidCredentials"));
@@ -41,9 +40,9 @@ export function LoginForm() {
   }
 
   return (
-    <Card className="w-full max-w-sm">
+    <Card className="animate-fade-in-up w-full max-w-sm">
       <CardHeader className="text-center">
-        <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+        <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/25 transition-transform duration-300 hover:scale-105">
           <Activity className="h-6 w-6" />
         </div>
         <CardTitle>{t("welcomeBack")}</CardTitle>
@@ -51,15 +50,19 @@ export function LoginForm() {
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit} className="space-y-4">
-          <div className="space-y-2">
+          <div className="animate-fade-in-up space-y-2" style={{ "--stagger": 1 } as React.CSSProperties}>
             <Label htmlFor="email">{t("email")}</Label>
             <Input id="email" name="email" type="email" required autoComplete="email" />
           </div>
-          <div className="space-y-2">
+          <div className="animate-fade-in-up space-y-2" style={{ "--stagger": 2 } as React.CSSProperties}>
             <Label htmlFor="password">{t("password")}</Label>
             <Input id="password" name="password" type="password" required autoComplete="current-password" />
           </div>
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && (
+            <p role="alert" className="animate-scale-in text-sm text-destructive">
+              {error}
+            </p>
+          )}
           <Button type="submit" className="w-full" disabled={loading}>
             {loading && <Loader2 className="h-4 w-4 animate-spin" />}
             {t("signIn")}

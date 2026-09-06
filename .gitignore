@@ -55,3 +55,6 @@ dist/
 # runtime tunnel data (binaries, logs, keys, configs)
 tunnels/*
 !tunnels/examples/
+
+# local desktop tool state (not part of the project)
+.freebuff/

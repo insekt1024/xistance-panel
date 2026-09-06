@@ -10,6 +10,7 @@ interface Bucket {
 }
 
 const buckets = new Map<string, Bucket>();
+const MAX_BUCKETS = 10_000;
 
 export function rateLimit(
   key: string,
@@ -19,6 +20,21 @@ export function rateLimit(
   const now = Date.now();
   const existing = buckets.get(key);
   if (!existing || now > existing.resetAt) {
+    if (buckets.size >= MAX_BUCKETS) {
+      // Evict oldest expired bucket; if none expired, drop the oldest by resetAt.
+      let evicted = false;
+      for (const [k, v] of buckets) {
+        if (now > v.resetAt) { buckets.delete(k); evicted = true; break; }
+      }
+      if (!evicted) {
+        let oldestKey = "";
+        let oldestReset = Infinity;
+        for (const [k, v] of buckets) {
+          if (v.resetAt < oldestReset) { oldestReset = v.resetAt; oldestKey = k; }
+        }
+        if (oldestKey) buckets.delete(oldestKey);
+      }
+    }
     buckets.set(key, { count: 1, resetAt: now + windowMs });
     return { ok: true, remaining: limit - 1 };
   }

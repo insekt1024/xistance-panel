@@ -2,4 +2,4 @@
 // Managed by scripts/version.mjs — do not edit by hand.
 
 export const APP_VERSION = "1.0.0";
-export const APP_REPO_URL = "https://github.com/insektdotbin/xistance-panel";
+export const APP_REPO_URL = "https://github.com/insekt1024/xistance-panel";

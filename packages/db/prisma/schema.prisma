@@ -36,6 +36,8 @@ model User {
   sessions     Session[]
   apiKeys      ApiKey[]
   auditLogs    AuditLog[]
+
+  @@index([role])
 }
 
 model Session {
@@ -119,13 +121,15 @@ model Tunnel {
   errorMessage   String?
   autostart      Boolean   @default(false)
   createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  updatedAt      DateTime   @updatedAt
 
   trafficSamples TrafficSample[]
 
   @@index([clientNodeId])
   @@index([serverNodeId])
   @@index([ownerId])
+  @@index([status])
+  @@index([state])
 }
 
 model TrafficSample {
@@ -139,6 +143,8 @@ model TrafficSample {
   ts        DateTime @default(now())
 
   @@index([tunnelId, ts])
+  @@index([ts])
+  @@index([ts, bytesIn, bytesOut])
 }
 
 model PortForward {
@@ -160,6 +166,7 @@ model PortForward {
 
   @@index([nodeId])
   @@index([userId])
+  @@index([direction])
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +183,7 @@ model AuditLog {
   ip        String?
   createdAt DateTime @default(now())
 
-  @@index([actorId])
+  @@index([actorId, createdAt])
   @@index([createdAt])
 }
 

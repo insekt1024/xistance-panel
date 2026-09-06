@@ -6,18 +6,27 @@ import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/routing";
 import { Plus } from "lucide-react";
 import { TunnelTable } from "./tunnel-table";
+import { ImportDialog } from "./import-dialog";
 
 export const dynamic = "force-dynamic";
 
 export default async function TunnelsPage() {
   const t = await getTranslations("tunnels");
-  const tunnels = await prisma.tunnel.findMany({
-    include: {
-      clientNode: { select: { id: true, name: true, type: true } },
-      serverNode: { select: { id: true, name: true, type: true } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  const [tunnels, nodes] = await Promise.all([
+    prisma.tunnel.findMany({
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true, name: true, method: true, status: true, state: true,
+        port: true, autostart: true, createdAt: true,
+        clientNode: { select: { name: true } },
+        serverNode: { select: { name: true } },
+      },
+    }),
+    prisma.node.findMany({
+      select: { id: true, name: true, type: true },
+      orderBy: { name: "asc" },
+    }),
+  ]);
   const engine = getEngine();
   const rows = await Promise.all(
     tunnels.map(async (tun) => {
@@ -47,12 +56,15 @@ export default async function TunnelsPage() {
           <h1 className="text-2xl font-bold tracking-tight">{t("title")}</h1>
           <p className="text-muted-foreground">{t("subtitle")}</p>
         </div>
-        <Button asChild>
-          <Link href="/tunnels/new">
-            <Plus className="h-4 w-4" />
-            {t("new")}
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <ImportDialog nodes={nodes} />
+          <Button asChild>
+            <Link href="/tunnels/new">
+              <Plus className="h-4 w-4" />
+              {t("new")}
+            </Link>
+          </Button>
+        </div>
       </div>
       <TunnelTable tunnels={rows} />
     </div>

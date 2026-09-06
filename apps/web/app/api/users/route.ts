@@ -37,7 +37,7 @@ export async function POST(request: Request) {
   if (!body.ok) return body.response;
   const data = body.data;
 
-  const existing = await prisma.user.findUnique({ where: { email: data.email.toLowerCase() } });
+  const existing = await prisma.user.findUnique({ where: { email: data.email.toLowerCase() }, select: { id: true } });
   if (existing) return apiError("Email already in use", 409);
 
   const password = data.password ?? randomPassword();

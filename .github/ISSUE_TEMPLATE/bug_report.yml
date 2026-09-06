@@ -1,0 +1,43 @@
+name: Bug report
+description: Something broken in the panel
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Panel version
+      description: From the UI footer or `npm run version:show`
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [tunnels, nodes, port-forwards, auth, dashboard, installer, other]
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See error ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Relevant server logs (`journalctl -u xistance -n 50`) or screenshots
+      render: text
+    validations:
+      required: false

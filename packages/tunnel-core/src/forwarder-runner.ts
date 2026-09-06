@@ -131,9 +131,18 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const SHUTDOWN_TIMEOUT_MS = 10_000;
   const shutdown = (sig: string) => {
     process.stdout.write(`XT_FORWARDER_SHUTDOWN ${sig}\n`);
-    void Promise.all(handles.map((h) => h.stop())).finally(() => process.exit(0));
+    const forceExit = setTimeout(() => {
+      process.stderr.write("XT_FORWARDER_SHUTDOWN_TIMEOUT force-exiting\n");
+      process.exit(1);
+    }, SHUTDOWN_TIMEOUT_MS);
+    forceExit.unref();
+    void Promise.all(handles.map((h) => h.stop())).finally(() => {
+      clearTimeout(forceExit);
+      process.exit(0);
+    });
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));

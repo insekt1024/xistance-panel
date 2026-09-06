@@ -9,7 +9,9 @@
     "nodes": "Nodes",
     "portForward": "Port Forwarding",
     "tools": "Test Tools",
+    "audit": "Audit Log",
     "users": "Users",
+    "webhooks": "Webhooks",
     "settings": "Settings"
   },
   "common": {
@@ -43,7 +45,8 @@
     "gb": "GB",
     "perSecond": "/s",
     "actions": "Actions",
-    "networkError": "Network error — check your connection and try again"
+    "networkError": "Network error — check your connection and try again",
+    "retry": "Retry"
   },
   "auth": {
     "signIn": "Sign in",
@@ -75,6 +78,7 @@
     "activeTunnels": "Active tunnels",
     "totalNodes": "Nodes",
     "onlineNodes": "Online nodes",
+    "traffic": "Traffic",
     "trafficToday": "Traffic (24h)",
     "upload": "Upload",
     "download": "Download",
@@ -86,7 +90,9 @@
     "method": "Method",
     "nodes": "Nodes",
     "port": "Port",
-    "status": "Status"
+    "status": "Status",
+    "errorTitle": "Something went wrong",
+    "errorMessage": "An unexpected error occurred while loading the dashboard."
   },
   "tunnels": {
     "title": "Tunnels",
@@ -117,7 +123,28 @@
     "restarted": "Tunnel restarted",
     "deleted": "Tunnel deleted",
     "autostart": "Start on boot",
-    "copiedConfig": "Configuration copied"
+    "copiedConfig": "Configuration copied",
+    "stopConfirm": "Stop tunnel \"{name}\"?",
+    "import": "Import Config",
+    "importConfig": "Import Tunnel Configuration",
+    "importDesc": "Paste or upload a JSON tunnel config file to create a new tunnel.",
+    "jsonConfig": "JSON Config",
+    "uploadFile": "Upload File",
+    "pasteFromClipboard": "Paste from Clipboard",
+    "detectedMethod": "Detected method",
+    "namePlaceholder": "Enter tunnel name",
+    "selectAll": "Select all",
+    "deselectAll": "Deselect all",
+    "select": "Select",
+    "deselect": "Deselect",
+    "selectedCount": "{count} selected",
+    "batchStart": "Start",
+    "batchStop": "Stop",
+    "batchRestart": "Restart",
+    "batchStarted": "Selected tunnels started",
+    "batchStopped": "Selected tunnels stopped",
+    "batchRestarted": "Selected tunnels restarted",
+    "clearSelection": "Clear"
   },
   "methods": {
     "BACKHAUL": "Backhaul",
@@ -305,6 +332,9 @@
     "backup": "Backup & restore",
     "general": "General",
     "theme": "Theme",
+    "themeLight": "Light",
+    "themeDark": "Dark",
+    "themeSystem": "System",
     "language": "Language",
     "selfUpdate": "Panel update",
     "exportBackup": "Export backup",
@@ -324,7 +354,9 @@
     "events": "Events",
     "addWebhook": "Add webhook",
     "saved": "Settings saved",
-    "backupNote": "The backup is encrypted at rest. Keep it on the same server or hold on to your XTENC_KEY to restore it elsewhere."
+    "backupNote": "The backup is encrypted at rest. Keep it on the same server or hold on to your XTENC_KEY to restore it elsewhere.",
+    "apiDocs": "API Documentation",
+    "apiDocsDescription": "Explore the REST API endpoints available in this panel. Useful for integrations and scripting."
   },
   "users": {
     "title": "Users",
@@ -343,6 +375,26 @@
     "deleteConfirm": "Delete user \"{name}\"?",
     "deleted": "User deleted",
     "saved": "User saved"
+  },
+  "userActivity": {
+    "title": "User Activity",
+    "subtitle": "Track user actions and recent activity across the panel",
+    "filters": "Filters",
+    "allUsers": "All users",
+    "allActions": "All actions",
+    "apply": "Apply",
+    "clear": "Clear",
+    "user": "User",
+    "action": "Action",
+    "target": "Target",
+    "time": "Time",
+    "ip": "IP",
+    "system": "System",
+    "empty": "No activity logs found",
+    "forbidden": "You don't have permission to view user activity."
+  },
+  "nav": {
+    "activity": "Activity"
   },
   "role": {
     "SUPER_ADMIN": "Super admin",
@@ -363,11 +415,39 @@
     "serverError": "Something went wrong",
     "rateLimited": "Too many requests. Please slow down."
   },
+  "audit": {
+    "title": "Audit Log",
+    "subtitle": "Track user actions and system events",
+    "time": "Time",
+    "actor": "Actor",
+    "action": "Action",
+    "target": "Target",
+    "ip": "IP",
+    "system": "System",
+    "empty": "No audit logs yet"
+  },
   "install": {
     "title": "Installation",
     "finalUrl": "Panel URL",
     "adminEmail": "Admin email",
     "adminPassword": "Admin password",
     "nextSteps": "Next steps"
+  },
+  "shortcuts": {
+    "title": "Keyboard Shortcuts",
+    "description": "Available keyboard shortcuts for faster navigation",
+    "showHelp": "Show this help dialog",
+    "openSearch": "Open search / command palette",
+    "newTunnel": "Navigate to new tunnel page",
+    "closeDialog": "Close any open dialog"
+  },
+  "search": {
+    "placeholder": "Search tunnels, nodes, users…",
+    "description": "Search across tunnels, nodes and users",
+    "noResults": "No results found",
+    "hint": "Type to search across tunnels, nodes and users",
+    "tunnels": "Tunnels",
+    "nodes": "Nodes",
+    "users": "Users"
   }
 }

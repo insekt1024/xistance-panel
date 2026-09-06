@@ -12,6 +12,13 @@ async function findTunnel(id: string) {
   });
 }
 
+async function findTunnelMeta(id: string) {
+  return prisma.tunnel.findUnique({
+    where: { id },
+    select: { id: true, name: true, ownerId: true, clientNodeId: true, serverNodeId: true },
+  });
+}
+
 export async function GET(request: Request, ctx: { params: Promise<{ id: string }> }) {
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
@@ -26,7 +33,7 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
-  const tunnel = await findTunnel(id);
+  const tunnel = await findTunnelMeta(id);
   if (!tunnel) return apiError("Tunnel not found", 404);
   if (auth.user.role === "USER" && tunnel.ownerId !== auth.user.id) {
     return apiError("Forbidden", 403);

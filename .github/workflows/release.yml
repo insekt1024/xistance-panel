@@ -12,15 +12,25 @@ on:
           - patch
           - minor
           - major
+      dry-run:
+        description: 'Dry run (bump without commit/tag/publish)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
+  packages: write
+
+env:
+  # Turbopack chokes on tunnels/bin/gost (os error 22); always build without it.
+  TURBO_DISABLE: "true"
 
 jobs:
   release:
-    name: Release v${{ github.event.inputs.version }}
+    name: Release ${{ github.event.inputs.version }}${{ inputs.dry-run && ' (dry run)' || '' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -42,49 +52,99 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Bump version, commit and tag
+      - name: Bump version (local commit + tag, not pushed yet)
         run: node scripts/version.mjs ${{ github.event.inputs.version }} --commit
 
       - name: Read new version
         id: version
         run: echo "version=$(node scripts/version.mjs --show)" >> "$GITHUB_OUTPUT"
 
-      - name: Push commit + tag
+      - name: Stop here on dry run
+        if: ${{ inputs.dry-run }}
         run: |
-          git push origin HEAD:${{ github.ref }}
-          git push origin tag v${{ steps.version.outputs.version }}
+          git show --stat HEAD
+          git tag --list "v${{ steps.version.outputs.version }}"
+          echo "Dry run: version bump looks good, nothing pushed."
 
-      - name: Typecheck + lint + build
+      - name: Verify (typecheck + lint + tests + build)
+        if: ${{ !inputs.dry-run }}
         run: |
           npm run build:packages
+          npm run version:check
           npm run typecheck
           npm run lint
+          npx tsx scripts/test-optimizations.ts
           npm run build
 
+      - name: Push commit + tag (only after green build)
+        if: ${{ !inputs.dry-run }}
+        run: |
+          BRANCH="${GITHUB_REF#refs/heads/}"
+          git push origin "HEAD:${BRANCH}"
+          git push origin "tag v${{ steps.version.outputs.version }}"
+
       - name: Package standalone artifact
+        if: ${{ !inputs.dry-run }}
         run: |
           mkdir -p dist
-          cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
+          cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static 2>/dev/null || true
           tar -czf dist/xistance-panel-v${{ steps.version.outputs.version }}.tar.gz \
             -C apps/web/.next standalone
           tar -czf dist/xistance-panel-v${{ steps.version.outputs.version }}-static.tar.gz \
             -C apps/web/.next static
 
       - name: Generate release notes
+        if: ${{ !inputs.dry-run }}
         id: notes
         run: |
-          PRETAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -n "$PRETAG" ]; then
-            git log --oneline --no-merges "$PRETAG"..HEAD
-          else
-            git log --oneline --no-merges
-          fi | sed 's/^/- /' > RELEASE_NOTES.txt
+          {
+            echo "## Xistance Panel v${{ steps.version.outputs.version }}"
+            echo
+            PRETAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            if [ -n "$PRETAG" ]; then
+              echo "Changes since $PRETAG:"
+              echo
+              git log --oneline --no-merges "$PRETAG"..HEAD | sed 's/^/- /'
+            else
+              echo "Initial release."
+            fi
+          } > RELEASE_NOTES.txt
+          cat RELEASE_NOTES.txt
 
       - name: Create GitHub Release
+        if: ${{ !inputs.dry-run }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: Xistance Panel v${{ steps.version.outputs.version }}
           body_path: RELEASE_NOTES.txt
+          generate_release_notes: true
           files: |
             dist/*.tar.gz
+
+      - name: Login to GHCR
+        if: ${{ !inputs.dry-run }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        if: ${{ !inputs.dry-run }}
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}},value=v${{ steps.version.outputs.version }}
+            type=raw,value=latest
+
+      - name: Build + push Docker image
+        if: ${{ !inputs.dry-run }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

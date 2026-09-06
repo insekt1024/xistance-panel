@@ -1,8 +1,11 @@
+import { Suspense } from "react";
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@xistance/db";
 import { getEngine } from "@/lib/engine";
+import { cached } from "@/lib/query-cache";
 import { DashboardStats } from "./dashboard-stats";
 import { AutoRefresh } from "@/components/auto-refresh";
+import { DashboardSkeleton } from "./dashboard-skeleton";
 
 export const dynamic = "force-dynamic";
 
@@ -36,16 +39,18 @@ function aggregateTraffic(
 
 export default async function DashboardPage() {
   const t = await getTranslations("dashboard");
-  const [tunnels, nodes, portForwards, recentLogs] = await Promise.all([
+  const [tunnels, totalNodes, onlineNodes, portForwards, recentLogs] = await Promise.all([
     prisma.tunnel.findMany({
-      include: {
-        clientNode: { select: { id: true, name: true, type: true } },
-        serverNode: { select: { id: true, name: true, type: true } },
-      },
       orderBy: { createdAt: "desc" },
       take: 8,
+      select: {
+        id: true, name: true, method: true, state: true, port: true,
+        clientNode: { select: { name: true } },
+        serverNode: { select: { name: true } },
+      },
     }),
-    prisma.node.findMany(),
+    prisma.node.count(),
+    prisma.node.count({ where: { status: "online" } }),
     prisma.portForward.count(),
     prisma.auditLog.findMany({
       include: { actor: { select: { name: true, email: true } } },
@@ -62,13 +67,17 @@ export default async function DashboardPage() {
     }),
   );
 
-  const since = new Date(Date.now() - 24 * HOUR_MS); // eslint-disable-line react-hooks/purity
-  const rawSamples = await prisma.trafficSample.findMany({
-    where: { ts: { gte: since } },
-    select: { bytesIn: true, bytesOut: true, ts: true },
-    orderBy: { ts: "asc" },
+  // Sampler writes new rows every 60s, so caching the aggregate for 10s is
+  // invisible to users while collapsing the 5s auto-refresh into one query.
+  const samples = await cached("dashboard:traffic", 10_000, async () => {
+    const since = new Date(Date.now() - 24 * HOUR_MS); // eslint-disable-line react-hooks/purity
+    const rawSamples = await prisma.trafficSample.findMany({
+      where: { ts: { gte: since } },
+      select: { bytesIn: true, bytesOut: true, ts: true },
+      orderBy: { ts: "asc" },
+    });
+    return aggregateTraffic(rawSamples);
   });
-  const samples = aggregateTraffic(rawSamples);
 
   const running = liveTunnels.filter((x) => x.liveState === "running").length;
 
@@ -82,29 +91,31 @@ export default async function DashboardPage() {
         <p className="text-muted-foreground">{t("overview")}</p>
       </div>
 
-      <DashboardStats
-        totalTunnels={tunnels.length}
-        activeTunnels={running}
-        totalNodes={nodes.length}
-        onlineNodes={nodes.filter((n) => n.status === "online").length}
-        portForwards={portForwards}
-        tunnels={liveTunnels.map((x) => ({
-          id: x.id,
-          name: x.name,
-          method: x.method,
-          status: x.liveState,
-          port: x.port,
-          clientNode: x.clientNode?.name ?? "—",
-          serverNode: x.serverNode?.name ?? "—",
-        }))}
-        samples={samples}
-        recentActivity={recentLogs.map((l) => ({
-          action: l.action,
-          target: l.target ?? "",
-          actor: l.actor?.name ?? "system",
-          at: l.createdAt.toISOString(),
-        }))}
-      />
+      <Suspense fallback={<DashboardSkeleton />}>
+        <DashboardStats
+          totalTunnels={tunnels.length}
+          activeTunnels={running}
+          totalNodes={totalNodes}
+          onlineNodes={onlineNodes}
+          portForwards={portForwards}
+          tunnels={liveTunnels.map((x) => ({
+            id: x.id,
+            name: x.name,
+            method: x.method,
+            status: x.liveState,
+            port: x.port,
+            clientNode: x.clientNode?.name ?? "—",
+            serverNode: x.serverNode?.name ?? "—",
+          }))}
+          samples={samples}
+          recentActivity={recentLogs.map((l) => ({
+            action: l.action,
+            target: l.target ?? "",
+            actor: l.actor?.name ?? "system",
+            at: l.createdAt.toISOString(),
+          }))}
+        />
+      </Suspense>
     </div>
   );
 }

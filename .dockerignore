@@ -1,0 +1,16 @@
+node_modules
+.next
+.turbo
+dist
+build
+coverage
+.git
+.github
+.data
+.freebuff
+*.db
+*.db-journal
+.env*
+!.env.local.example
+tunnels/*
+!tunnels/examples/

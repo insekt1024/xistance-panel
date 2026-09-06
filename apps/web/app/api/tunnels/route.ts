@@ -28,10 +28,14 @@ export function extractPort(config: TunnelConfig): number | null {
   }
 }
 
+const LIST_LIMIT = 50;
+
 export async function GET(request: Request) {
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
-
+  const { searchParams } = new URL(request.url);
+  const cursor = searchParams.get("cursor") ? { id: searchParams.get("cursor")! } : undefined;
+  const limit = Math.min(Number(searchParams.get("limit")) || LIST_LIMIT, 100);
   const where =
     auth.user.role === "USER"
       ? { OR: [{ ownerId: auth.user.id }, { ownerId: null }] }
@@ -39,13 +43,24 @@ export async function GET(request: Request) {
   const tunnels = await prisma.tunnel.findMany({
     where,
     orderBy: { createdAt: "desc" },
-    include: {
+    take: limit,
+    cursor,
+    select: {
+      id: true,
+      name: true,
+      method: true,
+      status: true,
+      state: true,
+      port: true,
+      autostart: true,
       clientNode: { select: { id: true, name: true, type: true } },
       serverNode: { select: { id: true, name: true, type: true } },
       owner: { select: { id: true, name: true, email: true } },
     },
   });
-  return json({ tunnels });
+  const hasNext = tunnels.length === limit;
+  const nextCursor = hasNext ? tunnels[tunnels.length - 1].id : null;
+  return json({ tunnels, hasNext, nextCursor });
 }
 
 export async function POST(request: Request) {
@@ -65,13 +80,28 @@ export async function POST(request: Request) {
     }
   }
 
+  const nodeSelect = {
+    id: true, host: true, sshUser: true, sshPort: true,
+    authMethod: true, sshKeyEncrypted: true, sshPasswordEnc: true,
+  } as const;
   const [clientNode, serverNode] = await Promise.all([
-    prisma.node.findUnique({ where: { id: data.clientNodeId } }),
-    prisma.node.findUnique({ where: { id: data.serverNodeId } }),
+    prisma.node.findUnique({ where: { id: data.clientNodeId }, select: nodeSelect }),
+    prisma.node.findUnique({ where: { id: data.serverNodeId }, select: nodeSelect }),
   ]);
   if (!clientNode || !serverNode) return apiError("One or both nodes not found", 404);
   if (clientNode.id === serverNode.id) {
     return apiError("Client and server nodes must be different", 422);
+  }
+
+  const port = extractPort(data.config);
+  if (port !== null) {
+    const conflicting = await prisma.tunnel.findFirst({
+      where: { port, status: { in: ["running", "starting"] } },
+      select: { id: true, name: true },
+    });
+    if (conflicting) {
+      return apiError(`Port ${port} is already in use by tunnel "${conflicting.name}"`, 409);
+    }
   }
 
   const spec = await buildSpec(

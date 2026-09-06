@@ -18,6 +18,7 @@ import { buildSshCommand } from "./config/ssh.js";
 import { ProcessManager, type ProcessHandle, type ProcessSpec } from "./process.js";
 import { LocalRunner, RemoteRunner, type Runner } from "./runner.js";
 import { EventBus } from "./eventbus.js";
+import fs from "node:fs";
 
 // ---------------------------------------------------------------------------
 // Public models
@@ -96,6 +97,7 @@ interface Runtime {
 export class TunnelEngine {
   private readonly runtimes = new Map<string, Runtime>();
   private readonly mgrCache = new Map<string, ProcessManager>();
+  private readonly systemBinCache = new Map<string, string>();
   readonly bus: EventBus;
 
   // Short-lived status memoisation: page polls and the sampler call status()
@@ -103,9 +105,14 @@ export class TunnelEngine {
   // coalesce reads within a small window. Invalidated on lifecycle changes.
   private readonly statusCache = new Map<string, { at: number; status: Status }>();
   private static readonly STATUS_CACHE_TTL = 1_500;
+  // Per-process isRunning cache: avoids re-spawning SSH sessions for every poll.
+  // Keyed by process handle unit name; each entry has its own TTL.
+  private readonly processRunningCache = new Map<string, { at: number; running: boolean }>();
+  private static readonly PROCESS_RUNNING_CACHE_TTL = 3_000;
 
   constructor(private readonly opts: EngineOptions) {
     this.bus = new EventBus();
+    this.loadPersistentIoStats();
   }
 
   // ---- context / runner resolution ---------------------------------------
@@ -158,8 +165,12 @@ export class TunnelEngine {
     return path.join(ctx.binDir, name);
   }
 
-  /** Resolve a system tool (ssh, sshpass, node) on the target. */
+  /** Resolve a system tool (ssh, sshpass, node) on the target. Results cached
+   *  per node+tool — `which` costs a full SSH round-trip on remote nodes. */
   private async systemBin(ctx: NodeCtx, name: string): Promise<string> {
+    const key = `${ctx.name}:${name}`;
+    const hit = this.systemBinCache.get(key);
+    if (hit) return hit;
     const res = await ctx.runner.run(["which", name]);
     const found = res.stdout.trim();
     if (res.exitCode !== 0 || !found) {
@@ -168,6 +179,7 @@ export class TunnelEngine {
           `Install it (Ubuntu/Debian: apt install ${name}) and retry.`,
       );
     }
+    this.systemBinCache.set(key, found);
     return found;
   }
 
@@ -178,8 +190,11 @@ export class TunnelEngine {
     await this.ensureBinaries(spec);
     const procs: RunningProcess[] = [];
     for (const entry of plan) {
-      for (const f of entry.files ?? []) {
-        await entry.ctx.runner.writeFile(f.path, f.content, f.mode);
+      // Parallelize file writes within each entry (independent of each other)
+      if (entry.files) {
+        await Promise.all(
+          entry.files.map((f) => entry.ctx.runner.writeFile(f.path, f.content, f.mode)),
+        );
       }
       const mgr = await this.mgrFor(entry.ctx);
       const handle = await mgr.create(entry.spec);
@@ -190,7 +205,8 @@ export class TunnelEngine {
         startedAt: Date.now(),
       });
     }
-    for (const p of procs) await p.handle.start();
+    // Parallelize process starts
+    await Promise.all(procs.map((p) => p.handle.start()));
     this.runtimes.set(spec.id, { processes: procs });
     this.invalidateStatus(spec.id);
   }
@@ -225,19 +241,99 @@ export class TunnelEngine {
       await Promise.all(rt.processes.map((p) => p.handle.dispose()));
       this.runtimes.delete(id);
     }
-    this.statusCache.delete(id);
+    this.invalidateStatus(id);
   }
 
   has(id: string): boolean {
     return this.runtimes.has(id);
   }
 
-  // ---- status / stats ------------------------------------------------------
+  /** Number of tunnels currently managed by the engine. */
+  size(): number {
+    return this.runtimes.size;
+  }
+
+  /** Clear status and process-running caches for a tunnel. */
+  private invalidateStatus(id: string): void {
+    this.statusCache.delete(id);
+    // Invalidate per-process running cache for all processes in this runtime
+    const rt = this.runtimes.get(id);
+    if (rt) {
+      for (const p of rt.processes) {
+        this.processRunningCache.delete(p.spec.unitName || p.spec.id || String(p.constructor.name));
+      }
+    }
+    // Flush any pending stats write
+    if (this.statsWriteTimer) {
+      clearTimeout(this.statsWriteTimer);
+      this.statsWriteTimer = null;
+      void this.savePersistentIoStats();
+    }
+  }
 
   /** bytes read/written per process (cumulative) */
-  private recentIo = new Map<string, { at: number; bytesIn: number; bytesOut: number }>();
+  // NOTE: recentIo was removed; persistentIoStats serves double duty now.
+
   /** child-process handles that already have the engine log sink wired up */
   private readonly logSinks = new WeakSet<ProcessHandle>();
+  // Persistent I/O stats surviving engine restarts; loaded from .data/engine-stats.json
+  private readonly persistentIoStats: Map<string, { at: number; bytesIn: number; bytesOut: number }> =
+    new Map();
+  // Debounce timer for async stats persistence
+  private statsWriteTimer: NodeJS.Timeout | null = null;
+
+  private loadPersistentIoStats(): void {
+    try {
+      const data = fs.readFileSync(path.join(this.opts.dataDir, "engine-stats.json"), "utf8");
+      const parsed: Record<string, { at: number; bytesIn: number; bytesOut: number }> = JSON.parse(
+        data,
+      ) as Record<string, { at: number; bytesIn: number; bytesOut: number }>;
+      this.persistentIoStats.clear();
+      // Merge persisted stats, keeping the most recent timestamp per tunnel
+      Object.entries(parsed).forEach(([k, { at, bytesIn, bytesOut }]) => {
+        const existing = this.persistentIoStats.get(k);
+        if (!existing || at > existing.at) {
+          this.persistentIoStats.set(k, { at, bytesIn, bytesOut });
+        }
+      });
+    } catch {
+      // No persisted stats yet - fine, start fresh
+    }
+  }
+
+  private async savePersistentIoStats(): Promise<void> {
+    try {
+      const data: Record<string, { at: number; bytesIn: number; bytesOut: number }> = {};
+      this.persistentIoStats.forEach((v, k) => (data[k] = v));
+      await fs.promises.writeFile(
+        path.join(this.opts.dataDir, "engine-stats.json"),
+        JSON.stringify(data),
+        "utf8",
+      );
+    } catch {
+      // Ignore write failures; speed calc degrades gracefully.
+    }
+  }
+
+  /** Flush pending debounced stats to disk immediately (call on shutdown). */
+  flushStats(): void {
+    if (this.statsWriteTimer) {
+      clearTimeout(this.statsWriteTimer);
+      this.statsWriteTimer = null;
+      // Synchronous write is intentional here: the process may be exiting.
+      try {
+        const data: Record<string, { at: number; bytesIn: number; bytesOut: number }> = {};
+        this.persistentIoStats.forEach((v, k) => (data[k] = v));
+        fs.writeFileSync(
+          path.join(this.opts.dataDir, "engine-stats.json"),
+          JSON.stringify(data),
+          "utf8",
+        );
+      } catch {
+        /* best effort */
+      }
+    }
+  }
 
   private async ioSums(id: string): Promise<{ bytesIn: number; bytesOut: number; started: number }> {
     const rt = this.runtimes.get(id);
@@ -257,15 +353,20 @@ export class TunnelEngine {
     return { bytesIn, bytesOut, started };
   }
 
-  /** Drop the memoised status for a tunnel (called after any lifecycle change). */
-  private invalidateStatus(id: string): void {
-    this.statusCache.delete(id);
-  }
-
+  /** Drop the memoised status and process-running caches for a tunnel. */
   private async computeStatus(id: string): Promise<Status> {
     const rt = this.runtimes.get(id);
     if (!rt) return TunnelStatus.STOPPED;
-    const states = await Promise.all(rt.processes.map((p) => p.handle.isRunning()));
+    const states = await Promise.all(rt.processes.map(async (p) => {
+      const cacheKey = p.spec.unitName || p.spec.id || String(p.constructor.name);
+      const cached = this.processRunningCache.get(cacheKey);
+      if (cached && Date.now() - cached.at < TunnelEngine.PROCESS_RUNNING_CACHE_TTL) {
+        return cached.running;
+      }
+      const running = await p.handle.isRunning();
+      this.processRunningCache.set(cacheKey, { at: Date.now(), running });
+      return running;
+    }));
     const running = states.filter(Boolean).length;
     if (running === 0) return TunnelStatus.STOPPED;
     if (running < rt.processes.length) return TunnelStatus.DEGRADED;
@@ -290,9 +391,9 @@ export class TunnelEngine {
     const { bytesIn, bytesOut, started } = await this.ioSums(id);
 
     // Speed is a delta against the previous snapshot for this tunnel.
+    const prev = this.persistentIoStats.get(id);
     let speedInBps = 0;
     let speedOutBps = 0;
-    const prev = this.recentIo.get(id);
     if (prev && prev.at < now) {
       const dt = (now - prev.at) / 1000;
       if (dt > 0) {
@@ -300,7 +401,14 @@ export class TunnelEngine {
         speedOutBps = Math.max(0, Math.round((bytesOut - prev.bytesOut) / dt));
       }
     }
-    this.recentIo.set(id, { at: now, bytesIn, bytesOut });
+    // Update persistent store
+    this.persistentIoStats.set(id, { at: now, bytesIn, bytesOut });
+    // Debounced async write: coalesce multiple snapshots into a single write every 5s
+    if (this.statsWriteTimer) clearTimeout(this.statsWriteTimer);
+    this.statsWriteTimer = setTimeout(() => {
+      this.statsWriteTimer = null;
+      void this.savePersistentIoStats();
+    }, 5_000);
 
     return {
       bytesIn,
@@ -317,24 +425,29 @@ export class TunnelEngine {
     const rt = this.runtimes.get(id);
     if (!rt) return [];
     const out: string[] = [];
-    for (const p of rt.processes) {
-      if (!p.handle.recentLines) {
-        out.push(...(await readJournalctl(p.spec.unitName, maxLines, p.ctx)));
-        continue;
-      }
-      const mem = p.handle.recentLines().slice(-maxLines);
-      const fileLines = await readLogTail(
-        path.join(p.ctx.dataDir, "logs", `${p.spec.id}.log`),
-        maxLines,
-      );
-      // Tail history first, then live in-memory lines. Drop exact duplicates at
-      // the seam (the file's end overlaps the memory buffer after a restart).
-      const all = [...fileLines, ...mem].slice(-maxLines);
-      const deduped: string[] = [];
-      for (const line of all) {
-        if (deduped[deduped.length - 1] !== line) deduped.push(line);
-      }
-      out.push(...deduped);
+    // Parallelize log fetching across processes
+    const results = await Promise.all(
+      rt.processes.map(async (p) => {
+        if (!p.handle.recentLines) {
+          return readJournalctl(p.spec.unitName, maxLines, p.ctx);
+        }
+        const mem = p.handle.recentLines().slice(-maxLines);
+        const fileLines = await readLogTail(
+          path.join(p.ctx.dataDir, "logs", `${p.spec.id}.log`),
+          maxLines,
+        );
+        // Tail history first, then live in-memory lines. Drop exact duplicates at
+        // the seam (the file's end overlaps the memory buffer after a restart).
+        const all = [...fileLines, ...mem].slice(-maxLines);
+        const deduped: string[] = [];
+        for (const line of all) {
+          if (deduped[deduped.length - 1] !== line) deduped.push(line);
+        }
+        return deduped;
+      }),
+    );
+    for (const lines of results) {
+      out.push(...lines);
     }
     return out;
   }
@@ -414,10 +527,26 @@ export class TunnelEngine {
       default:
         break;
     }
+    // Batch existence checks: one shell round-trip per node instead of one
+    // SSH session per binary.
+    const byCtx = new Map<NodeCtx, string[]>();
     for (const { ctx, bin } of needs) {
-      const abs = this.binPath(ctx, bin);
-      const present = await ctx.runner.exists(abs);
-      if (!present) {
+      const list = byCtx.get(ctx) ?? [];
+      list.push(bin);
+      byCtx.set(ctx, list);
+    }
+    for (const [ctx, bins] of byCtx) {
+      const script = bins
+        .map((bin) => {
+          const abs = this.binPath(ctx, bin);
+          return `[ -e '${abs}' ] && echo "OK ${bin}" || echo "MISSING ${bin}"`;
+        })
+        .join("; ");
+      const res = await ctx.runner.run(["bash", "-c", script]);
+      for (const line of res.stdout.split("\n")) {
+        if (!line.startsWith("MISSING ")) continue;
+        const bin = line.slice("MISSING ".length).trim();
+        const abs = this.binPath(ctx, bin);
         throw new Error(
           `Required binary "${bin}" is missing on ${ctx.name} (${abs}). ` +
             `Run scripts/install.sh (or: xistance install --bin ${bin}) on the node to install it.`,
@@ -639,9 +768,20 @@ async function readJournalctl(unitName: string, lines: number, ctx: NodeCtx): Pr
 /** Tail the last `lines` lines of a child-process log file (best effort). */
 async function readLogTail(filePath: string, lines: number): Promise<string[]> {
   try {
-    const { promises: fs } = await import("node:fs");
-    const raw = await fs.readFile(filePath, "utf8");
-    return raw.split("\n").filter(Boolean).slice(-lines);
+    const stats = await fs.promises.stat(filePath);
+    if (stats.size === 0) return [];
+    // Read the last 8KB to find the tail efficiently (avoids loading entire large logs)
+    const CHUNK = 8192;
+    const start = Math.max(0, stats.size - CHUNK);
+    const fd = await fs.promises.open(filePath, "r");
+    try {
+      const buf = Buffer.allocUnsafe(stats.size - start);
+      await fd.read(buf, 0, buf.length, start);
+      const raw = buf.toString("utf8");
+      return raw.split("\n").filter(Boolean).slice(-lines);
+    } finally {
+      await fd.close();
+    }
   } catch {
     return [];
   }

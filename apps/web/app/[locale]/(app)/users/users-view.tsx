@@ -116,7 +116,7 @@ export function UsersView({ users, isAdmin }: { users: UserRow[]; isAdmin: boole
       )}
 
       {users.length === 0 ? (
-        <Card className="p-10 text-center text-muted-foreground">{t("empty")}</Card>
+        <Card className="animate-fade-in border-dashed p-10 text-center text-muted-foreground">{t("empty")}</Card>
       ) : (
         <Table>
           <TableHeader>
@@ -130,8 +130,8 @@ export function UsersView({ users, isAdmin }: { users: UserRow[]; isAdmin: boole
             </TableRow>
           </TableHeader>
           <TableBody>
-            {users.map((u) => (
-              <TableRow key={u.id}>
+            {users.map((u, i) => (
+              <TableRow key={u.id} className="animate-fade-in-up" style={{ "--stagger": Math.min(i, 10) } as React.CSSProperties}>
                 <TableCell className="font-medium">{u.name}</TableCell>
                 <TableCell className="text-sm">{u.email}</TableCell>
                 <TableCell>

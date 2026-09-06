@@ -7,6 +7,7 @@ import { routing } from "@/i18n/routing";
 import { localeInfo } from "@xistance/i18n";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
+import { KeyboardShortcutsProvider } from "@/components/keyboard-shortcuts-provider";
 import "../globals.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
@@ -53,7 +54,9 @@ export default async function LocaleLayout({
           disableTransitionOnChange
         >
           <NextIntlClientProvider locale={locale} messages={messages}>
-            {children}
+            <KeyboardShortcutsProvider>
+              {children}
+            </KeyboardShortcutsProvider>
             <Toaster />
           </NextIntlClientProvider>
         </ThemeProvider>

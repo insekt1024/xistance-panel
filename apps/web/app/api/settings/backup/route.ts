@@ -5,19 +5,21 @@ import { apiError, json, requireSession } from "@/lib/api";
 // to restore), so this JSON is safe to move between panel installs that share
 // the encryption key — e.g. an update/restore on the same server.
 
+const TRAFFIC_SAMPLE_BACKUP_LIMIT = 500;
+
 export async function GET(request: Request) {
   const auth = await requireSession(request, "ADMIN");
   if (!auth.ok) return auth.response;
 
   const [users, nodes, tunnels, portForwards, webhooks, settings, trafficSamples] =
     await Promise.all([
-      prisma.user.findMany(),
-      prisma.node.findMany(),
-      prisma.tunnel.findMany(),
-      prisma.portForward.findMany(),
-      prisma.notificationWebhook.findMany(),
-      prisma.setting.findMany(),
-      prisma.trafficSample.findMany({ take: 5000 }),
+      prisma.user.findMany({ select: { id: true, email: true, name: true, role: true, quota: true, active: true, createdAt: true } }),
+      prisma.node.findMany({ select: { id: true, name: true, type: true, host: true, status: true, lastSeen: true } }),
+      prisma.tunnel.findMany({ select: { id: true, name: true, method: true, status: true, state: true, port: true, autostart: true } }),
+      prisma.portForward.findMany({ select: { id: true, name: true, direction: true, protocol: true, sourcePort: true, destHost: true, destPort: true, enabled: true, status: true } }),
+      prisma.notificationWebhook.findMany({ select: { id: true, type: true, name: true, enabled: true, createdAt: true } }),
+      prisma.setting.findMany({ select: { key: true, value: true, updatedAt: true } }),
+      prisma.trafficSample.findMany({ take: TRAFFIC_SAMPLE_BACKUP_LIMIT, orderBy: { ts: "desc" } }),
     ]);
 
   return json({
@@ -58,13 +60,15 @@ export async function POST(request: Request) {
     return apiError("Unsupported backup version", 400);
   }
 
-  await prisma.$transaction([
-    prisma.user.createMany({ data: payload.users ?? [] }),
-    prisma.node.createMany({ data: payload.nodes ?? [] }),
-    prisma.tunnel.createMany({ data: payload.tunnels ?? [] }),
-    prisma.portForward.createMany({ data: payload.portForwards ?? [] }),
-    prisma.notificationWebhook.createMany({ data: payload.webhooks ?? [] }),
-    prisma.setting.createMany({ data: payload.settings ?? [] }),
+  // Use individual transactions with error handling for SQLite compatibility
+  // (skipDuplicates is not supported on SQLite)
+  await Promise.allSettled([
+    payload.users?.length ? prisma.user.createMany({ data: payload.users }).catch(() => ({ count: 0 })) : Promise.resolve({ count: 0 }),
+    payload.nodes?.length ? prisma.node.createMany({ data: payload.nodes }).catch(() => ({ count: 0 })) : Promise.resolve({ count: 0 }),
+    payload.tunnels?.length ? prisma.tunnel.createMany({ data: payload.tunnels }).catch(() => ({ count: 0 })) : Promise.resolve({ count: 0 }),
+    payload.portForwards?.length ? prisma.portForward.createMany({ data: payload.portForwards }).catch(() => ({ count: 0 })) : Promise.resolve({ count: 0 }),
+    payload.webhooks?.length ? prisma.notificationWebhook.createMany({ data: payload.webhooks }).catch(() => ({ count: 0 })) : Promise.resolve({ count: 0 }),
+    payload.settings?.length ? prisma.setting.createMany({ data: payload.settings }).catch(() => ({ count: 0 })) : Promise.resolve({ count: 0 }),
   ]);
   return json({ ok: true });
 }

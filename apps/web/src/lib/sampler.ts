@@ -23,6 +23,9 @@ export function startTrafficSampler(): void {
       const engine = getEngine();
       const tunnels = await prisma.tunnel.findMany({ select: { id: true } });
       const now = Date.now();
+      const managed = tunnels.filter((t) => engine.has(t.id));
+      // Snapshot all managed tunnels in parallel, then filter results
+      const snaps = await Promise.all(managed.map((t) => engine.snapshot(t.id)));
       const rows: Array<{
         tunnelId: string;
         bytesIn: bigint;
@@ -31,12 +34,11 @@ export function startTrafficSampler(): void {
         speedOutBps: number;
         ts: Date;
       }> = [];
-      for (const t of tunnels) {
-        if (!engine.has(t.id)) continue;
-        const snap = await engine.snapshot(t.id);
+      for (let i = 0; i < managed.length; i++) {
+        const snap = snaps[i];
         if (!snap || snap.status !== "running") continue;
         rows.push({
-          tunnelId: t.id,
+          tunnelId: managed[i].id,
           bytesIn: BigInt(Math.floor(snap.bytesIn)),
           bytesOut: BigInt(Math.floor(snap.bytesOut)),
           speedInBps: Math.floor(snap.speedInBps),

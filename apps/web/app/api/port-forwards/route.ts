@@ -14,11 +14,22 @@ const ruleSchema = z.object({
   nodeId: z.string().uuid().optional().nullable(),
 });
 
+const LIST_LIMIT = 50;
+
 export async function GET(request: Request) {
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
-  const rules = await prisma.portForward.findMany({ orderBy: { createdAt: "desc" } });
-  return json({ rules });
+  const { searchParams } = new URL(request.url);
+  const cursor = searchParams.get("cursor") ? { id: searchParams.get("cursor")! } : undefined;
+  const limit = Math.min(Number(searchParams.get("limit")) || LIST_LIMIT, 100);
+  const portForwards = await prisma.portForward.findMany({
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    cursor,
+  });
+  const hasNext = portForwards.length === limit;
+  const nextCursor = hasNext ? portForwards[portForwards.length - 1].id : null;
+  return json({ rules: portForwards, hasNext, nextCursor });
 }
 
 export async function POST(request: Request) {

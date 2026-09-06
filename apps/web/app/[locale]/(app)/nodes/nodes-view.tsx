@@ -4,18 +4,14 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/routing";
 import { toast } from "sonner";
-import { CheckCircle2, Loader2, Plus, RefreshCw, Trash2, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, Pencil, Plus, RefreshCw, Trash2, XCircle } from "lucide-react";
 import { apiFetch } from "@/lib/client";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { FormInput, FormSelect, useFieldValidation } from "@/components/ui/form-field";
 import {
-  Select,
-  SelectContent,
   SelectItem,
-  SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import {
   Dialog,
@@ -73,9 +69,40 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [form, setForm] = React.useState(EMPTY_FORM);
   const [saving, setSaving] = React.useState(false);
+  const [editingNode, setEditingNode] = React.useState<NodeRow | null>(null);
+  const [editForm, setEditForm] = React.useState(EMPTY_FORM);
   const [testingId, setTestingId] = React.useState<string | null>(null);
   const [deleteId, setDeleteId] = React.useState<NodeRow | null>(null);
   const [testResult, setTestResult] = React.useState<Record<string, boolean>>({});
+
+  const nameField = useFieldValidation(form.name, { required: true, minLength: 2, maxLength: 64 });
+  const hostField = useFieldValidation(form.host, {
+    required: true,
+    pattern: /^[\w.-]+$/,
+    patternMessage: "Invalid hostname or IP",
+  });
+  const usernameField = useFieldValidation(form.username, { required: true, minLength: 1 });
+  const keyField = useFieldValidation(form.key, {
+    validate: (v) =>
+      form.authMethod === "key" && !v.trim() ? "SSH key is required" : undefined,
+  });
+
+  const isAddValid = nameField.valid && hostField.valid && usernameField.valid && keyField.valid;
+
+  const editNameField = useFieldValidation(editForm.name, { required: true, minLength: 2, maxLength: 64 });
+  const editHostField = useFieldValidation(editForm.host, {
+    required: true,
+    pattern: /^[\w.-]+$/,
+    patternMessage: "Invalid hostname or IP",
+  });
+  const editUsernameField = useFieldValidation(editForm.username, { required: true, minLength: 1 });
+  const editKeyField = useFieldValidation(editForm.key, {
+    validate: (v) =>
+      editForm.authMethod === "key" && !v.trim() ? "SSH key is required" : undefined,
+  });
+
+  const isEditValid =
+    editNameField.valid && editHostField.valid && editUsernameField.valid && editKeyField.valid;
 
   async function submit() {
     setSaving(true);
@@ -94,6 +121,37 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
     }
   }
 
+  function openEdit(node: NodeRow) {
+    setEditingNode(node);
+    setEditForm({
+      name: node.name,
+      type: node.type,
+      host: node.host,
+      port: node.sshPort,
+      username: node.sshUser,
+      authMethod: node.authMethod,
+      key: "",
+      password: "",
+    });
+  }
+
+  async function editSubmit() {
+    if (!editingNode) return;
+    setSaving(true);
+    const res = await apiFetch(`/api/nodes/${editingNode.id}`, {
+      method: "PUT",
+      body: JSON.stringify(editForm),
+    });
+    setSaving(false);
+    if (res.ok) {
+      toast.success(t("saved"));
+      setEditingNode(null);
+      router.refresh();
+    } else {
+      toast.error((res.data as { error?: string })?.error ?? tCommon("error"));
+    }
+  }
+
   async function test(node: NodeRow) {
     setTestingId(node.id);
     setTestResult((r) => ({ ...r, [node.id]: true }));
@@ -105,7 +163,6 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
     } else {
       toast.error((res.data as { message?: string })?.message ?? t("unreachable"));
     }
-    router.refresh();
   }
 
   async function remove() {
@@ -130,7 +187,7 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
       </div>
 
       {nodes.length === 0 ? (
-        <Card className="p-10 text-center text-muted-foreground">{t("empty")}</Card>
+        <Card className="animate-fade-in border-dashed p-10 text-center text-muted-foreground">{t("empty")}</Card>
       ) : (
         <Table>
           <TableHeader>
@@ -145,8 +202,8 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {nodes.map((n) => (
-              <TableRow key={n.id}>
+            {nodes.map((n, i) => (
+              <TableRow key={n.id} className="animate-fade-in-up" style={{ "--stagger": Math.min(i, 10) } as React.CSSProperties}>
                 <TableCell className="font-medium">{n.name}</TableCell>
                 <TableCell>
                   {n.type === "IRAN" ? t("iran") : t("foreign")}
@@ -170,7 +227,7 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
                 <TableCell className="text-right">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={tCommon("actions")}>
                         {testingId === n.id ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : testResult[n.id] ? (
@@ -186,6 +243,10 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
                       <DropdownMenuItem onClick={() => test(n)}>
                         <RefreshCw className="h-4 w-4" />
                         {t("testConnection")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => openEdit(n)}>
+                        <Pencil className="h-4 w-4" />
+                        {tCommon("edit")}
                       </DropdownMenuItem>
                       <DropdownMenuItem
                         className="text-destructive"
@@ -210,82 +271,87 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>{t("name")}</Label>
-                <Input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>{t("type")}</Label>
-                <Select
-                  value={form.type}
-                  onValueChange={(v) => setForm({ ...form, type: v as "IRAN" | "FOREIGN" })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="IRAN">{t("iran")}</SelectItem>
-                    <SelectItem value="FOREIGN">{t("foreign")}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              <FormInput
+                label={t("name")}
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                onBlur={() => nameField.setTouched(true)}
+                error={nameField.error}
+                required
+              />
+              <FormSelect
+                label={t("type")}
+                value={form.type}
+                onValueChange={(v) => setForm({ ...form, type: v as "IRAN" | "FOREIGN" })}
+                required
+                valid={!!form.type}
+              >
+                <SelectItem value="IRAN">{t("iran")}</SelectItem>
+                <SelectItem value="FOREIGN">{t("foreign")}</SelectItem>
+              </FormSelect>
             </div>
-            <div className="space-y-1.5">
-              <Label>{t("host")}</Label>
-              <Input
-                value={form.host}
-                onChange={(e) => setForm({ ...form, host: e.target.value })}
-                placeholder="203.0.113.10"
+            <FormInput
+              label={t("host")}
+              value={form.host}
+              onChange={(e) => setForm({ ...form, host: e.target.value })}
+              onBlur={() => hostField.setTouched(true)}
+              placeholder="203.0.113.10"
+              error={hostField.error}
+              required
+            />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormInput
+                label={t("sshPort")}
+                type="number"
+                value={form.port}
+                onChange={(e) => setForm({ ...form, port: Number(e.target.value) })}
+              />
+              <FormInput
+                label={t("username")}
+                value={form.username}
+                onChange={(e) => setForm({ ...form, username: e.target.value })}
+                onBlur={() => usernameField.setTouched(true)}
+                error={usernameField.error}
+                required
               />
             </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>{t("sshPort")}</Label>
-                <Input
-                  type="number"
-                  value={form.port}
-                  onChange={(e) => setForm({ ...form, port: Number(e.target.value) })}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>{t("username")}</Label>
-                <Input
-                  value={form.username}
-                  onChange={(e) => setForm({ ...form, username: e.target.value })}
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label>{t("authMethod")}</Label>
-              <Select
-                value={form.authMethod}
-                onValueChange={(v) => setForm({ ...form, authMethod: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="key">{t("key")}</SelectItem>
-                  <SelectItem value="password">{t("password")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+            <FormSelect
+              label={t("authMethod")}
+              value={form.authMethod}
+              onValueChange={(v) => setForm({ ...form, authMethod: v })}
+              required
+              valid={!!form.authMethod}
+            >
+              <SelectItem value="key">{t("key")}</SelectItem>
+              <SelectItem value="password">{t("password")}</SelectItem>
+            </FormSelect>
             {form.authMethod === "key" ? (
               <div className="space-y-1.5">
-                <Label>{t("key")}</Label>
+                <label className="text-sm font-medium">
+                  {t("key")}
+                  <span className="ml-0.5 text-destructive">*</span>
+                </label>
                 <textarea
-                  className="min-h-20 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className={`min-h-20 w-full rounded-md bg-transparent px-3 py-2 font-mono text-xs shadow-sm transition-all duration-200 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 ${
+                    keyField.error
+                      ? "border border-destructive focus-visible:ring-destructive/30"
+                      : "border border-input focus-visible:ring-ring"
+                  }`}
                   placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
                   value={form.key}
                   onChange={(e) => setForm({ ...form, key: e.target.value })}
+                  onBlur={() => keyField.setTouched(true)}
                 />
+                {keyField.error && (
+                  <p className="flex items-center gap-1 text-xs text-destructive">
+                    <XCircle className="h-3 w-3 shrink-0" />
+                    {keyField.error}
+                  </p>
+                )}
               </div>
             ) : (
               <div className="space-y-1.5">
-                <Label>{t("password")}</Label>
+                <label className="text-sm font-medium">{t("password")}</label>
                 <Input
                   type="password"
                   value={form.password}
@@ -298,7 +364,115 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               {tCommon("cancel")}
             </Button>
-            <Button onClick={submit} disabled={saving}>
+            <Button onClick={submit} disabled={saving || !isAddValid}>
+              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
+              {tCommon("save")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingNode} onOpenChange={(o) => !o && setEditingNode(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{tCommon("edit")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormInput
+                label={t("name")}
+                value={editForm.name}
+                onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
+                onBlur={() => editNameField.setTouched(true)}
+                error={editNameField.error}
+                required
+              />
+              <FormSelect
+                label={t("type")}
+                value={editForm.type}
+                onValueChange={(v) => setEditForm({ ...editForm, type: v as "IRAN" | "FOREIGN" })}
+                required
+                valid={!!editForm.type}
+              >
+                <SelectItem value="IRAN">{t("iran")}</SelectItem>
+                <SelectItem value="FOREIGN">{t("foreign")}</SelectItem>
+              </FormSelect>
+            </div>
+            <FormInput
+              label={t("host")}
+              value={editForm.host}
+              onChange={(e) => setEditForm({ ...editForm, host: e.target.value })}
+              onBlur={() => editHostField.setTouched(true)}
+              placeholder="203.0.113.10"
+              error={editHostField.error}
+              required
+            />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <FormInput
+                label={t("sshPort")}
+                type="number"
+                value={editForm.port}
+                onChange={(e) => setEditForm({ ...editForm, port: Number(e.target.value) })}
+              />
+              <FormInput
+                label={t("username")}
+                value={editForm.username}
+                onChange={(e) => setEditForm({ ...editForm, username: e.target.value })}
+                onBlur={() => editUsernameField.setTouched(true)}
+                error={editUsernameField.error}
+                required
+              />
+            </div>
+            <FormSelect
+              label={t("authMethod")}
+              value={editForm.authMethod}
+              onValueChange={(v) => setEditForm({ ...editForm, authMethod: v })}
+              required
+              valid={!!editForm.authMethod}
+            >
+              <SelectItem value="key">{t("key")}</SelectItem>
+              <SelectItem value="password">{t("password")}</SelectItem>
+            </FormSelect>
+            {editForm.authMethod === "key" ? (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">
+                  {t("key")}
+                  <span className="ml-0.5 text-destructive">*</span>
+                </label>
+                <textarea
+                  className={`min-h-20 w-full rounded-md bg-transparent px-3 py-2 font-mono text-xs shadow-sm transition-all duration-200 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 ${
+                    editKeyField.error
+                      ? "border border-destructive focus-visible:ring-destructive/30"
+                      : "border border-input focus-visible:ring-ring"
+                  }`}
+                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                  value={editForm.key}
+                  onChange={(e) => setEditForm({ ...editForm, key: e.target.value })}
+                  onBlur={() => editKeyField.setTouched(true)}
+                />
+                {editKeyField.error && (
+                  <p className="flex items-center gap-1 text-xs text-destructive">
+                    <XCircle className="h-3 w-3 shrink-0" />
+                    {editKeyField.error}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">{t("password")}</label>
+                <Input
+                  type="password"
+                  value={editForm.password}
+                  onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
+                />
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditingNode(null)}>
+              {tCommon("cancel")}
+            </Button>
+            <Button onClick={editSubmit} disabled={saving || !isEditValid}>
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               {tCommon("save")}
             </Button>

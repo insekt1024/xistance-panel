@@ -18,7 +18,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
-  const existing = await prisma.portForward.findUnique({ where: { id } });
+  const existing = await prisma.portForward.findUnique({ where: { id }, select: { userId: true, name: true } });
   if (!existing) return apiError("Rule not found", 404);
   if (auth.user.role === "USER" && existing.userId !== auth.user.id) {
     return apiError("Forbidden", 403);
@@ -39,7 +39,7 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
-  const existing = await prisma.portForward.findUnique({ where: { id } });
+  const existing = await prisma.portForward.findUnique({ where: { id }, select: { userId: true, name: true } });
   if (!existing) return apiError("Rule not found", 404);
   if (auth.user.role === "USER" && existing.userId !== auth.user.id) {
     return apiError("Forbidden", 403);

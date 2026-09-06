@@ -89,10 +89,14 @@ const SESSION_CACHE_TTL = 3_000;
 const MAX_CACHE_ITEMS = 2_000;
 const sessionCache = new Map<string, { at: number; user: SafeUser | null }>();
 
+let lastGcAt = 0;
+const GC_INTERVAL_MS = 60_000;
+
 function cacheSession(token: string, user: SafeUser | null): void {
   sessionCache.set(token, { at: Date.now(), user });
-  if (sessionCache.size > MAX_CACHE_ITEMS) {
-    const now = Date.now();
+  const now = Date.now();
+  if (sessionCache.size > MAX_CACHE_ITEMS && now - lastGcAt >= GC_INTERVAL_MS) {
+    lastGcAt = now;
     for (const [k, v] of sessionCache) {
       if (now - v.at >= SESSION_CACHE_TTL) sessionCache.delete(k);
     }
@@ -140,6 +144,7 @@ export async function refreshSession(): Promise<SafeUser | null> {  const store 
       revokedAt: null,
       expiresAt: { gt: new Date() },
     },
+    select: { id: true, userId: true },
   });
   if (!session) return null;
   const user = await prisma.user.findUnique({

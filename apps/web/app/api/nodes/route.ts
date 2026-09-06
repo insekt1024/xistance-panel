@@ -3,17 +3,36 @@ import { prisma } from "@xistance/db";
 import { encryptSecret } from "@xistance/tunnel-core";
 import { NodeConfigSchema } from "@xistance/types";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
+import { clearNodeCache } from "@/lib/forward-supervisor";
 import { redactNode } from "@/lib/tunnels";
 
 const nodeCreateSchema = NodeConfigSchema.extend({
   apiToken: z.string().optional(),
 });
 
+const LIST_LIMIT = 50;
+
 export async function GET(request: Request) {
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
-  const nodes = await prisma.node.findMany({ orderBy: { createdAt: "desc" } });
-  return json({ nodes: nodes.map(redactNode) });
+  const { searchParams } = new URL(request.url);
+  const cursor = searchParams.get("cursor") ? { id: searchParams.get("cursor")! } : undefined;
+  const limit = Math.min(Number(searchParams.get("limit")) || LIST_LIMIT, 100);
+  const nodes = await prisma.node.findMany({
+    orderBy: { createdAt: "desc" },
+    take: limit,
+    cursor,
+    select: {
+      id: true, name: true, type: true, host: true, sshPort: true,
+      sshUser: true, authMethod: true, sshKeyEncrypted: true,
+      sshPasswordEnc: true, apiTokenEncrypted: true,
+      status: true, lastSeen: true, health: true, createdAt: true, updatedAt: true,
+    },
+  });
+  const hasNext = nodes.length === limit;
+  const nextCursor = hasNext ? nodes[nodes.length - 1].id : null;
+  const data = nodes.map(redactNode);
+  return json({ nodes: data, hasNext, nextCursor });
 }
 
 export async function POST(request: Request) {
@@ -25,6 +44,7 @@ export async function POST(request: Request) {
 
   const existing = await prisma.node.findUnique({
     where: { name_type: { name: data.name, type: data.type } },
+    select: { id: true },
   });
   if (existing) return apiError("A node with this name and type already exists", 409);
 
@@ -42,5 +62,6 @@ export async function POST(request: Request) {
     },
   });
   await auditLog(auth.user.id, "node.create", node.id, node.name, getClientIp(request));
+  clearNodeCache();
   return json({ node: redactNode(node) }, 201);
 }

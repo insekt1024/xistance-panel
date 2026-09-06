@@ -14,7 +14,12 @@ export default async function AppLayout({
   return (
     <div className="flex min-h-screen flex-col">
       <Navbar userName={user.name} userEmail={user.email} />
-      <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">{children}</main>
+      <main
+        key="page-content"
+        className="animate-fade-in mx-auto w-full max-w-7xl flex-1 px-4 py-6"
+      >
+        {children}
+      </main>
       <footer className="border-t py-4 text-center text-xs text-muted-foreground">
         <a
           href={APP_REPO_URL}

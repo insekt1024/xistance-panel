@@ -15,7 +15,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
   const auth = await requireSession(request, "ADMIN");
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
-  const existing = await prisma.user.findUnique({ where: { id } });
+  const existing = await prisma.user.findUnique({ where: { id }, select: { role: true, email: true } });
   if (!existing) return apiError("User not found", 404);
 
   const body = await parseBody(request, userUpdateSchema);
@@ -37,6 +37,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
       active: data.active,
       passwordHash: data.password ? hashPassword(data.password) : undefined,
     },
+    select: { id: true, email: true },
   });
   await auditLog(auth.user.id, "user.update", id, user.email, getClientIp(request));
   return json({ user: { id: user.id, email: user.email } });
@@ -47,7 +48,7 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
   if (id === auth.user.id) return apiError("You cannot delete yourself", 400);
-  const existing = await prisma.user.findUnique({ where: { id } });
+  const existing = await prisma.user.findUnique({ where: { id }, select: { email: true } });
   if (!existing) return apiError("User not found", 404);
   await prisma.user.delete({ where: { id } });
   await auditLog(auth.user.id, "user.delete", id, existing.email, getClientIp(request));

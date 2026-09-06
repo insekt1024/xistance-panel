@@ -1,7 +1,8 @@
 import net from "node:net";
 import { z } from "zod";
 import { LocalRunner } from "@xistance/tunnel-core";
-import { json, parseBody, requireSession } from "@/lib/api";
+import { apiError, json, parseBody, requireSession } from "@/lib/api";
+import { rateLimit } from "@/lib/rate-limit";
 
 const toolSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tcp"), host: z.string().min(1), port: z.number().int().min(1).max(65535) }),
@@ -44,6 +45,9 @@ const runner = new LocalRunner();
 export async function POST(request: Request) {
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
+  // Probes can hold sockets for up to 12s; cap per-user usage.
+  const rl = rateLimit(`tools:${auth.user.id}`, 20, 60_000);
+  if (!rl.ok) return apiError("Too many tool requests, try again shortly", 429);
   const body = await parseBody(request, toolSchema);
   if (!body.ok) return body.response;
   const data = body.data;
@@ -61,7 +65,8 @@ export async function POST(request: Request) {
           signal: AbortSignal.timeout(12_000),
         });
         const ms = Date.now() - started;
-        await resp.arrayBuffer();
+        // Cancel body download — we only need status/timing, not content.
+        resp.body?.cancel();
         return json({ ok: true, result: { http: { status: resp.status, ms, ok: resp.ok } } });
       } catch {
         return json({ ok: true, result: { http: { status: 0, ms: Date.now() - started, ok: false } } });
@@ -83,10 +88,9 @@ export async function POST(request: Request) {
       return json({ ok: true, result: { dns: { ips, available: res.exitCode === 0 } } });
     }
     case "censorship": {
-      const results = [];
-      for (const ep of CENSORED_ENDPOINTS) {
-        results.push({ host: ep.host, port: ep.port, ...(await tcpProbe(ep.host, ep.port)) });
-      }
+      const results = await Promise.all(
+        CENSORED_ENDPOINTS.map((ep) => tcpProbe(ep.host, ep.port).then((r) => ({ host: ep.host, port: ep.port, ...r }))),
+      );
       const blocked = results.filter((r) => !r.ok).length;
       return json({
         ok: true,

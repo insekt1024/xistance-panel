@@ -121,7 +121,7 @@ export function PortForwardView({ rules }: { rules: ForwardRow[] }) {
       </div>
 
       {rules.length === 0 ? (
-        <Card className="p-10 text-center text-muted-foreground">{t("empty")}</Card>
+        <Card className="animate-fade-in border-dashed p-10 text-center text-muted-foreground">{t("empty")}</Card>
       ) : (
         <Table>
           <TableHeader>
@@ -137,8 +137,8 @@ export function PortForwardView({ rules }: { rules: ForwardRow[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rules.map((r) => (
-              <TableRow key={r.id}>
+            {rules.map((r, i) => (
+              <TableRow key={r.id} className="animate-fade-in-up" style={{ "--stagger": Math.min(i, 10) } as React.CSSProperties}>
                 <TableCell className="font-medium">{r.name}</TableCell>
                 <TableCell>
                   {r.direction === "IRAN_TO_FOREIGN" ? t("iranToForeign") : t("foreignToIran")}

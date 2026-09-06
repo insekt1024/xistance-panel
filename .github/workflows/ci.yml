@@ -10,11 +10,18 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  # Turbopack chokes on tunnels/bin/gost (os error 22); always build without it.
+  TURBO_DISABLE: "true"
+
 jobs:
-  lint-typecheck-build:
-    name: Lint · Typecheck · Build
+  verify:
+    name: Lint · Typecheck · Version · Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,14 +38,45 @@ jobs:
       - name: Build packages (incl. Prisma client)
         run: npm run build:packages
 
+      - name: Version files in sync
+        run: npm run version:check
+
       - name: Lint
         run: npm run lint
 
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Optimization tests (temp SQLite DB)
+        run: npx tsx scripts/test-optimizations.ts
+
+      - name: Dependency audit (high+, non-blocking)
+        run: npm audit --omit=dev --audit-level=high
+        continue-on-error: true
+
+  build:
+    name: Build + Docker
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: verify
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
       - name: Build
         run: npm run build
+
+      - name: Validate Dockerfile
+        run: docker build -t xistance-panel:ci .
 
       - name: Upload standalone build
         if: github.event_name == 'push'
