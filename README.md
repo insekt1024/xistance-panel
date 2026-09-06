@@ -84,6 +84,8 @@ What the installer does:
   systemd, connectivity), then installs OS deps (`curl unzip jq sqlite3
   openssh-client sshpass tar gnupg systemd ufw openssl iproute2`), Node ≥ 22,
   and `backhaul` / `frp` / `gost` binaries into `/var/lib/xistance/bin`.
+  Hosts with < 1.5G RAM automatically get a 2G `/swapfile` (skippable with
+  `--no-swap`) so `npm ci` / the Next.js build don't OOM.
 - Writes config to `/etc/xistance/xistance.env` (auto-generated `XTENC_KEY`
   and `JWT_SECRET`, mode 600; re-runs keep secrets and update the port).
 - Builds the panel with `npm ci && npm run build` (`TURBO_DISABLE=true`) and
@@ -111,6 +113,7 @@ Options:
 | `--menu` | Interactive process-control menu (install/update/status/logs/rollback/…) |
 | `--status` | Show service + health status and exit |
 | `--skip-firewall` | Don't touch ufw |
+| `--no-swap` | Don't auto-provision a swapfile on low-RAM hosts |
 | `--rollback` | Restore the previous version before this install (if a backup exists) |
 | `--allow-os` | Allow untested OS versions |
 | `--yes` | Non-interactive (no prompts) |

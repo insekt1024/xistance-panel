@@ -21,7 +21,7 @@
 #   sudo bash scripts/install.sh --status                         # service + health status
 #
 # Steps (recorded in $DATA_DIR/.install-state, skipped when already done):
-#   preflight → deps → node → binaries → env → build → deploy → db → systemd → firewall → verify
+#   preflight → deps → node → swap → binaries → env → build → deploy → db → systemd → firewall → verify
 #
 # Environment overrides (all optional, CLI flags win):
 #   XT_ADMIN_EMAIL, XT_ADMIN_PASSWORD, XT_PORT, XT_DATA_DIR, XT_BIN_DIR,
@@ -55,6 +55,7 @@ SKIP_FIREWALL=0
 ROLLBACK=0
 NONINTERACTIVE=0
 ALLOW_OS=0
+NO_SWAP=0
 REDO=0
 NO_RESUME=0
 FROM_STEP=""
@@ -70,7 +71,7 @@ FRP_VERSION="${FRP_VERSION:-}"
 GOST_VERSION="${GOST_VERSION:-}"
 MIRROR="${XT_MIRROR:-https://github.com}"
 
-STEPS=(preflight deps node binaries env build deploy db systemd firewall verify)
+STEPS=(preflight deps node swap binaries env build deploy db systemd firewall verify)
 
 # ---------------------------------------------------------------------------
 # Colours / output helpers (bilingual: English + فارسی)
@@ -117,10 +118,11 @@ Usage: sudo bash scripts/install.sh [options]
   --lang <en|fa>         Message language for prompts (default: en)
   --node <iran|foreign>  Install only tunnel binaries for a remote node
   --skip-firewall        Do not open firewall ports
+  --no-swap              Do not auto-provision a swapfile on low-RAM hosts
   --resume               Resume: skip steps already done (default behaviour)
   --no-resume            Re-run every step from scratch
   --redo                 Force re-run of completed steps
-  --from <STEP>          Start from STEP (preflight|deps|node|binaries|env|build|deploy|db|systemd|firewall|verify)
+  --from <STEP>          Start from STEP (preflight|deps|node|swap|binaries|env|build|deploy|db|systemd|firewall|verify)
   --only <STEP>          Run only STEP and exit
   --menu                 Interactive process-control menu
   --status               Show service + health status and exit
@@ -153,6 +155,7 @@ while [[ $# -gt 0 ]]; do
     --lang=*) LANG_PREF="${1#*=}"; shift;;
     --node) MODE="${2:-}"; shift 2;;
     --skip-firewall) SKIP_FIREWALL=1; shift;;
+    --no-swap) NO_SWAP=1; shift;;
     --resume) NO_RESUME=0; shift;;
     --no-resume) NO_RESUME=1; shift;;
     --redo) REDO=1; shift;;
@@ -397,6 +400,48 @@ ensure_node() {
     || die "Node.js install failed." "نصب Node.js ناموفق بود."
   node -v | grep -q '^v2[2-9]' || die "Node.js install failed." "نصب Node.js ناموفق بود."
   ok "Node.js $(node -v) installed." "Node.js $(node -v) نصب شد."
+}
+
+# ---------------------------------------------------------------------------
+# Swap (low-RAM hosts: npm ci + next build need headroom)
+# ---------------------------------------------------------------------------
+ensure_swap() {
+  if [[ "$NO_SWAP" -eq 1 ]]; then
+    note "Swap provisioning skipped (--no-swap)."
+    return 0
+  fi
+  local mem_kb swap_kb
+  mem_kb="$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+  swap_kb="$(awk '/SwapTotal/{print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+  if (( mem_kb >= 1572864 )) || (( swap_kb >= 1048576 )); then
+    note "Memory OK ($((mem_kb/1024))M RAM, $((swap_kb/1024))M swap); no swapfile needed."
+    return 0
+  fi
+  local swapfile="/swapfile"
+  if swapon --show=NAME 2>/dev/null | grep -qx "$swapfile"; then
+    ok "Swapfile already active." "سواپ فعال است."
+    return 0
+  fi
+  info "Low RAM ($((mem_kb/1024))M); provisioning 2G swapfile…" "رم کم است؛ ساخت سواپ…"
+  local free_kb
+  free_kb="$(df -k / 2>/dev/null | awk 'NR==2{print $4}')"
+  if [[ -n "$free_kb" ]] && (( free_kb < 2621440 )); then
+    warn "Not enough free disk for a 2G swapfile; continuing without swap (build may OOM)." \
+         "فضای کافی برای سواپ نیست."
+    return 0
+  fi
+  if fallocate -l 2G "$swapfile" 2>/dev/null || dd if=/dev/zero of="$swapfile" bs=1M count=2048 status=none 2>/dev/null; then
+    chmod 600 "$swapfile"
+    if mkswap "$swapfile" >/dev/null 2>&1 && swapon "$swapfile" 2>/dev/null; then
+      grep -qx "$swapfile none swap sw 0 0" /etc/fstab 2>/dev/null || echo "$swapfile none swap sw 0 0" >>/etc/fstab
+      ok "Swap active: $(free -m | awk '/Swap/{print $2}')M total." "سواپ فعال شد."
+      return 0
+    fi
+    rm -f "$swapfile"
+  fi
+  warn "Could not enable swap (restricted environment?); continuing — build may OOM." \
+       "فعال‌سازی سواپ ممکن نشد."
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -748,6 +793,7 @@ step_func() { # <step> -> function name
     preflight) echo preflight;;
     deps) echo install_deps;;
     node) echo ensure_node;;
+    swap) echo ensure_swap;;
     binaries) echo install_binaries;;
     env) echo write_env;;
     build) echo build_panel;;
