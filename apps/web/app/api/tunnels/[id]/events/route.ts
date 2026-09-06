@@ -1,5 +1,6 @@
+import { prisma } from "@xistance/db";
 import { getEngine } from "@/lib/engine";
-import { requireSession } from "@/lib/api";
+import { apiError, requireSession } from "@/lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,9 +11,17 @@ export async function GET(
   ctx: { params: Promise<{ id: string }> },
 ) {
   const auth = await requireSession(request);
-  if (!auth.ok) return new Response(auth.response.body, { status: auth.response.status });
+  if (!auth.ok) return auth.response;
 
   const { id } = await ctx.params;
+  const tunnel = await prisma.tunnel.findUnique({
+    where: { id },
+    select: { ownerId: true },
+  });
+  if (!tunnel) return apiError("Tunnel not found", 404);
+  if (auth.user.role === "USER" && tunnel.ownerId !== auth.user.id) {
+    return apiError("Forbidden", 403);
+  }
   const engine = getEngine();
   const encoder = new TextEncoder();
 

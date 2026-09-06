@@ -22,10 +22,23 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const cursor = searchParams.get("cursor") ? { id: searchParams.get("cursor")! } : undefined;
   const limit = Math.min(Number(searchParams.get("limit")) || LIST_LIMIT, 100);
+  const where = auth.user.role === "USER" ? { userId: auth.user.id } : undefined;
   const portForwards = await prisma.portForward.findMany({
+    where,
     orderBy: { createdAt: "desc" },
     take: limit,
     cursor,
+    select: {
+      id: true,
+      name: true,
+      direction: true,
+      protocol: true,
+      sourcePort: true,
+      destHost: true,
+      destPort: true,
+      enabled: true,
+      status: true,
+    },
   });
   const hasNext = portForwards.length === limit;
   const nextCursor = hasNext ? portForwards[portForwards.length - 1].id : null;

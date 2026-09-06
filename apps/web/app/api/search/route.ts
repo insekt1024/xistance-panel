@@ -14,14 +14,12 @@ export async function GET(request: Request) {
     return json({ tunnels: [], nodes: [], users: [] });
   }
 
-  const like = `%${q}%`;
-
   const isUser = auth.user.role === "ADMIN" || auth.user.role === "SUPER_ADMIN";
 
   const [tunnels, nodes, users] = await Promise.all([
     prisma.tunnel.findMany({
       where: {
-        name: { contains: like },
+        name: { contains: q },
         ...(auth.user.role === "USER"
           ? { OR: [{ ownerId: auth.user.id }, { ownerId: null }] }
           : {}),
@@ -36,7 +34,7 @@ export async function GET(request: Request) {
       orderBy: { name: "asc" },
     }),
     prisma.node.findMany({
-      where: { name: { contains: like } },
+      where: { name: { contains: q } },
       take: MAX_PER_TYPE,
       select: {
         id: true,
@@ -51,8 +49,8 @@ export async function GET(request: Request) {
       ? prisma.user.findMany({
           where: {
             OR: [
-              { email: { contains: like } },
-              { name: { contains: like } },
+              { email: { contains: q } },
+              { name: { contains: q } },
             ],
           },
           take: MAX_PER_TYPE,
