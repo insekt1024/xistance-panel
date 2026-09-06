@@ -18,7 +18,7 @@
     "version:bump": "node scripts/version.mjs"
   },
   "devDependencies": {
-    "@types/node": "^20",
+    "@types/node": "^26",
     "eslint": "^9",
     "typescript": "^5"
   },
