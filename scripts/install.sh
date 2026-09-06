@@ -711,6 +711,11 @@ verify_installation() {
 # Status
 # ---------------------------------------------------------------------------
 show_status() {
+  # Read the installed port (CLI default 8080 is wrong for custom installs).
+  if [[ -f "$ENV_FILE" ]]; then
+    set -a; . "$ENV_FILE"; set +a
+    [[ -n "${PORT:-}" ]] && PANEL_PORT="$PORT"
+  fi
   say ""
   say "  Xistance Panel — status / وضعیت"
   printf '  Service : %s\n' "$(systemctl is-active xistance.service 2>/dev/null || echo "unknown (no systemd?)")"
