@@ -41,9 +41,10 @@ if systemctl list-unit-files | grep -q '^xistance\.service'; then
   printf '%s✓  Service removed.%s\n' "$C_GRN" "$C_RST"
 fi
 
-# Stop any panel-managed tunnel units
+# Stop any panel-managed tunnel units (the `|| true` keeps `set -o pipefail`
+# from aborting when no xt-tunnel units exist).
 if command -v systemctl >/dev/null; then
-  systemctl list-unit-files | grep -E '^xt-tunnel-.*\.service' \
+  systemctl list-unit-files 2>/dev/null | { grep -E '^xt-tunnel-.*\.service' || true; } \
     | awk '{print $1}' | while read -r u; do
       systemctl stop "$u" 2>/dev/null || true
       systemctl disable "$u" 2>/dev/null || true
