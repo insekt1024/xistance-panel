@@ -80,7 +80,7 @@ jobs:
 
       - name: Upload standalone build
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: xistance-standalone
           path: apps/web/.next/standalone
