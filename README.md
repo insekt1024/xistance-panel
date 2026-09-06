@@ -1,22 +1,61 @@
-# Xistance Panel
+<p align="center">
+  <img src="docs/xistance-logo.svg" alt="Xistance Panel logo" width="128" />
+</p>
 
-Self-hosted control panel for managing cross-border tunnel servers —
-**Backhaul**, **FRP**, **GOST**, and **SSH** port forwards — with a bilingual
-(English / فارسی) web UI. Built with Next.js 16, React 19, and a shared
-TypeScript core that drives real processes over systemd (or child processes in
-dev).
+<h1 align="center">Xistance Panel</h1>
 
-پنل مدیریت سرویس‌های تانل (بک‌هال، FRP، GOST و SSH) با رابط کاربری دوزبانه
-(فارسی / انگلیسی) و پشتیبانی از کنترل کامل نودهای ایران و خارج.
+<p align="center">
+  Self-hosted control panel for managing cross-border tunnel servers —
+  <strong>Backhaul</strong>, <strong>FRP</strong>, <strong>GOST</strong>, and
+  <strong>SSH</strong> port forwards — with a bilingual (English / فارسی) web UI.
+</p>
+
+<p align="center">
+  <a href="https://github.com/insekt1024/xistance-panel/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/insekt1024/xistance-panel/actions/workflows/ci.yml/badge.svg" /></a>
+  <a href="https://github.com/insekt1024/xistance-panel/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/insekt1024/xistance-panel" /></a>
+  <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-black" />
+  <img alt="Prisma" src="https://img.shields.io/badge/Prisma-6-2D3748" />
+</p>
+
+<p align="center">
+  پنل مدیریت سرویس‌های تانل (بک‌هال، FRP، GOST و SSH) با رابط کاربری دوزبانه
+  (فارسی / انگلیسی) و پشتیبانی از کنترل کامل نودهای ایران و خارج.
+</p>
+
+## Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Quick start (development)](#quick-start-development)
+- [Install on a server](#install-on-a-server-ubuntu-2204--2404)
+- [Running the production build manually](#running-the-production-build-manually)
+- [Example configs](#example-configs)
+- [Commands](#commands)
+- [Versioning](#versioning)
+- [CI/CD](#cicd)
 
 ## Features
 
-- **Tunnels** — Backhaul, FRP, GOST and SSH port forwards; TCP & UDP; per-node roles (Iran / Foreign).
-- **Nodes** — register Foreign nodes, run the bundled installer remotely, and track status/traffic.
+- **Dashboard** — tunnel/node status at a glance, traffic chart with range
+  selector (1h–7d), live health + connection indicators.
+- **Tunnels** — Backhaul, FRP, GOST and SSH relays; TCP & UDP; per-node roles
+  (Iran / Foreign); live logs with search/filter, batch start/stop/restart,
+  JSON import/export.
+- **Nodes** — register Iran/Foreign servers, test SSH connectivity, track
+  status/traffic; one-liner prep script for remote VPS bootstrapping.
 - **Port forwarding** — quick relay rules (local forwarder, node-based).
-- **Tools** — privacy helpers (backup/restore, secrets, network info) and the bundled xistence CLI bridge.
+- **Test tools** — TCP / latency / DNS / censorship probes with rate limiting.
+- **Audit log + user activity** — every mutating action is logged with actor,
+  target and IP; browsable per-user activity page.
+- **Users & roles** — `SUPER_ADMIN` / `ADMIN` / `USER`, per-user tunnel quotas,
+  session management with password-change revocation.
+- **Webhooks** — Telegram/Discord notifications for tunnel and node events.
+- **Settings** — encrypted backup/restore, password change, theme, API docs
+  (`/api/docs`) and Prometheus-friendly metrics (`/api/metrics`).
 - **Bilingual UI** — `en` and `fa` locales with RTL layout.
-- **Traffic & status** — live line logs, bytes read/written per process, systemd or child-process lifecycle.
+- **Power-user UX** — global search (`Ctrl+K`), keyboard shortcuts (`?` for
+  help), dark mode, mobile card layouts, staggered motion (reduced-motion
+  aware).
 
 ## Architecture
 
@@ -26,14 +65,19 @@ packages/i18n         en / fa message catalogs
 packages/tunnel-core  engine + config builders (TOML / command lines) + process management
 packages/db           Prisma schema, seed (admin user), SQLite by default / Postgres optional
 packages/types        shared TypeScript types
-scripts/              install.sh, update.sh, backup.sh, uninstall.sh
+scripts/              bootstrap.sh, install.sh, update.sh, backup.sh, uninstall.sh
+docs/                 xistance-logo.svg and project docs
 tunnels/              runtime data dir (binaries, configs, logs, dev.db)
+Dockerfile            multi-stage build with /api/health healthcheck
 ```
 
 `DATABASE_URL` defaults to a SQLite file at `$XT_DATA_DIR/xistance.db` (falls
 back to `.data/` in the repo). To use Postgres instead, see
 `docker/docker-compose.postgres.yml` and the note in
 `packages/db/prisma/schema.prisma`.
+
+Built with Next.js 16, React 19, and a shared TypeScript core that drives real
+processes over systemd (or child processes in dev).
 
 ## Quick start (development)
 
@@ -49,7 +93,12 @@ Dev server: `http://localhost:3000` (default admin `admin@xistance.local` /
 
 On a machine without systemd (e.g. WSL) the engine runs tunnel processes as
 plain child processes; on a Linux VPS it manages systemd units
-(`xt-tunnel-<id>.service`) automatically.
+(`xt-tunnel-<id>.service`) automatically. Set `XT_FORCE_NODE=true` in dev to
+force child processes.
+
+> **Build quirk:** Turbopack chokes on the `tunnels/bin/gost` binary
+> (`Invalid argument (os error 22)`), so always build with
+> `TURBO_DISABLE=true npm run build`.
 
 ## Install on a server (Ubuntu 22.04 / 24.04)
 
@@ -139,6 +188,13 @@ XTENC_KEY=... JWT_SECRET=... PORT=3000 HOSTNAME=0.0.0.0 \
 node apps/web/.next/standalone/apps/web/server.js
 ```
 
+Or via Docker (healthcheck hits `/api/health`):
+
+```bash
+docker build -t xistance-panel .
+docker run -p 3000:3000 --env-file /etc/xistance/xistance.env xistance-panel
+```
+
 ## Example configs
 
 Working TOML / command examples for each relay live in `tunnels/examples/`
@@ -147,19 +203,23 @@ Working TOML / command examples for each relay live in `tunnels/examples/`
 
 ## Commands
 
-- `npm run dev` — dev server
-- `npm run build` — production build (runs typecheck)
+- `npm run dev` — dev server (builds packages first)
+- `npm run build` — production build (set `TURBO_DISABLE=true`, see above)
 - `npm run lint` — ESLint
-- `npm run typecheck` — TypeScript only
+- `npm run typecheck` — TypeScript across all packages + app
+- `npm run version:show` / `version:check` / `version:bump -- patch` — version tools
+- `TURBO_DISABLE=true npx tsx scripts/test-optimizations.ts` — 31 dynamic DB tests
 
 ## Versioning
 
 The panel version is shown in the footer (`Xistance Panel vX.Y.Z`, linking to the
 GitHub repo) and is kept in sync across `package.json` files and
-`apps/web/src/lib/version.ts` by `scripts/version.mjs`:
+`apps/web/src/lib/version.ts` by `scripts/version.mjs` — never edit
+`version.ts` by hand:
 
 ```bash
 npm run version:show                 # print current version
+npm run version:check                # fail if any version file drifted
 npm run version:bump -- patch        # bump patch -> 1.0.1
 npm run version:bump -- minor        # 1.1.0
 npm run version:bump -- major        # 2.0.0
@@ -169,12 +229,15 @@ node scripts/version.mjs patch --commit  # bump + git commit + tag vX.Y.Z
 
 ## CI/CD
 
-- **`.github/workflows/ci.yml`** — runs `lint`, `typecheck` and `build` on every
-  push/PR to `master`/`main`; uploads the standalone build as an artifact on push.
-- **`.github/workflows/release.yml`** — manual `workflow_dispatch` that takes
-  `patch`/`minor`/`major`, bumps the version, commits + tags `vX.Y.Z`, rebuilds,
-  packages the standalone + static bundles, and creates a GitHub Release with
-  auto-generated notes.
+- **CI** (`ci.yml`, `TURBO_DISABLE=true`): `verify` job (`version:check` →
+  lint → typecheck → 31 optimization tests → non-blocking audit), then `build`
+  job (`next build` + `docker build` validation). Standalone artifact uploaded
+  on push.
+- **Release** (`release.yml`, `workflow_dispatch` with `patch|minor|major` +
+  `dry-run`): bumps the version (commit + tag stay local) → full verify +
+  build → pushes commit + tag only if green → GitHub Release with tarballs
+  and auto-generated notes → Docker image to GHCR (`:vX.Y.Z` + `:latest`).
+- **Dependabot** watches npm, GitHub Actions and Docker weekly.
 
-Push the repo to `https://github.com/insektdotbin/xistance-panel` to activate the
+Clone from `https://github.com/insekt1024/xistance-panel` to activate the
 workflows.
