@@ -415,7 +415,9 @@ latest_release() { # repo -> version tag (tag_name), "unknown" when unreachable
 fetch_and_extract() { # url asset-name dst-dir bin-names...
   local url="$1" asset="$2" dst="$3"; shift 3
   local tmp; tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' RETURN
+  # NOTE: expand $tmp now — a single-quoted trap would see the local as
+  # unbound when it fires on RETURN under `set -u`.
+  trap "rm -rf '${tmp}'" RETURN
   curl -fL --retry 3 --connect-timeout 15 -o "$tmp/$asset" "$url" || return 1
   case "$asset" in
     *.tar.gz|*.tgz) tar -xzf "$tmp/$asset" -C "$tmp" || return 1;;
