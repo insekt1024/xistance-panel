@@ -31,7 +31,10 @@ say ""
 say "  Xistance Panel — uninstall / حذف نصب"
 say ""
 
-if systemctl list-unit-files | grep -q '^xistance\.service'; then
+# NOTE: no `systemctl list-unit-files | grep -q` here — under `set -o pipefail`
+# grep -q exits on first match, the producer gets SIGPIPE (141), and the
+# condition is always false. `systemctl cat` is a single command: no pipe.
+if systemctl cat xistance.service >/dev/null 2>&1 || [[ -f /etc/systemd/system/xistance.service ]]; then
   printf '%sStopping xistance.service…%s\n' "$C_YEL" "$C_RST"
   systemctl stop xistance.service 2>/dev/null || true
   systemctl disable xistance.service 2>/dev/null || true

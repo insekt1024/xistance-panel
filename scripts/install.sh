@@ -86,10 +86,20 @@ warn()  { printf '%s⚠ %s%s\n' "$C_YEL" "$1" "$C_RST"; printf '   %s\n' "$2"; l
 die()   { printf '%s✗ %s%s\n' "$C_RED" "$1" "$C_RST" >&2; printf '   %s\n' "$2" >&2; log "FATAL: $1"; exit 1; }
 log()   { [[ -n "${LOG_FILE:-}" ]] && printf '[%s] %s\n' "$(date '+%F %T')" "$1" >>"$LOG_FILE" 2>/dev/null || true; }
 
+# Read package.json version with bash (no grep -m | pipe: SIGPIPE-prone).
+pkg_version() { # -> version or "unknown"
+  local src
+  [[ -f "$REPO_ROOT/package.json" ]] || { echo "unknown"; return; }
+  src="$(<"$REPO_ROOT/package.json")"
+  if [[ "$src" =~ \"version\":[[:space:]]*\"([^\"]+)\" ]]; then
+    echo "${BASH_REMATCH[1]}"
+  else
+    echo "unknown"
+  fi
+}
+
 banner() {
-  local ver="unknown"
-  [[ -f "$REPO_ROOT/package.json" ]] && \
-    ver="$(grep -m1 '"version"' "$REPO_ROOT/package.json" | sed 's/[^0-9.]//g')"
+  local ver; ver="$(pkg_version)"
   say ""
   printf '%s%s%s\n' "$C_CYN" '  __  __ ___ ____ _____  _    _   _  ____ _____ ' "$C_RST"
   printf '%s%s%s\n' "$C_CYN" '  \ \/ // __|_   _|_ _|/ \  | \ | |/ ___| ____|' "$C_RST"
@@ -194,7 +204,7 @@ fi
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ "$SHOW_VERSION" -eq 1 ]]; then
-  grep -m1 '"version"' "$REPO_ROOT/package.json" 2>/dev/null | sed 's/[^0-9.]//g' || echo "unknown"
+  pkg_version
   exit 0
 fi
 
@@ -382,10 +392,11 @@ install_deps() {
 # ---------------------------------------------------------------------------
 ensure_node() {
   if need_cmd node; then
-    local v major
+    # NOTE: no `node -v | grep -q` — under `set -o pipefail` grep -q can
+    # SIGPIPE the producer (exit 141) and misreport. Bash regex instead.
+    local v
     v="$(node -v | tr -d 'v')"
-    major="${v%%.*}"
-    if (( major >= NODE_MIN_MAJOR )); then
+    if [[ "$v" =~ ^([0-9]+) ]] && (( BASH_REMATCH[1] >= NODE_MIN_MAJOR )); then
       need_cmd npm || die "node exists but npm is missing." "npm یافت نشد."
       ok "Node.js $(node -v) detected." "Node.js $(node -v) یافت شد."
       return 0
@@ -398,7 +409,10 @@ ensure_node() {
     || die "NodeSource setup failed." "راه‌اندازی NodeSource ناموفق بود."
   apt-get install -y nodejs >/dev/null \
     || die "Node.js install failed." "نصب Node.js ناموفق بود."
-  node -v | grep -q '^v2[2-9]' || die "Node.js install failed." "نصب Node.js ناموفق بود."
+  local nv
+  nv="$(node -v | tr -d 'v')"
+  [[ "$nv" =~ ^([0-9]+) ]] && (( BASH_REMATCH[1] >= NODE_MIN_MAJOR )) \
+    || die "Node.js install failed." "نصب Node.js ناموفق بود."
   ok "Node.js $(node -v) installed." "Node.js $(node -v) نصب شد."
 }
 
@@ -451,10 +465,13 @@ ARCH="$(detect_arch)"
 GO_ARCH=$([[ "$ARCH" == "amd64" ]] && echo "amd64" || echo "arm64")
 
 latest_release() { # repo -> version tag (tag_name), "unknown" when unreachable
-  local tag
-  tag="$(curl -fsSL --connect-timeout 10 "https://api.github.com/repos/$1/releases/latest" 2>/dev/null \
-        | jq -r '.tag_name' 2>/dev/null)"
-  printf '%s' "${tag:-unknown}"
+  # NOTE: no curl|jq pipe — jq reads stdin to EOF so it is SIGPIPE-safe, but
+  # the herestring form also lets us distinguish empty/"null" (rate-limited).
+  local tag raw
+  raw="$(curl -fsSL --connect-timeout 10 "https://api.github.com/repos/$1/releases/latest" 2>/dev/null)"
+  tag="$(jq -r '.tag_name // "unknown"' <<<"$raw" 2>/dev/null)"
+  [[ -z "$tag" || "$tag" == "null" ]] && tag="unknown"
+  printf '%s' "$tag"
 }
 
 fetch_and_extract() { # url asset-name dst-dir bin-names...
