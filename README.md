@@ -51,36 +51,73 @@ On a machine without systemd (e.g. WSL) the engine runs tunnel processes as
 plain child processes; on a Linux VPS it manages systemd units
 (`xt-tunnel-<id>.service`) automatically.
 
-## Install on a server (Ubuntu / Debian)
+## Install on a server (Ubuntu 22.04 / 24.04)
+
+One-liner (downloads the installer, then runs it — flags, prompts and
+`--menu` all work because the script is saved to a file first, not piped):
 
 ```bash
-git clone <this-repo> && cd xistance-panel
-sudo bash scripts/install.sh                  # panel only
-sudo bash scripts/install.sh --node iran     # + Iran-node dependencies (backhaul client, frpc, gost)
-sudo bash scripts/install.sh --node foreign  # + Foreign-node dependencies (backhaul server, frps, gost)
+curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/master/scripts/bootstrap.sh \
+  -o /tmp/xp-install.sh && sudo bash /tmp/xp-install.sh \
+  --port 8080 --admin-email you@example.com
+```
+
+With a custom admin password (omit it and one is generated + printed):
+
+```bash
+sudo bash /tmp/xp-install.sh --port 8080 \
+  --admin-email you@example.com --admin-password 'S3cret!'
+```
+
+From a local checkout instead:
+
+```bash
+git clone https://github.com/insekt1024/xistance-panel.git && cd xistance-panel
+sudo bash scripts/install.sh --port 8080 --admin-email you@example.com
+sudo bash scripts/install.sh --menu        # process-control menu
+sudo bash scripts/install.sh --node iran   # remote-node binaries only
 ```
 
 What the installer does:
 
-- Installs OS deps (`curl unzip jq sqlite3 openssh-client sshpass tar gnupg systemd ufw`), Node ≥ 22, and pinned `backhaul` / `frp` / `gost` binaries into `/var/lib/xistance/bin` with checksum verification.
-- Writes config to `/etc/xistance/xistance.env` (auto-generated `XTENC_KEY` and `JWT_SECRET`, mode 600).
-- Builds the panel with `npm ci && npm run build` and deploys it to `/opt/xistance` (standalone output).
+- Preflight checks (root, arch, Ubuntu/Debian version, disk/RAM, port free,
+  systemd, connectivity), then installs OS deps (`curl unzip jq sqlite3
+  openssh-client sshpass tar gnupg systemd ufw openssl iproute2`), Node ≥ 22,
+  and `backhaul` / `frp` / `gost` binaries into `/var/lib/xistance/bin`.
+- Writes config to `/etc/xistance/xistance.env` (auto-generated `XTENC_KEY`
+  and `JWT_SECRET`, mode 600; re-runs keep secrets and update the port).
+- Builds the panel with `npm ci && npm run build` (`TURBO_DISABLE=true`) and
+  deploys it to `/opt/xistance` (standalone output).
 - Initializes the database and seeds the admin account.
 - Installs the `xistance.service` systemd unit and starts it.
 - Opens the panel port via `ufw` (skippable with `--skip-firewall`).
+- Verifies `/api/health` at the end.
+
+Resumable: every step is recorded in `/var/lib/xistance/.install-state`.
+If a step fails you get retry / skip / abort, and re-running the same command
+continues where it stopped (`--from <step>`, `--only <step>`, `--redo`,
+`--no-resume`). Full log at `/var/log/xistance-install.log`.
 
 Options:
 
 | Flag | Meaning |
 | --- | --- |
-| `--port 8080` | Panel listen port (default 8080) |
+| `--port 8080` | Panel listen port (default 8080, or `$XT_PORT`) |
+| `--admin-email`, `--admin-password` | Admin login (password generated + printed if omitted) |
+| `--data-dir`, `--install-dir` | Data / install dirs (defaults `/var/lib/xistance`, `/opt/xistance`) |
+| `--branch`, `--repo` | Checkout source (defaults `master`, this repo) |
+| `--lang en\|fa` | Prompt language (default `en`) |
+| `--node iran\|foreign` | Remote-node binaries only |
+| `--menu` | Interactive process-control menu (install/update/status/logs/rollback/…) |
+| `--status` | Show service + health status and exit |
 | `--skip-firewall` | Don't touch ufw |
 | `--rollback` | Restore the previous version before this install (if a backup exists) |
+| `--allow-os` | Allow untested OS versions |
 | `--yes` | Non-interactive (no prompts) |
 
 Env overrides: `XT_ADMIN_EMAIL`, `XT_ADMIN_PASSWORD`, `XT_PORT`, `XT_DATA_DIR`,
-`XT_BIN_DIR`, `XT_MIRROR`, `BACKHAUL_VERSION`, `FRP_VERSION`, `GOST_VERSION`,
-`XT_INSTALL_DIR`.
+`XT_BIN_DIR`, `XT_INSTALL_DIR`, `XT_MIRROR`, `BACKHAUL_VERSION`, `FRP_VERSION`,
+`GOST_VERSION`, `XT_LANG`.
 
 Other scripts: `scripts/update.sh` (pull + rebuild + restart),
 `scripts/backup.sh` (tar of data + config, kept under `/var/backups/xistance`),

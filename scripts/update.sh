@@ -5,7 +5,7 @@
 # Pulls the latest source, rebuilds the panel and restarts the service.
 # Run from a repository checkout on the server:
 #
-#   sudo bash scripts/update.sh [--branch main]
+#   sudo bash scripts/update.sh [master]
 #
 set -euo pipefail
 
@@ -15,7 +15,7 @@ die() { printf '%s✗ %s%s\n' "$C_RED" "$1" "$C_RST" >&2; exit 1; }
 
 INSTALL_DIR="/opt/xistance"
 ENV_FILE="/etc/xistance/xistance.env"
-BRANCH="${1:-main}"
+BRANCH="${1:-master}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
