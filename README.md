@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="docs/xistance-logo.svg" alt="Xistance Panel logo" width="128" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/xistance-logo.png" />
+    <img src="docs/xistance-logo-light.png" alt="Xistance Panel logo" width="128" />
+  </picture>
 </p>
 
 <h1 align="center">Xistance Panel</h1>
@@ -66,7 +69,7 @@ packages/tunnel-core  engine + config builders (TOML / command lines) + process 
 packages/db           Prisma schema, seed (admin user), SQLite by default / Postgres optional
 packages/types        shared TypeScript types
 scripts/              bootstrap.sh, install.sh, update.sh, backup.sh, uninstall.sh
-docs/                 xistance-logo.svg and project docs
+docs/                 project logo and docs
 tunnels/              runtime data dir (binaries, configs, logs, dev.db)
 Dockerfile            multi-stage build with /api/health healthcheck
 ```

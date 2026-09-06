@@ -12,9 +12,14 @@ const userCreateSchema = z.object({
   active: z.boolean().default(true),
 });
 
+const LIST_LIMIT = 50;
+
 export async function GET(request: Request) {
   const auth = await requireSession(request, "ADMIN");
   if (!auth.ok) return auth.response;
+  const { searchParams } = new URL(request.url);
+  const cursor = searchParams.get("cursor") ? { id: searchParams.get("cursor")! } : undefined;
+  const limit = Math.min(Number(searchParams.get("limit")) || LIST_LIMIT, 100);
   const users = await prisma.user.findMany({
     select: {
       id: true,
@@ -26,8 +31,13 @@ export async function GET(request: Request) {
       createdAt: true,
     },
     orderBy: { createdAt: "asc" },
+    take: limit + 1,
+    ...(cursor ? { skip: 1, cursor } : {}),
   });
-  return json({ users });
+  const hasNext = users.length > limit;
+  const items = hasNext ? users.slice(0, limit) : users;
+  const nextCursor = hasNext ? items[items.length - 1].id : null;
+  return json({ users: items, hasNext, nextCursor });
 }
 
 export async function POST(request: Request) {

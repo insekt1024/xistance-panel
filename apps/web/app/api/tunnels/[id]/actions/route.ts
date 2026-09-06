@@ -4,6 +4,7 @@ import { apiError, json, parseBody, requireSession } from "@/lib/api";
 import { getEngine } from "@/lib/engine";
 import { buildDeploySpec } from "@/lib/tunnels";
 import { rateLimit } from "@/lib/rate-limit";
+import { invalidateCache } from "@/lib/query-cache";
 
 const actionSchema = z.object({
   action: z.enum(["start", "stop", "restart"]),
@@ -80,5 +81,6 @@ export async function POST(
     where: { id },
     data: { state, status: state, errorMessage: null },
   });
+  invalidateCache();
   return json({ ok: true, state });
 }

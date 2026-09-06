@@ -129,7 +129,7 @@ export function DashboardStats(props: Props) {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <TrafficChart data={props.samples} />
+            <TrafficChart key={props.samples.length} data={props.samples} />
           </CardContent>
         </Card>
 

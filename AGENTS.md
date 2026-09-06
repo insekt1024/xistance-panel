@@ -35,6 +35,16 @@ TURBO_DISABLE=true npx tsx scripts/test-optimizations.ts
 TURBO_DISABLE=true npm run build
 ```
 
+### No `optimizePackageImports` (Turbopack panic)
+`experimental.optimizePackageImports` triggers a deterministic Turbopack panic
+(`AssetContent::file was canceled`, Next 16.3.0) during the chunking/emit phase.
+Do NOT re-add it without verifying `TURBO_DISABLE=true npx next build` passes.
+
+### No `ssr: false` dynamic imports in Server Components
+`next/dynamic` with `{ ssr: false }` is rejected in async Server Components.
+Pattern: create a `"use client"` wrapper (e.g. `import-dialog-lazy.tsx`) that does
+the dynamic import, then statically import the wrapper in the server page.
+
 ### Dev server
 Requires `XT_FORCE_NODE=true` to run child processes (not systemd) in dev. Set in `apps/web/.env.local`.
 

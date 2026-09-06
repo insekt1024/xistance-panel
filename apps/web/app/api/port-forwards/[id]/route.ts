@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 import { reconcilePortForwards } from "@/lib/forward-supervisor";
+import { invalidateCache } from "@/lib/query-cache";
 
 const updateSchema = z.object({
   name: z.string().min(1).max(80).optional(),
@@ -32,6 +33,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
   });
   await reconcilePortForwards();
   await auditLog(auth.user.id, "portforward.update", id, rule.name, getClientIp(request));
+  invalidateCache();
   return json({ rule });
 }
 
@@ -47,5 +49,6 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
   await prisma.portForward.delete({ where: { id } });
   await reconcilePortForwards();
   await auditLog(auth.user.id, "portforward.delete", id, existing.name, getClientIp(request));
+  invalidateCache();
   return json({ ok: true });
 }

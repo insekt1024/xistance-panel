@@ -42,6 +42,9 @@ export function LogViewer({
     return result;
   }, [lines, search, levelFilter]);
 
+  const pausedRef = React.useRef(paused);
+  pausedRef.current = paused;
+
   React.useEffect(() => {
     let disposed = false;
     buf.current = [];
@@ -52,23 +55,38 @@ export function LogViewer({
       .then((d) => {
         if (disposed) return;
         buf.current = (d.lines ?? []) as string[];
-        setLines([...buf.current]);
+        if (!pausedRef.current) setLines([...buf.current]);
       })
       .catch(() => {});
 
     const es = new EventSource(`/api/tunnels/${tunnelId}/events`);
+    let rafId: number | null = null;
+
+    const flushBuffer = () => {
+      if (pausedRef.current || disposed) {
+        rafId = null;
+        return;
+      }
+      if (buf.current.length > 0) {
+        setLines([...buf.current]);
+      }
+      rafId = null;
+    };
+
     es.onopen = () => setConnected(true);
     es.onerror = () => setConnected(false);
     es.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data) as { type?: string; line?: string };
         if (data.type === "log" && data.line) {
-          if (paused) {
+          if (pausedRef.current) {
             pausedBuf.current.push(data.line);
           } else {
             buf.current.push(data.line);
             if (buf.current.length > 1000) buf.current = buf.current.slice(-1000);
-            setLines([...buf.current]);
+            if (rafId === null) {
+              rafId = requestAnimationFrame(flushBuffer);
+            }
           }
         }
       } catch {
@@ -79,8 +97,9 @@ export function LogViewer({
     return () => {
       disposed = true;
       es.close();
+      if (rafId !== null) cancelAnimationFrame(rafId);
     };
-  }, [tunnelId, paused]);
+  }, [tunnelId]);
 
   React.useEffect(() => {
     if (!paused) {

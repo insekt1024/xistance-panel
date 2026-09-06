@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma, type Prisma } from "@xistance/db";
-import { auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
+import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
+import { rateLimit } from "@/lib/rate-limit";
 
 // Full backup/restore. Secrets stay encrypted at rest (same XTENC_KEY required
 // to restore), so this JSON is safe to move between panel installs that share
@@ -25,6 +26,8 @@ const restoreSchema = z.object({
 export async function GET(request: Request) {
   const auth = await requireSession(request, "ADMIN");
   if (!auth.ok) return auth.response;
+  const rl = rateLimit(`settings-backup:${auth.user.id}`, 10, 60_000);
+  if (!rl.ok) return apiError("Too many requests, slow down", 429);
 
   const [users, nodes, tunnels, portForwards, webhooks, settings, trafficSamples] =
     await Promise.all([
@@ -34,7 +37,11 @@ export async function GET(request: Request) {
       prisma.portForward.findMany({ select: { id: true, name: true, direction: true, protocol: true, sourcePort: true, destHost: true, destPort: true, enabled: true, status: true } }),
       prisma.notificationWebhook.findMany({ select: { id: true, type: true, name: true, enabled: true, createdAt: true } }),
       prisma.setting.findMany({ select: { key: true, value: true, updatedAt: true } }),
-      prisma.trafficSample.findMany({ take: TRAFFIC_SAMPLE_BACKUP_LIMIT, orderBy: { ts: "desc" } }),
+      prisma.trafficSample.findMany({
+        take: TRAFFIC_SAMPLE_BACKUP_LIMIT,
+        orderBy: { ts: "desc" },
+        select: { ts: true, tunnelId: true, bytesIn: true, bytesOut: true },
+      }),
     ]);
 
   return json({

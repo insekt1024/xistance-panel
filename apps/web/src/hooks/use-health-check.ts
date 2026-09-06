@@ -55,10 +55,18 @@ export function useHealthCheck(options: UseHealthCheckOptions = {}) {
     if (!enabled) return;
 
     checkHealth();
-    const id = setInterval(checkHealth, interval);
+    const id = setInterval(() => {
+      if (!document.hidden) checkHealth();
+    }, interval);
+
+    const onVisibility = () => {
+      if (!document.hidden) checkHealth();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
       clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
       abortControllerRef.current?.abort();
     };
   }, [enabled, interval, checkHealth]);

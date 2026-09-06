@@ -4,6 +4,8 @@ import { TunnelConfigSchema, type TunnelConfig } from "@xistance/types";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 import { getEngine } from "@/lib/engine";
 import { buildSpec, storeTunnelConfig } from "@/lib/tunnels";
+import { rateLimit } from "@/lib/rate-limit";
+import { invalidateCache } from "@/lib/query-cache";
 
 const tunnelCreateSchema = z.object({
   name: z.string().min(1).max(80),
@@ -43,8 +45,8 @@ export async function GET(request: Request) {
   const tunnels = await prisma.tunnel.findMany({
     where,
     orderBy: { createdAt: "desc" },
-    take: limit,
-    cursor,
+    take: limit + 1,
+    ...(cursor ? { skip: 1, cursor } : {}),
     select: {
       id: true,
       name: true,
@@ -58,14 +60,17 @@ export async function GET(request: Request) {
       owner: { select: { id: true, name: true, email: true } },
     },
   });
-  const hasNext = tunnels.length === limit;
-  const nextCursor = hasNext ? tunnels[tunnels.length - 1].id : null;
-  return json({ tunnels, hasNext, nextCursor });
+  const hasNext = tunnels.length > limit;
+  const items = hasNext ? tunnels.slice(0, limit) : tunnels;
+  const nextCursor = hasNext ? items[items.length - 1].id : null;
+  return json({ tunnels: items, hasNext, nextCursor });
 }
 
 export async function POST(request: Request) {
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
+  const rl = rateLimit(`tunnels-create:${auth.user.id}`, 10, 60_000);
+  if (!rl.ok) return apiError("Too many create requests, slow down", 429);
 
   const body = await parseBody(request, tunnelCreateSchema);
   if (!body.ok) return body.response;
@@ -135,5 +140,6 @@ export async function POST(request: Request) {
     },
   });
   await auditLog(auth.user.id, "tunnel.create", tunnel.id, tunnel.name, getClientIp(request));
+  invalidateCache();
   return json({ tunnel }, 201);
 }

@@ -1,11 +1,18 @@
 import { prisma } from "@xistance/db";
-import { json, requireSession } from "@/lib/api";
+import { apiError, json, requireSession } from "@/lib/api";
+import { rateLimit } from "@/lib/rate-limit";
 
 const MAX_PER_TYPE = 5;
+
+function escapeLike(s: string): string {
+  return s.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
 
 export async function GET(request: Request) {
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
+  const rl = rateLimit(`search:${auth.user.id}`, 30, 60_000);
+  if (!rl.ok) return apiError("Too many search requests, slow down", 429);
 
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q")?.trim();
@@ -14,12 +21,13 @@ export async function GET(request: Request) {
     return json({ tunnels: [], nodes: [], users: [] });
   }
 
+  const like = escapeLike(q);
   const isUser = auth.user.role === "ADMIN" || auth.user.role === "SUPER_ADMIN";
 
   const [tunnels, nodes, users] = await Promise.all([
     prisma.tunnel.findMany({
       where: {
-        name: { contains: q },
+        name: { contains: like },
         ...(auth.user.role === "USER"
           ? { OR: [{ ownerId: auth.user.id }, { ownerId: null }] }
           : {}),
@@ -34,7 +42,7 @@ export async function GET(request: Request) {
       orderBy: { name: "asc" },
     }),
     prisma.node.findMany({
-      where: { name: { contains: q } },
+      where: { name: { contains: like } },
       take: MAX_PER_TYPE,
       select: {
         id: true,
@@ -49,8 +57,8 @@ export async function GET(request: Request) {
       ? prisma.user.findMany({
           where: {
             OR: [
-              { email: { contains: q } },
-              { name: { contains: q } },
+              { email: { contains: like } },
+              { name: { contains: like } },
             ],
           },
           take: MAX_PER_TYPE,

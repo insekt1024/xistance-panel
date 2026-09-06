@@ -1,6 +1,7 @@
 import { prisma } from "@xistance/db";
 import { apiError, auditLog, getClientIp, json, requireSession } from "@/lib/api";
 import { getEngine } from "@/lib/engine";
+import { invalidateCache } from "@/lib/query-cache";
 
 async function findTunnel(id: string, includeConfig: boolean) {
   if (includeConfig) {
@@ -76,5 +77,6 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
   }
   await prisma.tunnel.delete({ where: { id } });
   await auditLog(auth.user.id, "tunnel.delete", id, tunnel.name, getClientIp(request));
+  invalidateCache();
   return json({ ok: true });
 }

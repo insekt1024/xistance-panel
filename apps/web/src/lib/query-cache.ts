@@ -4,6 +4,8 @@
 // Only safe for server-side, non-user-specific data.
 // ---------------------------------------------------------------------------
 
+const MAX_ENTRIES = 500;
+
 interface Entry<T> {
   at: number;
   value: T;
@@ -11,6 +13,20 @@ interface Entry<T> {
 
 const store = new Map<string, Entry<unknown>>();
 const inflight = new Map<string, Promise<unknown>>();
+
+function evictOldest(): void {
+  if (store.size < MAX_ENTRIES) return;
+  // Evict the entry with the oldest `at` timestamp (expired first).
+  let oldestKey = "";
+  let oldestAt = Infinity;
+  for (const [k, v] of store) {
+    if (v.at < oldestAt) {
+      oldestAt = v.at;
+      oldestKey = k;
+    }
+  }
+  if (oldestKey) store.delete(oldestKey);
+}
 
 export async function cached<T>(
   key: string,
@@ -27,6 +43,7 @@ export async function cached<T>(
 
   const p = fn()
     .then((value) => {
+      evictOldest();
       store.set(key, { at: Date.now(), value });
       return value;
     })

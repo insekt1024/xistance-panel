@@ -1,5 +1,3 @@
-"use client";
-
 // Client-side helpers for talking to the panel API.
 
 export function csrfToken(): string {

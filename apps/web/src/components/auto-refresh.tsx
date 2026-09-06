@@ -8,7 +8,7 @@ import { usePathname } from "next/navigation";
  * Periodically re-renders the surrounding server components (live tunnel
  * status, byte counters) while the tab is visible, without a full reload.
  */
-export function AutoRefresh({ intervalMs = 5_000 }: { intervalMs?: number }) {
+export function AutoRefresh({ intervalMs = 30_000 }: { intervalMs?: number }) {
   const router = useRouter();
   const pathname = usePathname();
   const last = React.useRef(pathname);

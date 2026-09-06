@@ -4,6 +4,7 @@ import { apiError, json, parseBody, requireSession, auditLog, getClientIp } from
 import { getEngine } from "@/lib/engine";
 import { buildDeploySpec } from "@/lib/tunnels";
 import { rateLimit } from "@/lib/rate-limit";
+import { invalidateCache } from "@/lib/query-cache";
 
 const batchSchema = z.object({
   action: z.enum(["start", "stop", "restart"]),
@@ -26,8 +27,12 @@ export async function POST(request: Request) {
   if (!body.ok) return body.response;
   const { action, tunnelIds } = body.data;
 
+  const whereFilter = auth.user.role === "USER"
+    ? { id: { in: tunnelIds }, ownerId: auth.user.id }
+    : { id: { in: tunnelIds } };
+
   const tunnels = await prisma.tunnel.findMany({
-    where: { id: { in: tunnelIds } },
+    where: whereFilter,
     select: {
       id: true,
       name: true,
@@ -49,6 +54,32 @@ export async function POST(request: Request) {
   const engine = getEngine();
   const results: { id: string; ok: boolean; error?: string }[] = [];
 
+  // Prefetch tunnel configs + nodes before the loop instead of per-tunnel
+  const nodeSelect = { id: true, host: true, sshUser: true, sshPort: true, authMethod: true, sshKeyEncrypted: true, sshPasswordEnc: true } as const;
+  const configIds = owned.filter((t) => !engine.has(t.id) && action !== "stop").map((t) => t.id);
+  const nodeIds = [...new Set(
+    owned.filter((t) => !engine.has(t.id) && action !== "stop")
+      .flatMap((t) => [t.clientNodeId, t.serverNodeId].filter(Boolean) as string[]),
+  )];
+
+  const [tunnelConfigs, nodes] = await Promise.all([
+    configIds.length > 0
+      ? prisma.tunnel.findMany({
+          where: { id: { in: configIds } },
+          select: { id: true, name: true, method: true, config: true, clientNodeId: true, serverNodeId: true },
+        })
+      : Promise.resolve([]),
+    nodeIds.length > 0
+      ? prisma.node.findMany({
+          where: { id: { in: nodeIds } },
+          select: nodeSelect,
+        })
+      : Promise.resolve([]),
+  ]);
+
+  const configMap = new Map(tunnelConfigs.map((c) => [c.id, c]));
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+
   // Process tunnels sequentially to avoid overwhelming SSH
   for (const tunnel of owned) {
     const hasTunnel = engine.has(tunnel.id);
@@ -62,21 +93,10 @@ export async function POST(request: Request) {
           results.push({ id: tunnel.id, ok: true });
           continue;
         }
-        // Deploy before starting/restarting
-        const [withConfig, client, server] = await Promise.all([
-          prisma.tunnel.findUnique({
-            where: { id: tunnel.id },
-            select: { id: true, name: true, method: true, config: true, clientNodeId: true, serverNodeId: true },
-          }),
-          prisma.node.findUnique({
-            where: { id: tunnel.clientNodeId ?? "" },
-            select: { id: true, host: true, sshUser: true, sshPort: true, authMethod: true, sshKeyEncrypted: true, sshPasswordEnc: true },
-          }),
-          prisma.node.findUnique({
-            where: { id: tunnel.serverNodeId ?? "" },
-            select: { id: true, host: true, sshUser: true, sshPort: true, authMethod: true, sshKeyEncrypted: true, sshPasswordEnc: true },
-          }),
-        ]);
+        // Deploy before starting/restarting — use prefetched data
+        const withConfig = configMap.get(tunnel.id) ?? null;
+        const client = tunnel.clientNodeId ? nodeMap.get(tunnel.clientNodeId) ?? null : null;
+        const server = tunnel.serverNodeId ? nodeMap.get(tunnel.serverNodeId) ?? null : null;
         if (!withConfig) {
           results.push({ id: tunnel.id, ok: false, error: "Tunnel config not found" });
           continue;
@@ -114,6 +134,7 @@ export async function POST(request: Request) {
   }
 
   await auditLog(auth.user.id, `tunnel.batch.${action}`, undefined, `ids: ${tunnelIds.join(",")}`, getClientIp(request));
+  invalidateCache();
 
   return json({
     ok: results.every((r) => r.ok),

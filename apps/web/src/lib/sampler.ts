@@ -14,11 +14,14 @@ const RETAIN_MS = 7 * 24 * 3600_000;
 const MAX_BATCH = 50;
 
 let started = false;
+let running = false;
 
 export function startTrafficSampler(): void {
   if (started) return;
   started = true;
   const timer = setInterval(async () => {
+    if (running) return;
+    running = true;
     try {
       const engine = getEngine();
       const tunnels = await prisma.tunnel.findMany({ select: { id: true } });
@@ -52,8 +55,10 @@ export function startTrafficSampler(): void {
           data: rows.slice(i, i + MAX_BATCH),
         });
       }
-    } catch {
-      /* sampler must never crash the server */
+    } catch (err) {
+      console.error("[sampler] traffic sample failed:", err);
+    } finally {
+      running = false;
     }
   }, SAMPLE_INTERVAL_MS);
   timer.unref();
@@ -64,8 +69,8 @@ export function startTrafficSampler(): void {
       await prisma.trafficSample.deleteMany({
         where: { ts: { lt: new Date(Date.now() - RETAIN_MS) } },
       });
-    } catch {
-      /* best effort */
+    } catch (err) {
+      console.error("[sampler] prune failed:", err);
     }
   }, PRUNE_INTERVAL_MS);
   pruneTimer.unref();

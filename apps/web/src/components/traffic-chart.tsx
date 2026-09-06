@@ -55,18 +55,28 @@ export function TrafficChart({
   const [chartType, setChartType] = React.useState<ChartType>("area");
   const [data, setData] = React.useState(initialData);
   const [loading, setLoading] = React.useState(false);
+  const abortRef = React.useRef<AbortController | null>(null);
 
   const fetchRange = React.useCallback(async (r: Range) => {
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
     setLoading(true);
     try {
-      const res = await fetch(`/api/traffic?range=${r}`);
+      const res = await fetch(`/api/traffic?range=${r}`, { signal: ac.signal });
       if (res.ok) {
         const json = await res.json();
         if (json.ok) setData(json.data);
       }
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
     } finally {
-      setLoading(false);
+      if (!ac.signal.aborted) setLoading(false);
     }
+  }, []);
+
+  React.useEffect(() => {
+    return () => { abortRef.current?.abort(); };
   }, []);
 
   const handleRangeChange = React.useCallback(

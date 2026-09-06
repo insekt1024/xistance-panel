@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 import { reconcilePortForwards } from "@/lib/forward-supervisor";
+import { invalidateCache } from "@/lib/query-cache";
 
 const ruleSchema = z.object({
   name: z.string().min(1).max(80),
@@ -26,8 +27,8 @@ export async function GET(request: Request) {
   const portForwards = await prisma.portForward.findMany({
     where,
     orderBy: { createdAt: "desc" },
-    take: limit,
-    cursor,
+    take: limit + 1,
+    ...(cursor ? { skip: 1, cursor } : {}),
     select: {
       id: true,
       name: true,
@@ -40,9 +41,10 @@ export async function GET(request: Request) {
       status: true,
     },
   });
-  const hasNext = portForwards.length === limit;
-  const nextCursor = hasNext ? portForwards[portForwards.length - 1].id : null;
-  return json({ rules: portForwards, hasNext, nextCursor });
+  const hasNext = portForwards.length > limit;
+  const items = hasNext ? portForwards.slice(0, limit) : portForwards;
+  const nextCursor = hasNext ? items[items.length - 1].id : null;
+  return json({ rules: items, hasNext, nextCursor });
 }
 
 export async function POST(request: Request) {
@@ -67,5 +69,6 @@ export async function POST(request: Request) {
   });
   await reconcilePortForwards();
   await auditLog(auth.user.id, "portforward.create", rule.id, rule.name, getClientIp(request));
+  invalidateCache();
   return json({ rule }, 201);
 }

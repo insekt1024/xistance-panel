@@ -5,6 +5,7 @@ import { NodeConfigSchema } from "@xistance/types";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 import { clearNodeCache } from "@/lib/forward-supervisor";
 import { redactNode } from "@/lib/tunnels";
+import { invalidateCache } from "@/lib/query-cache";
 
 const nodeCreateSchema = NodeConfigSchema.extend({
   apiToken: z.string().optional(),
@@ -20,8 +21,8 @@ export async function GET(request: Request) {
   const limit = Math.min(Number(searchParams.get("limit")) || LIST_LIMIT, 100);
   const nodes = await prisma.node.findMany({
     orderBy: { createdAt: "desc" },
-    take: limit,
-    cursor,
+    take: limit + 1,
+    ...(cursor ? { skip: 1, cursor } : {}),
     select: {
       id: true, name: true, type: true, host: true, sshPort: true,
       sshUser: true, authMethod: true, sshKeyEncrypted: true,
@@ -29,9 +30,10 @@ export async function GET(request: Request) {
       status: true, lastSeen: true, health: true, createdAt: true, updatedAt: true,
     },
   });
-  const hasNext = nodes.length === limit;
-  const nextCursor = hasNext ? nodes[nodes.length - 1].id : null;
-  const data = nodes.map(redactNode);
+  const hasNext = nodes.length > limit;
+  const items = hasNext ? nodes.slice(0, limit) : nodes;
+  const nextCursor = hasNext ? items[items.length - 1].id : null;
+  const data = items.map(redactNode);
   return json({ nodes: data, hasNext, nextCursor });
 }
 
@@ -63,5 +65,6 @@ export async function POST(request: Request) {
   });
   await auditLog(auth.user.id, "node.create", node.id, node.name, getClientIp(request));
   clearNodeCache();
+  invalidateCache();
   return json({ node: redactNode(node) }, 201);
 }

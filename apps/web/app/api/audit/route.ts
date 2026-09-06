@@ -1,11 +1,14 @@
 import { prisma } from "@xistance/db";
-import { json, requireSession } from "@/lib/api";
+import { apiError, json, requireSession } from "@/lib/api";
+import { rateLimit } from "@/lib/rate-limit";
 
 const LIST_LIMIT = 50;
 
 export async function GET(request: Request) {
   const auth = await requireSession(request, "ADMIN");
   if (!auth.ok) return auth.response;
+  const rl = rateLimit(`audit:${auth.user.id}`, 30, 60_000);
+  if (!rl.ok) return apiError("Too many requests, slow down", 429);
 
   const { searchParams } = new URL(request.url);
   const cursor = searchParams.get("cursor") ? { id: searchParams.get("cursor")! } : undefined;
@@ -13,8 +16,8 @@ export async function GET(request: Request) {
 
   const logs = await prisma.auditLog.findMany({
     orderBy: { createdAt: "desc" },
-    take: limit,
-    cursor,
+    take: limit + 1,
+    ...(cursor ? { skip: 1, cursor } : {}),
     select: {
       id: true,
       actorId: true,
@@ -27,7 +30,8 @@ export async function GET(request: Request) {
     },
   });
 
-  const hasNext = logs.length === limit;
-  const nextCursor = hasNext ? logs[logs.length - 1].id : null;
-  return json({ logs, hasNext, nextCursor });
+  const hasNext = logs.length > limit;
+  const items = hasNext ? logs.slice(0, limit) : logs;
+  const nextCursor = hasNext ? items[items.length - 1].id : null;
+  return json({ logs: items, hasNext, nextCursor });
 }

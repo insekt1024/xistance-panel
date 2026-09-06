@@ -22,6 +22,15 @@ export async function GET(request: Request) {
     take: limit + 1,
     ...(cursor ? { skip: 1, where: { id: { gt: cursor } } } : {}),
     orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      name: true,
+      type: true,
+      url: true,
+      events: true,
+      enabled: true,
+      createdAt: true,
+    },
   });
 
   const hasNext = webhooks.length > limit;

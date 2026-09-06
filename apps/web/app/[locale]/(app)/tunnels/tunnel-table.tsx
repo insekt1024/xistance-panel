@@ -46,7 +46,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { LogViewer } from "./log-viewer";
+import dynamic from "next/dynamic";
+
+const LogViewer = dynamic(
+  () => import("./log-viewer").then((m) => ({ default: m.LogViewer })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-64 animate-pulse bg-muted rounded" />
+    ),
+  },
+);
 
 export interface TunnelRow {
   id: string;

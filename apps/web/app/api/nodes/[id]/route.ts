@@ -5,6 +5,7 @@ import { NodeConfigSchema } from "@xistance/types";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 import { redactNode } from "@/lib/tunnels";
 import { clearNodeCache } from "@/lib/forward-supervisor";
+import { invalidateCache } from "@/lib/query-cache";
 
 const nodeUpdateSchema = NodeConfigSchema.extend({
   apiToken: z.string().optional(),
@@ -79,6 +80,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
   });
   await auditLog(auth.user.id, "node.update", node.id, node.name, getClientIp(request));
   clearNodeCache();
+  invalidateCache();
   return json({ node: redactNode(node) });
 }
 
@@ -97,5 +99,6 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
   await prisma.node.delete({ where: { id } });
   await auditLog(auth.user.id, "node.delete", id, existing.name, getClientIp(request));
   clearNodeCache();
+  invalidateCache();
   return json({ ok: true });
 }

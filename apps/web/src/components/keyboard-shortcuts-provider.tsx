@@ -2,8 +2,17 @@
 
 import * as React from "react";
 import { useKeyboardShortcuts } from "@/hooks/use-keyboard-shortcuts";
-import { KeyboardShortcutsHelp } from "@/components/keyboard-shortcuts-help";
-import { SearchDialog } from "@/components/search-dialog";
+import dynamic from "next/dynamic";
+
+const KeyboardShortcutsHelp = dynamic(
+  () => import("@/components/keyboard-shortcuts-help").then((m) => ({ default: m.KeyboardShortcutsHelp })),
+  { ssr: false },
+);
+
+const SearchDialog = dynamic(
+  () => import("@/components/search-dialog").then((m) => ({ default: m.SearchDialog })),
+  { ssr: false },
+);
 
 export function KeyboardShortcutsProvider({
   children,

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/routing";
 import { Plus } from "lucide-react";
 import { TunnelTable } from "./tunnel-table";
-import { ImportDialog } from "./import-dialog";
+import { ImportDialogLazy as ImportDialog } from "./import-dialog-lazy";
 
 export const dynamic = "force-dynamic";
 

@@ -20,6 +20,13 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  poweredByHeader: false,
+  // NOTE: experimental.optimizePackageImports removed — triggers a
+  // deterministic Turbopack panic (AssetContent::file was canceled) in Next 16.3.0
+  compiler: {
+    removeConsole:
+      process.env.NODE_ENV === "production" ? { exclude: ["error"] } : false,
+  },
   async headers() {
     return [
       {
