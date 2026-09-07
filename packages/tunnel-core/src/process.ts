@@ -47,11 +47,18 @@ function shellQuote(s: string): string {
   return `'${s.replaceAll("'", `'\\''`)}'`;
 }
 
+/** Strip CR/LF so names/descriptions can't inject systemd directives. */
+export function sanitizeUnitText(s: string): string {
+  return s.replaceAll(/[\r\n]+/g, " ").slice(0, 200);
+}
+
 function buildUnit(spec: ProcessSpec): string {
   const envFile = spec.envFile ? `EnvironmentFile=${spec.envFile}\n` : "";
   const exec = spec.command.map(shellQuote).join(" ");
   const cd = spec.workdir ? `WorkingDirectory=${spec.workdir}\n` : "";
-  const desc = spec.description ?? `Xistance tunnel: ${spec.name}`;
+  const desc = sanitizeUnitText(
+    spec.description ?? `Xistance tunnel: ${spec.name}`,
+  );
   return `[Unit]
 Description=${desc}
 After=network-online.target
@@ -138,7 +145,14 @@ export class SystemdProcessHandle implements ProcessHandle {
   }
 
   async dispose(): Promise<void> {
-    await this.systemctl("stop");
+    // Full teardown so deleted tunnels stay deleted across reboots: stop +
+    // disable the unit, remove its unit file, and reload the daemon.
+    // (stop() alone leaves an enabled unit file behind, which systemd — and
+    // our own rehydrate — would happily start again on next boot.)
+    await this.stop();
+    const unitPath = path.join(this.spec.dataDir, "systemd", this.unit());
+    await this.runner.run(["rm", "-f", unitPath]);
+    await this.runner.run(["systemctl", "daemon-reload"]);
   }
 }
 

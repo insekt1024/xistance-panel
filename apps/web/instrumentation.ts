@@ -31,6 +31,14 @@ export async function register() {
           console.log(`[instrumentation] rehydrated tunnel ${t.name}`);
         } catch (err) {
           console.error(`[instrumentation] failed to rehydrate ${t.name}`, err);
+          // Don't leave the DB claiming "running" for a tunnel we failed to
+          // start — otherwise it shows running forever with no process behind
+          // it. Best effort: a DB failure here must not crash boot.
+          try {
+            await prisma.tunnel.update({ where: { id: t.id }, data: { state: "stopped" } });
+          } catch (dbErr) {
+            console.error(`[instrumentation] failed to mark ${t.name} stopped`, dbErr);
+          }
         }
       }
       // Re-deploy enabled port-forward rules so they match their persisted state.
@@ -54,8 +62,14 @@ export async function register() {
           /* best effort */
         }
       };
-      process.once("SIGTERM", flush);
-      process.once("SIGINT", flush);
+      const flushAndExit = () => {
+        flush();
+        // Previously the handlers swallowed SIGTERM/SIGINT (flush only), so
+        // the orchestrator had to SIGKILL us. Exit after a short drain delay.
+        setTimeout(() => process.exit(0), 250);
+      };
+      process.once("SIGTERM", flushAndExit);
+      process.once("SIGINT", flushAndExit);
       process.once("beforeExit", flush);
     } catch (err) {
       console.error("[instrumentation] rehydration failed", err);

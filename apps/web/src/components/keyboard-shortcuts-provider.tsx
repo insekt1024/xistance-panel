@@ -41,8 +41,8 @@ export function KeyboardShortcutsProvider({
   return (
     <>
       {children}
-      <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
-      <KeyboardShortcutsHelp open={helpOpen} onOpenChange={setHelpOpen} />
+      {searchOpen && <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />}
+      {helpOpen && <KeyboardShortcutsHelp open={helpOpen} onOpenChange={setHelpOpen} />}
     </>
   );
 }

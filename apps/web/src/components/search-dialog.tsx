@@ -164,9 +164,10 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
   const navigate = React.useCallback(
     (item: SearchResult) => {
       onOpenChange(false);
-      if (item.type === "tunnel") router.push(`/tunnels/${item.id}`);
-      else if (item.type === "node") router.push(`/nodes/${item.id}`);
-      else router.push(`/users/${item.id}`);
+      // No per-item detail pages exist — land on the list pages instead.
+      if (item.type === "tunnel") router.push(`/tunnels`);
+      else if (item.type === "node") router.push(`/nodes`);
+      else router.push(`/users`);
     },
     [router, onOpenChange],
   );
@@ -319,16 +320,16 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
             <span className="inline-flex items-center gap-1">
               <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">&uarr;</kbd>
               <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">&darr;</kbd>
-              navigate
+              {t("search.navigate")}
             </span>
             <span className="inline-flex items-center gap-1">
               <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">&crarr;</kbd>
-              select
+              {t("search.select")}
             </span>
           </div>
           {totalResults > 0 && (
             <span className="text-xs text-muted-foreground">
-              {totalResults} result{totalResults !== 1 ? "s" : ""}
+              {t("search.resultsCount", { count: totalResults })}
             </span>
           )}
         </div>

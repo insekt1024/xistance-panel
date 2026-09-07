@@ -90,7 +90,7 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
   const { id } = await ctx.params;
   const [existing, used] = await Promise.all([
     findNode(id),
-    prisma.tunnel.count({ where: { OR: [{ clientNodeId: id }, { serverNodeId: id }] } }),
+    prisma.tunnel.count({ where: { status: { in: ["running", "starting"] }, OR: [{ clientNodeId: id }, { serverNodeId: id }] } }),
   ]);
   if (!existing) return apiError("Node not found", 404);
   if (used > 0) {

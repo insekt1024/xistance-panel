@@ -3,6 +3,7 @@ import { z } from "zod";
 import { LocalRunner } from "@xistance/tunnel-core";
 import { apiError, json, parseBody, requireSession } from "@/lib/api";
 import { rateLimit } from "@/lib/rate-limit";
+import { isBlockedTarget } from "@/lib/ssrf";
 
 const toolSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tcp"), host: z.string().min(1), port: z.number().int().min(1).max(65535) }),
@@ -54,14 +55,33 @@ export async function POST(request: Request) {
 
   switch (data.type) {
     case "tcp": {
+      if (await isBlockedTarget(data.host)) {
+        return apiError("Probing internal or private addresses is not allowed", 400);
+      }
       const res = await tcpProbe(data.host, data.port);
       return json({ ok: true, result: { tcp: { ...res, host: data.host, port: data.port } } });
     }
     case "http": {
+      let parsed: URL;
+      try {
+        parsed = new URL(data.url);
+      } catch {
+        return apiError("Invalid URL", 400);
+      }
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        return apiError("Only http and https URLs are allowed", 400);
+      }
+      if (parsed.username || parsed.password) {
+        return apiError("URLs with credentials are not allowed", 400);
+      }
+      if (await isBlockedTarget(parsed.hostname)) {
+        return apiError("Probing internal or private addresses is not allowed", 400);
+      }
       const started = Date.now();
       try {
         const resp = await fetch(data.url, {
-          redirect: "follow",
+          // manual: never follow redirects (redirect-to-internal bypass)
+          redirect: "manual",
           signal: AbortSignal.timeout(12_000),
         });
         const ms = Date.now() - started;
@@ -73,6 +93,9 @@ export async function POST(request: Request) {
       }
     }
     case "latency": {
+      if (await isBlockedTarget(data.host)) {
+        return apiError("Probing internal or private addresses is not allowed", 400);
+      }
       const res = await runner.run(["ping", "-c", "4", "-W", "3", data.host]);
       const avg = /=\s*[\d.]+\/([\d.]+)\/[\d.]+\//.exec(res.stdout)?.[1];
       return json({

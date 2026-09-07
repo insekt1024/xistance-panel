@@ -285,7 +285,11 @@ export const SshConfigSchema = z.object({
   // remote forwarding: -R [bindAddr:]remotePort:localHost:localPort
   remoteBindAddr: z.string().default("0.0.0.0"),
   dynamicBindAddr: z.string().default("127.0.0.1"),
-  extraArgs: z.array(z.string()).default([]),
+  // Extra raw SSH argv. Fail closed: any non-empty value is rejected because
+  // raw argv appended to the SSH command is an RCE vector (-o ProxyCommand=).
+  // The panel UI always sends []. Defense-in-depth filtering also lives in
+  // buildSshCommand (tunnel-core).
+  extraArgs: z.array(z.string()).max(0).default([]),
 });
 export type SshConfig = z.infer<typeof SshConfigSchema>;
 

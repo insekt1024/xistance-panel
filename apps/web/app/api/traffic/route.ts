@@ -33,7 +33,8 @@ export async function GET(req: Request) {
   if (!rl.ok) return apiError("Too many requests, slow down", 429);
 
   const url = new URL(req.url);
-  const parsed = Schema.safeParse({ range: url.searchParams.get("range") });
+  const rangeRaw = url.searchParams.get("range") ?? undefined;
+  const parsed = Schema.safeParse({ range: rangeRaw });
   if (!parsed.success) return apiError("Invalid range parameter");
 
   const { range } = parsed.data;

@@ -10,8 +10,11 @@ process.env.JWT_SECRET = "test-jwt-secret";
 process.env.NODE_ENV = "test";
 
 import { PrismaClient } from "../packages/db/generated/client/index.js";
-import { hashPassword, verifyPassword } from "../packages/tunnel-core/src/index.ts";
+import { filterExtraArgs, hashPassword, sanitizeUnitText, verifyPassword } from "../packages/tunnel-core/src/index.ts";
+import { SshConfigSchema } from "../packages/types/src/index.ts";
 import { cached, invalidateCache } from "../apps/web/src/lib/query-cache.ts";
+import { rateLimit } from "../apps/web/src/lib/rate-limit.ts";
+import { isBlockedTarget, isPrivateIp } from "../apps/web/src/lib/ssrf.ts";
 import path from "node:path";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
@@ -474,6 +477,81 @@ async function main() {
     // All samples are >1h old (inserted with now - i*60_000, so first is now, last is now-240s)
     // So some should exist — but the structure check is what matters
     if (!Array.isArray(data)) throw new Error("data is not an array");
+  });
+
+  // Test 32: extraArgs schema rejects non-empty arrays (RCE guard)
+  await test("Security: SshConfigSchema rejects non-empty extraArgs", async () => {
+    const evil = SshConfigSchema.safeParse({
+      mode: "local", host: "h", username: "u", localPort: 1080, remotePort: 80,
+      extraArgs: ["-o", "ProxyCommand=curl evil"],
+    });
+    if (evil.success) throw new Error("ProxyCommand args must be rejected");
+    const ok = SshConfigSchema.safeParse({
+      mode: "local", host: "h", username: "u", localPort: 1080, remotePort: 80,
+      extraArgs: [],
+    });
+    if (!ok.success) throw new Error("Empty extraArgs must pass");
+  });
+
+  // Test 33: filterExtraArgs allowlist
+  await test("Security: filterExtraArgs drops dangerous options", async () => {
+    const out = filterExtraArgs(["-o", "ProxyCommand=id", "-o", "ConnectTimeout=10", "-L", "x", "-o", "ForwardAgent=yes"]);
+    if (out.join(" ") !== "-o ConnectTimeout=10") throw new Error("Unexpected filter result: " + out.join(" "));
+    if (filterExtraArgs(["-o"]).length !== 0) throw new Error("Dangling -o must be dropped");
+    if (filterExtraArgs(["-o", "ConnectTimeout=1;id"]).length !== 0) throw new Error("Metachar values must be dropped");
+  });
+
+  // Test 34: systemd Description sanitization
+  await test("Security: sanitizeUnitText strips newlines", async () => {
+    const evil = " legit\nExecStart=/bin/evil\n[Install]";
+    const clean = sanitizeUnitText(evil);
+    if (/[\r\n]/.test(clean)) throw new Error("Newlines must be stripped");
+    if (!clean.includes("legit")) throw new Error("Safe text must survive");
+  });
+
+  // Test 35: isPrivateIp coverage
+  await test("Security: isPrivateIp blocks private ranges", async () => {
+    for (const ip of ["127.0.0.1", "10.0.0.5", "192.168.1.1", "172.16.0.1", "172.31.255.255", "169.254.169.254", "0.0.0.0", "::1", "fe80::1", "fc00::1"]) {
+      if (!isPrivateIp(ip)) throw new Error(ip + " must be private");
+    }
+    for (const ip of ["8.8.8.8", "1.1.1.1", "172.32.0.1", "172.15.0.1", "203.0.113.5", "not-an-ip"]) {
+      if (isPrivateIp(ip)) throw new Error(ip + " must NOT be private");
+    }
+  });
+
+  // Test 36: isBlockedTarget fail-closed on internal names
+  await test("Security: isBlockedTarget blocks localhost/private literals", async () => {
+    if (!(await isBlockedTarget("localhost"))) throw new Error("localhost must be blocked");
+    if (!(await isBlockedTarget("127.0.0.1"))) throw new Error("127.0.0.1 must be blocked");
+    if (!(await isBlockedTarget("169.254.169.254"))) throw new Error("cloud metadata IP must be blocked");
+    if (!(await isBlockedTarget("db.internal"))) throw new Error(".internal must be blocked");
+  });
+
+  // Test 37: query-cache invalidates in-flight recomputes
+  await test("Cache: invalidateCache purges in-flight entries", async () => {
+    let calls = 0;
+    const slow = () => new Promise<string>((res) => setTimeout(() => res(`v${++calls}`), 50));
+    const p1 = cached("sec:test", 60_000, slow);
+    invalidateCache("sec:");
+    const v1 = await p1;
+    const v2 = await cached("sec:test", 60_000, slow);
+    if (calls !== 2) throw new Error(`Stale in-flight repopulated cache (calls=${calls}, v1=${v1}, v2=${v2})`);
+    invalidateCache("sec:");
+  });
+
+  // Test 38: rate-limit evicts oldest (O(1), no unbounded growth)
+  await test("RateLimit: oldest buckets evicted at cap", async () => {
+    for (let i = 0; i < 10_005; i++) rateLimit(`sec:evict:${i}`, 1, 60_000);
+    // The first keys must be gone (evicted), so a new request passes.
+    const r = rateLimit("sec:evict:0", 1, 60_000);
+    if (!r.ok) throw new Error("Evicted bucket should allow a fresh request");
+  });
+
+  // Test 39: unknown-email login path runs full scrypt without throwing
+  await test("Security: verifyPassword safe on dummy hash", async () => {
+    const dummy = hashPassword("xistance-never-matches-any-login");
+    if (verifyPassword("wrong-password", dummy)) throw new Error("Dummy must never verify");
+    if (verifyPassword("x", "scrypt:dummy:dummy")) throw new Error("Malformed must not verify");
   });
 
   // Print results

@@ -1,7 +1,9 @@
 import { destroySession } from "@/lib/auth";
-import { json } from "@/lib/api";
+import { csrfGuard, json } from "@/lib/api";
 
-export async function POST() {
+export async function POST(request: Request) {
+  const csrf = csrfGuard(request);
+  if (csrf) return csrf;
   await destroySession();
   return json({ ok: true });
 }

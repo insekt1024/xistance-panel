@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { prisma } from "@xistance/db";
-import { auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
+import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 
 const webhookCreateSchema = z.object({
   name: z.string().min(1).max(80),
@@ -15,23 +15,32 @@ export async function GET(request: Request) {
   if (!auth.ok) return auth.response;
 
   const url = new URL(request.url);
-  const cursor = url.searchParams.get("cursor");
-  const limit = Math.min(Number(url.searchParams.get("limit") ?? "50"), 100);
+  const cursor = url.searchParams.get("cursor") ? { id: url.searchParams.get("cursor")! } : undefined;
+  const limit = Math.min(Math.max(Number(url.searchParams.get("limit")) || 50, 1), 100);
 
-  const webhooks = await prisma.notificationWebhook.findMany({
-    take: limit + 1,
-    ...(cursor ? { skip: 1, where: { id: { gt: cursor } } } : {}),
-    orderBy: { createdAt: "asc" },
-    select: {
-      id: true,
-      name: true,
-      type: true,
-      url: true,
-      events: true,
-      enabled: true,
-      createdAt: true,
-    },
-  });
+  let webhooks;
+  try {
+    webhooks = await prisma.notificationWebhook.findMany({
+      take: limit + 1,
+      ...(cursor ? { skip: 1, cursor } : {}),
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        url: true,
+        events: true,
+        enabled: true,
+        createdAt: true,
+      },
+    });
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "P2025" || /cursor/i.test((err as Error).message ?? "")) {
+      return apiError("Invalid cursor", 400);
+    }
+    throw err;
+  }
 
   const hasNext = webhooks.length > limit;
   const items = hasNext ? webhooks.slice(0, limit) : webhooks;

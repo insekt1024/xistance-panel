@@ -38,6 +38,20 @@ interface ImportedConfig {
   config?: unknown;
 }
 
+const KNOWN_METHODS = ["BACKHAUL", "FRP", "GOST", "SSH", "PORT_FORWARD"];
+
+// The server validates `config` against a discriminated union on `method`,
+// so derive the method from the config shape itself (the authoritative source).
+function deriveMethod(cfg: unknown): string | null {
+  if (!cfg || typeof cfg !== "object") return null;
+  const c = cfg as Record<string, unknown>;
+  for (const k of ["backhaul", "frp", "gost", "ssh"]) {
+    if (c[k] !== undefined) return k.toUpperCase();
+  }
+  if (Array.isArray(c.portForwards)) return "PORT_FORWARD";
+  return null;
+}
+
 export function ImportDialog({ nodes }: { nodes: ImportNode[] }) {
   const t = useTranslations("tunnels");
   const tCommon = useTranslations("common");
@@ -117,6 +131,13 @@ export function ImportDialog({ nodes }: { nodes: ImportNode[] }) {
 
   async function deploy() {
     if (!parsed || !clientNodeId || !serverNodeId || !tunnelName.trim()) return;
+    const method =
+      deriveMethod(parsed.config) ??
+      (parsed.method && KNOWN_METHODS.includes(parsed.method) ? parsed.method : null);
+    if (!method) {
+      toast.error(t("importUnknownMethod"));
+      return;
+    }
     setDeploying(true);
     const res = await apiFetch("/api/tunnels", {
       method: "POST",
@@ -124,7 +145,8 @@ export function ImportDialog({ nodes }: { nodes: ImportNode[] }) {
         name: tunnelName.trim(),
         clientNodeId,
         serverNodeId,
-        config: parsed.config,
+        method,
+        config: { ...(parsed.config as Record<string, unknown>), method },
         autostart,
       }),
     });

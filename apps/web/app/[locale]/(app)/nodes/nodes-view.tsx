@@ -45,8 +45,8 @@ export interface NodeRow {
   sshUser: string;
   authMethod: string;
   status: string;
-  sshKeyEncrypted: string | null;
-  sshPasswordEnc: string | null;
+  hasKey: boolean;
+  hasPassword: boolean;
   createdAt: string;
 }
 
@@ -76,10 +76,15 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
   const [testResult, setTestResult] = React.useState<Record<string, boolean>>({});
 
   const nameField = useFieldValidation(form.name, { required: true, minLength: 2, maxLength: 64 });
+  // Lenient on purpose: IPv6 (::1), IDNs and plain hostnames must all pass;
+  // the server schema (z.string().min(1)) is the authority.
   const hostField = useFieldValidation(form.host, {
     required: true,
-    pattern: /^[\w.-]+$/,
-    patternMessage: "Invalid hostname or IP",
+    validate: (v) => {
+      if (!v.trim()) return undefined;
+      if (/[\s\x00-\x1f\x7f]/.test(v)) return "Invalid hostname or IP";
+      return undefined;
+    },
   });
   const usernameField = useFieldValidation(form.username, { required: true, minLength: 1 });
   const keyField = useFieldValidation(form.key, {
@@ -92,17 +97,21 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
   const editNameField = useFieldValidation(editForm.name, { required: true, minLength: 2, maxLength: 64 });
   const editHostField = useFieldValidation(editForm.host, {
     required: true,
-    pattern: /^[\w.-]+$/,
-    patternMessage: "Invalid hostname or IP",
+    validate: (v) => {
+      if (!v.trim()) return undefined;
+      if (/[\s\x00-\x1f\x7f]/.test(v)) return "Invalid hostname or IP";
+      return undefined;
+    },
   });
   const editUsernameField = useFieldValidation(editForm.username, { required: true, minLength: 1 });
-  const editKeyField = useFieldValidation(editForm.key, {
-    validate: (v) =>
-      editForm.authMethod === "key" && !v.trim() ? "SSH key is required" : undefined,
-  });
+  // Edit mode keeps the stored key when the field is left empty, so unlike the
+  // create form the key is optional here (blank secrets are omitted on submit).
+  const editKeyField = useFieldValidation(editForm.key, {});
 
+  // Key is optional when editing (empty = keep stored key), so it must not
+  // gate the save button.
   const isEditValid =
-    editNameField.valid && editHostField.valid && editUsernameField.valid && editKeyField.valid;
+    editNameField.valid && editHostField.valid && editUsernameField.valid;
 
   async function submit() {
     setSaving(true);
@@ -138,9 +147,13 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
   async function editSubmit() {
     if (!editingNode) return;
     setSaving(true);
+    // Blank secrets mean "keep existing" — omit them so stored values survive.
+    const payload: Record<string, unknown> = { ...editForm };
+    if (!editForm.key.trim()) delete payload.key;
+    if (!editForm.password.trim()) delete payload.password;
     const res = await apiFetch(`/api/nodes/${editingNode.id}`, {
       method: "PUT",
-      body: JSON.stringify(editForm),
+      body: JSON.stringify(payload),
     });
     setSaving(false);
     if (res.ok) {
@@ -212,7 +225,7 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
                 <TableCell>{n.sshPort}</TableCell>
                 <TableCell>
                   {n.authMethod === "key" ? (
-                    n.sshKeyEncrypted ? (
+                    n.hasKey ? (
                       "🔑 key"
                     ) : (
                       <span className="text-muted-foreground">key —</span>
@@ -437,7 +450,6 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
               <div className="space-y-1.5">
                 <label className="text-sm font-medium">
                   {t("key")}
-                  <span className="ml-0.5 text-destructive">*</span>
                 </label>
                 <textarea
                   className={`min-h-20 w-full rounded-md bg-transparent px-3 py-2 font-mono text-xs shadow-sm transition-all duration-200 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 ${
@@ -445,7 +457,7 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
                       ? "border border-destructive focus-visible:ring-destructive/30"
                       : "border border-input focus-visible:ring-ring"
                   }`}
-                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                  placeholder={t("keepExistingKey")}
                   value={editForm.key}
                   onChange={(e) => setEditForm({ ...editForm, key: e.target.value })}
                   onBlur={() => editKeyField.setTouched(true)}
@@ -463,6 +475,7 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
                 <Input
                   type="password"
                   value={editForm.password}
+                  placeholder={t("keepExistingKey")}
                   onChange={(e) => setEditForm({ ...editForm, password: e.target.value })}
                 />
               </div>

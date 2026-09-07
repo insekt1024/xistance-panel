@@ -20,20 +20,16 @@ export function rateLimit(
   const now = Date.now();
   const existing = buckets.get(key);
   if (!existing || now > existing.resetAt) {
+    // Refresh recency so insertion order tracks last use (Map.set on an
+    // existing key keeps its original position, which would otherwise pin
+    // reused keys at the "oldest" slot and get them wrongly evicted).
+    if (existing) buckets.delete(key);
     if (buckets.size >= MAX_BUCKETS) {
-      // Evict oldest expired bucket; if none expired, drop the oldest by resetAt.
-      let evicted = false;
-      for (const [k, v] of buckets) {
-        if (now > v.resetAt) { buckets.delete(k); evicted = true; break; }
-      }
-      if (!evicted) {
-        let oldestKey = "";
-        let oldestReset = Infinity;
-        for (const [k, v] of buckets) {
-          if (v.resetAt < oldestReset) { oldestReset = v.resetAt; oldestKey = k; }
-        }
-        if (oldestKey) buckets.delete(oldestKey);
-      }
+      // O(1) eviction: Map preserves insertion order, so the first key is
+      // the least-recently-reset bucket. (Previously this scanned all
+      // buckets for the oldest resetAt on every insert while full.)
+      const oldest = buckets.keys().next();
+      if (!oldest.done) buckets.delete(oldest.value);
     }
     buckets.set(key, { count: 1, resetAt: now + windowMs });
     return { ok: true, remaining: limit - 1 };

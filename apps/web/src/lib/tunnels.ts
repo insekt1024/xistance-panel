@@ -26,8 +26,18 @@ export function loadTunnelConfig(
     typeof stored === "object" && stored !== null && "enc" in stored
       ? (stored as { enc: string }).enc
       : JSON.stringify(stored);
-  const parsed = TunnelConfigSchema.parse(JSON.parse(decryptSecret(raw)));
-  return parsed;
+  try {
+    const parsed = TunnelConfigSchema.parse(JSON.parse(decryptSecret(raw)));
+    return parsed;
+  } catch {
+    // Legacy plaintext configs (pre-encryption rows store raw JSON): fall
+    // back to parsing the stored value directly instead of crashing.
+    // Only throw if BOTH the decrypt path and the plaintext path fail.
+    const plain = typeof stored === "string" ? stored : JSON.stringify(stored);
+    const parsed = TunnelConfigSchema.parse(JSON.parse(plain));
+    console.warn("[tunnels] loaded legacy plaintext tunnel config; re-save to migrate to encrypted storage");
+    return parsed;
+  }
 }
 
 // ---------------------------------------------------------------------------

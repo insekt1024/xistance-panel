@@ -1,6 +1,6 @@
 import { prisma } from "@xistance/db";
 import { getEngine } from "@/lib/engine";
-import { requireSession, json } from "@/lib/api";
+import { apiError, requireSession, json } from "@/lib/api";
 import { rateLimit } from "@/lib/rate-limit";
 import { cached } from "@/lib/query-cache";
 
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   const session = await requireSession(request, "ADMIN");
   if (!session.ok) return session.response;
   const rl = rateLimit(`metrics:${session.user.id}`, 20, 60_000);
-  if (!rl.ok) return json({ error: "Too many requests, slow down" }, 429);
+  if (!rl.ok) return apiError("Too many requests, slow down", 429);
 
   const data = await cached("metrics:summary", 20_000, async () => {
     const [

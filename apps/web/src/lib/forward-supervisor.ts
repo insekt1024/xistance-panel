@@ -104,11 +104,11 @@ export async function reconcilePortForwards(): Promise<void> {
           node.type === "IRAN" ? node : null,
           node.type === "FOREIGN" ? node : null,
         );
-        if (engine.has(tunnelId)) {
-          await engine.restart(tunnelId);
-        } else {
-          await engine.deploy(spec);
-        }
+        // Always go through the deploy path: engine.restart() only restarts the
+        // existing processes and never rewrites rules.json, so rule edits
+        // would never take effect. deploy() rewrites the files AND disposes
+        // the predecessor runtime first (see TunnelEngine.deploy).
+        await engine.deploy(spec);
         return { nodeId, node, success: true };
       } catch (err) {
         console.error(`[port-forward] deploy to ${node.name} failed`, err);

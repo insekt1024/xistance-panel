@@ -28,9 +28,8 @@ export async function GET(request: Request) {
     prisma.tunnel.findMany({
       where: {
         name: { contains: like },
-        ...(auth.user.role === "USER"
-          ? { OR: [{ ownerId: auth.user.id }, { ownerId: null }] }
-          : {}),
+        // Ownerless (ownerId null) tunnels 403 on detail for USER, so don't surface them either.
+        ...(auth.user.role === "USER" ? { ownerId: auth.user.id } : {}),
       },
       take: MAX_PER_TYPE,
       select: {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { prisma } from "@xistance/db";
-import { auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
+import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 import { reconcilePortForwards } from "@/lib/forward-supervisor";
 import { invalidateCache } from "@/lib/query-cache";
 
@@ -22,25 +22,34 @@ export async function GET(request: Request) {
   if (!auth.ok) return auth.response;
   const { searchParams } = new URL(request.url);
   const cursor = searchParams.get("cursor") ? { id: searchParams.get("cursor")! } : undefined;
-  const limit = Math.min(Number(searchParams.get("limit")) || LIST_LIMIT, 100);
+  const limit = Math.min(Math.max(Number(searchParams.get("limit")) || LIST_LIMIT, 1), 100);
   const where = auth.user.role === "USER" ? { userId: auth.user.id } : undefined;
-  const portForwards = await prisma.portForward.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    take: limit + 1,
-    ...(cursor ? { skip: 1, cursor } : {}),
-    select: {
-      id: true,
-      name: true,
-      direction: true,
-      protocol: true,
-      sourcePort: true,
-      destHost: true,
-      destPort: true,
-      enabled: true,
-      status: true,
-    },
-  });
+  let portForwards;
+  try {
+    portForwards = await prisma.portForward.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: limit + 1,
+      ...(cursor ? { skip: 1, cursor } : {}),
+      select: {
+        id: true,
+        name: true,
+        direction: true,
+        protocol: true,
+        sourcePort: true,
+        destHost: true,
+        destPort: true,
+        enabled: true,
+        status: true,
+      },
+    });
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "P2025" || /cursor/i.test((err as Error).message ?? "")) {
+      return apiError("Invalid cursor", 400);
+    }
+    throw err;
+  }
   const hasNext = portForwards.length > limit;
   const items = hasNext ? portForwards.slice(0, limit) : portForwards;
   const nextCursor = hasNext ? items[items.length - 1].id : null;

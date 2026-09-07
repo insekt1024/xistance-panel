@@ -113,6 +113,11 @@ export interface SshConnection {
   configDir?: string;
 }
 
+/** Single-quote a string for POSIX sh (escapes embedded single quotes). */
+function shQuote(s: string): string {
+  return `'${s.replaceAll("'", `'"'"'`)}'`;
+}
+
 function sshPassEnv(conn: SshConnection): Record<string, string> | undefined {
   if (conn.authMethod === "password" && conn.password) {
     return { SSHPASS: conn.password };
@@ -148,6 +153,10 @@ export class RemoteRunner implements Runner {
   constructor(private readonly conn: SshConnection) {}
 
   private baseArgs(cmd: string): string[] {
+    // NOTE: BatchMode=yes must NOT be set for password auth — it disables
+    // password/keyboard-interactive prompts, which breaks sshpass logins.
+    // (Same rule as apps/web/app/api/nodes/[id]/test/route.ts.)
+    const usePassword = this.conn.authMethod === "password" && Boolean(this.conn.password);
     return [
       ...sshPassPrefix(this.conn),
       "ssh",
@@ -157,8 +166,7 @@ export class RemoteRunner implements Runner {
       "StrictHostKeyChecking=accept-new",
       "-o",
       "ConnectTimeout=15",
-      "-o",
-      "BatchMode=yes",
+      ...(usePassword ? [] : ["-o", "BatchMode=yes"]),
       ...sshIdentityArgs(this.conn),
       `${this.conn.username}@${this.conn.host}`,
       "bash", "-lc", cmd,
@@ -210,9 +218,13 @@ export class RemoteRunner implements Runner {
   async writeFile(p: string, content: string, mode?: number): Promise<void> {
     await this.makeDir(path.dirname(p));
     // Base64 over stdin avoids quoting pitfalls on remote shell.
+    // Single `bash -lc` invocation: run() already wraps argv in one remote
+    // `bash -lc '<cmd>'`, so passing ["bash","-lc",script] would double-wrap
+    // (the outer shell would swallow the script as $0/$1 instead of running it).
     const b64 = Buffer.from(content, "utf8").toString("base64");
-    const target = `echo ${b64} | base64 -d > '${p}'` + (mode ? ` && chmod ${mode.toString(8)} '${p}'` : "");
-    const res = await this.run(["bash", "-lc", target]);
+    const target = shQuote(p);
+    const script = `echo ${b64} | base64 -d > ${target}` + (mode ? ` && chmod ${mode.toString(8)} ${target}` : "");
+    const res = await this.runScript(script);
     if (res.exitCode !== 0) {
       throw new Error(`Failed to write remote file ${p}: ${res.stderr}`);
     }
@@ -230,8 +242,35 @@ export class RemoteRunner implements Runner {
   }
 
   async exists(p: string): Promise<boolean> {
-    const res = await this.run(["test", "-e", p, "&&", "echo", "yes", "||", "echo", "no"]);
+    // Single-string form: `&&`/`||` must be parsed by ONE remote shell.
+    // Passing them as separate argv elements would single-quote each one
+    // remotely (always false). runScript() issues a single `bash -lc`.
+    const res = await this.runScript(`test -e ${shQuote(p)} && echo yes || echo no`);
     return res.stdout.trim() === "yes";
+  }
+
+  /** Run an opaque shell script via a single remote `bash -lc` invocation. */
+  private runScript(
+    script: string,
+    opts?: { timeoutMs?: number; env?: Record<string, string> },
+  ): Promise<RunResult> {
+    const args = this.baseArgs(script);
+    const passEnv = sshPassEnv(this.conn);
+    const env = passEnv ? { ...process.env, ...passEnv, ...opts?.env } : { ...process.env, ...opts?.env };
+    return new Promise((resolve) => {
+      execFile(
+        args[0],
+        args.slice(1),
+        { timeout: opts?.timeoutMs ?? 60_000, maxBuffer: 10 * 1024 * 1024, env },
+        (err, stdout, stderr) => {
+          resolve({
+            exitCode: err ? 1 : 0,
+            stdout: String(stdout),
+            stderr: String(stderr),
+          });
+        },
+      );
+    });
   }
 }
 

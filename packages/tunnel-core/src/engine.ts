@@ -97,7 +97,8 @@ interface Runtime {
 export class TunnelEngine {
   private readonly runtimes = new Map<string, Runtime>();
   private readonly mgrCache = new Map<string, ProcessManager>();
-  private readonly systemBinCache = new Map<string, string>();
+  private readonly systemBinCache = new Map<string, { at: number; path: string }>();
+  private static readonly SYSTEM_BIN_CACHE_TTL = 10 * 60_000;
   readonly bus: EventBus;
 
   // Short-lived status memoisation: page polls and the sampler call status()
@@ -106,7 +107,10 @@ export class TunnelEngine {
   private readonly statusCache = new Map<string, { at: number; status: Status }>();
   private static readonly STATUS_CACHE_TTL = 1_500;
   // Per-process isRunning cache: avoids re-spawning SSH sessions for every poll.
-  // Keyed by process handle unit name; each entry has its own TTL.
+  // Keyed by process handle unit name (one entry per process, not per tunnel:
+  // a tunnel owns several processes, so tunnel id alone would collide).
+  // Unit names embed the full tunnel UUID (see sanitizeUnit), so distinct
+  // tunnels cannot poison each other's entries.
   private readonly processRunningCache = new Map<string, { at: number; running: boolean }>();
   private static readonly PROCESS_RUNNING_CACHE_TTL = 3_000;
 
@@ -170,7 +174,7 @@ export class TunnelEngine {
   private async systemBin(ctx: NodeCtx, name: string): Promise<string> {
     const key = `${ctx.name}:${name}`;
     const hit = this.systemBinCache.get(key);
-    if (hit) return hit;
+    if (hit && Date.now() - hit.at < TunnelEngine.SYSTEM_BIN_CACHE_TTL) return hit.path;
     const res = await ctx.runner.run(["which", name]);
     const found = res.stdout.trim();
     if (res.exitCode !== 0 || !found) {
@@ -179,13 +183,21 @@ export class TunnelEngine {
           `Install it (Ubuntu/Debian: apt install ${name}) and retry.`,
       );
     }
-    this.systemBinCache.set(key, found);
+    this.systemBinCache.set(key, { at: Date.now(), path: found });
     return found;
   }
 
   // ---- deploy -------------------------------------------------------------
 
   async deploy(spec: TunnelDeploySpec): Promise<void> {
+    // Dispose any predecessor runtime for this id first: without this,
+    // redeploys (e.g. port-forward rule updates) leak the old processes and
+    // orphan their systemd units while the map entry is overwritten.
+    const prev = this.runtimes.get(spec.id);
+    if (prev) {
+      await Promise.all(prev.processes.map((p) => p.handle.dispose()));
+      this.runtimes.delete(spec.id);
+    }
     const plan = await this.buildPlan(spec);
     await this.ensureBinaries(spec);
     const procs: RunningProcess[] = [];
@@ -238,8 +250,15 @@ export class TunnelEngine {
   async remove(id: string): Promise<void> {
     const rt = this.runtimes.get(id);
     if (rt) {
+      // Capture cache keys BEFORE deleting the runtime: invalidateStatus()
+      // looks the runtime up by id to find its processes, so evicting after
+      // the delete would leave stale processRunningCache entries behind.
+      const cacheKeys = rt.processes.map(
+        (p) => p.spec.unitName || p.spec.id || String(p.constructor.name),
+      );
       await Promise.all(rt.processes.map((p) => p.handle.dispose()));
       this.runtimes.delete(id);
+      for (const k of cacheKeys) this.processRunningCache.delete(k);
     }
     this.invalidateStatus(id);
   }
@@ -694,7 +713,8 @@ export class TunnelEngine {
             `${rule.protocol}-${rule.sourcePort}`,
             [
               this.binPath(ctx, "gost"),
-              `-L ${rule.protocol}://:${rule.sourcePort}/${rule.destHost}:${rule.destPort}`,
+              "-L",
+              `${rule.protocol}://:${rule.sourcePort}/${rule.destHost}:${rule.destPort}`,
             ],
             ctx,
           ),
@@ -743,7 +763,9 @@ function processSpec(
 }
 
 function sanitizeUnit(id: string): string {
-  return id.replace(/[^A-Za-z0-9_\-]/g, "_").slice(0, 32);
+  // systemd unit names allow up to 256 chars: no need to truncate to 32,
+  // which collided distinct 36-char UUID tunnel ids sharing a prefix.
+  return id.replace(/[^A-Za-z0-9_\-]/g, "_").slice(0, 200);
 }
 
 async function readJournalctl(unitName: string, lines: number, ctx: NodeCtx): Promise<string[]> {

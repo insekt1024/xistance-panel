@@ -144,7 +144,14 @@
     "batchStarted": "تونل‌های انتخاب شده شروع شدند",
     "batchStopped": "تونل‌های انتخاب شده متوقف شدند",
     "batchRestarted": "تونل‌های انتخاب شده مجدداً راه‌اندازی شدند",
-    "clearSelection": "پاک کردن انتخاب"
+    "clearSelection": "پاک کردن انتخاب",
+    "importUnknownMethod": "نمی‌توان روش تونل را از این پیکربندی تشخیص داد",
+    "logSearchPlaceholder": "جستجو در لاگ‌ها…",
+    "logLevelAll": "همه سطوح",
+    "logLevelStdout": "stdout",
+    "logLevelStderr": "stderr",
+    "logWaiting": "در انتظار خروجی…",
+    "logNoMatch": "خط منطبقی یافت نشد"
   },
   "methods": {
     "BACKHAUL": "بک‌هاول",
@@ -251,7 +258,10 @@
     "addRule": "افزودن قانون",
     "emptyRules": "حداقل یک قانون پورت‌فوروارد اضافه کنید",
     "emptyProxies": "حداقل یک پروکسی FRP اضافه کنید",
-    "enabled": "فعال"
+    "enabled": "فعال",
+    "fieldRequired": "{field} الزامی است",
+    "invalidPort": "{field} باید بین 1 تا 65535 باشد",
+    "sshIncomplete": "برای SSH میزبان، نام کاربری، پورت محلی و پورت راه دور الزامی است"
   },
   "nodes": {
     "title": "گره‌ها",
@@ -275,7 +285,8 @@
     "empty": "هنوز گره‌ای اضافه نشده است. سرورهای خود را اضافه کنید.",
     "deleteConfirm": "گره «{name}» حذف شود؟",
     "deleted": "گره حذف شد",
-    "saved": "گره ذخیره شد"
+    "saved": "گره ذخیره شد",
+    "keepExistingKey": "خالی بگذارید تا کلید فعلی حفظ شود"
   },
   "portForward": {
     "title": "انتقال پورت",
@@ -295,7 +306,9 @@
     "deleted": "قانون حذف شد",
     "saved": "قانون ذخیره شد",
     "tcp": "TCP",
-    "udp": "UDP"
+    "udp": "UDP",
+    "fieldRequired": "{field} الزامی است",
+    "invalidPort": "{field} باید بین 1 تا 65535 باشد"
   },
   "tools": {
     "title": "ابزارهای تست",
@@ -448,6 +461,9 @@
     "hint": "برای جستجو در تونل‌ها، گره‌ها و کاربران تایپ کنید",
     "tunnels": "تونل‌ها",
     "nodes": "گره‌ها",
-    "users": "کاربران"
+    "users": "کاربران",
+    "navigate": "پیمایش",
+    "select": "انتخاب",
+    "resultsCount": "{count, plural, one {# نتیجه} other {# نتیجه}}"
   }
 }

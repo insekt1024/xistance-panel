@@ -41,9 +41,47 @@ export function buildSshCommand(
   }
 
   args.push(`-p`, String(cfg.port), `${cfg.username}@${cfg.host}`);
-  for (const extra of cfg.extraArgs ?? []) args.push(extra);
+  // Defense in depth: only allow a small set of harmless -o options even if
+  // a caller bypasses schema validation. Anything else is dropped silently.
+  for (const extra of filterExtraArgs(cfg.extraArgs ?? [])) args.push(extra);
 
   return args;
+}
+
+// Safe -o keys: numeric/boolean/enum values only. Notably EXCLUDED:
+// ProxyCommand, LocalCommand, PermitLocalCommand, ForwardAgent,
+// ForwardX11, IdentityFile, IdentityAgent, ControlPath, Match, Include.
+const SAFE_SSH_OPTIONS = new Set([
+  "Compression",
+  "ConnectTimeout",
+  "ConnectionAttempts",
+  "ExitOnForwardFailure",
+  "LogLevel",
+  "ServerAliveCountMax",
+  "ServerAliveInterval",
+  "StrictHostKeyChecking",
+  "TCPKeepAlive",
+]);
+
+const SAFE_SSH_VALUE = /^[A-Za-z0-9._-]+$/;
+
+export function filterExtraArgs(extras: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < extras.length; i++) {
+    const arg = extras[i];
+    // Only accept pairs shaped exactly like: "-o", "Key=Value"
+    if (arg !== "-o" || i + 1 >= extras.length) continue;
+    const kv = extras[i + 1];
+    const eq = kv.indexOf("=");
+    if (eq <= 0) continue;
+    const key = kv.slice(0, eq);
+    const value = kv.slice(eq + 1);
+    if (!SAFE_SSH_OPTIONS.has(key)) continue;
+    if (!SAFE_SSH_VALUE.test(value)) continue;
+    out.push("-o", `${key}=${value}`);
+    i++; // consumed the value
+  }
+  return out;
 }
 
 /** True if the tunnel requires the sshpass wrapper to supply a password. */

@@ -242,20 +242,91 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
     setStep((s) => Math.min(s + 1, 3));
   }
 
+  function isPort(n: number): boolean {
+    return Number.isInteger(n) && n >= 1 && n <= 65535;
+  }
+
   function validateConfig(): boolean {
     if (!name.trim()) {
       toast.error(t("nameMissing"));
       return false;
     }
-    if (method === "FRP" && frp.proxies.length === 0) {
-      toast.error(t("emptyProxies"));
+    const fail = (msg: string) => {
+      toast.error(msg);
       return false;
+    };
+    switch (method) {
+      case "BACKHAUL": {
+        if (!isPort(bh.listenPort)) return fail(t("invalidPort", { field: t("listenPort") }));
+        if (!bh.remoteHost.trim()) return fail(t("fieldRequired", { field: t("remoteHost") }));
+        for (let i = 0; i < bh.portMap.length; i++) {
+          const m = bh.portMap[i];
+          if (!isPort(m.local) || !isPort(m.remote)) {
+            return fail(t("invalidPort", { field: `${t("portMap")} #${i + 1}` }));
+          }
+        }
+        return true;
+      }
+      case "FRP": {
+        if (frp.proxies.length === 0) {
+          toast.error(t("emptyProxies"));
+          return false;
+        }
+        if (!isPort(frp.bindPort)) return fail(t("invalidPort", { field: t("bindPort") }));
+        if (frp.dashboard.enabled && frp.dashboard.port && !isPort(frp.dashboard.port)) {
+          return fail(t("invalidPort", { field: t("dashboardPort") }));
+        }
+        for (let i = 0; i < frp.proxies.length; i++) {
+          const p = frp.proxies[i];
+          if (!p.name.trim()) return fail(t("fieldRequired", { field: `${t("proxies")} #${i + 1}` }));
+          if (!isPort(p.localPort)) {
+            return fail(t("invalidPort", { field: `${t("proxyLocalPort")} (#${i + 1})` }));
+          }
+          if (p.remotePort && !isPort(p.remotePort)) {
+            return fail(t("invalidPort", { field: `${t("proxyRemotePort")} (#${i + 1})` }));
+          }
+        }
+        return true;
+      }
+      case "GOST": {
+        if (!isPort(gost.listenPort)) return fail(t("invalidPort", { field: t("listenPort") }));
+        if (!gost.forwardHost.trim()) return fail(t("fieldRequired", { field: t("forwardHost") }));
+        if (gost.forwardPort && !isPort(gost.forwardPort)) {
+          return fail(t("invalidPort", { field: t("forwardPort") }));
+        }
+        if (gost.remotePort && !isPort(gost.remotePort)) {
+          return fail(t("invalidPort", { field: t("remotePort") }));
+        }
+        return true;
+      }
+      case "SSH": {
+        if (!ssh.host.trim() || !ssh.username.trim() || !isPort(ssh.localPort) || !isPort(ssh.remotePort)) {
+          return fail(t("sshIncomplete"));
+        }
+        if (!isPort(ssh.port)) return fail(t("invalidPort", { field: t("remotePort") }));
+        if (!ssh.remoteHost.trim()) return fail(t("fieldRequired", { field: t("remoteHostSvc") }));
+        return true;
+      }
+      case "PORT_FORWARD": {
+        if (rules.length === 0) {
+          toast.error(t("emptyRules"));
+          return false;
+        }
+        for (let i = 0; i < rules.length; i++) {
+          const r = rules[i];
+          if (!r.name.trim()) return fail(t("fieldRequired", { field: `${t("rules")} #${i + 1}` }));
+          if (!r.destHost.trim()) {
+            return fail(t("fieldRequired", { field: `${t("destHost")} (#${i + 1})` }));
+          }
+          if (!isPort(r.sourcePort) || !isPort(r.destPort)) {
+            return fail(t("invalidPort", { field: `${t("sourcePort")}/${t("destPort")} (#${i + 1})` }));
+          }
+        }
+        return true;
+      }
+      default:
+        return true;
     }
-    if (method === "PORT_FORWARD" && rules.length === 0) {
-      toast.error(t("emptyRules"));
-      return false;
-    }
-    return true;
   }
 
   async function deploy() {

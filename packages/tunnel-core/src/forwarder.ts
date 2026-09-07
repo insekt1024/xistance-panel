@@ -24,6 +24,10 @@ export interface ForwardHandle {
 }
 
 const SESSION_TTL_MS = 15_000;
+// Idle TCP relay pairs are destroyed after this long without any bytes in
+// either direction (mirrors the UDP flow TTL idea for long-lived sockets).
+const TCP_IDLE_TIMEOUT_MS = 10 * 60_000;
+const TCP_IDLE_CHECK_MS = 60_000;
 
 interface UdpFlow {
   upstream: dgram.Socket;
@@ -48,6 +52,23 @@ function startTcp(rule: PortForwardRule): Promise<ForwardHandle> {
         host: rule.destHost,
         port: rule.destPort,
       });
+      let lastActivity = Date.now();
+      const touch = () => {
+        lastActivity = Date.now();
+      };
+      client.on("data", touch);
+      upstream.on("data", touch);
+      const idleTimer = setInterval(() => {
+        if (Date.now() - lastActivity > TCP_IDLE_TIMEOUT_MS) {
+          clearInterval(idleTimer);
+          client.destroy();
+          upstream.destroy();
+        }
+      }, TCP_IDLE_CHECK_MS);
+      idleTimer.unref();
+      const clearIdle = () => clearInterval(idleTimer);
+      client.on("close", clearIdle);
+      upstream.on("close", clearIdle);
       client.pipe(upstream).pipe(client);
       upstream.on("error", () => client.destroy());
       client.on("error", () => upstream.destroy());
@@ -132,9 +153,17 @@ function startUdp(rule: PortForwardRule): Promise<ForwardHandle> {
 
 export async function startForwarders(rules: PortForwardRule[]): Promise<ForwardHandle[]> {
   const handles: ForwardHandle[] = [];
-  for (const rule of rules) {
-    if (!rule.enabled) continue;
-    handles.push(await startForwarder(rule));
+  try {
+    for (const rule of rules) {
+      if (!rule.enabled) continue;
+      handles.push(await startForwarder(rule));
+    }
+  } catch (err) {
+    // Roll back already-bound listeners (same pattern as forwarder-runner.ts
+    // main()): without this a mid-batch bind failure leaves half the ports
+    // bound with no handle to stop them.
+    await Promise.all(handles.map((h) => h.stop()));
+    throw err;
   }
   return handles;
 }

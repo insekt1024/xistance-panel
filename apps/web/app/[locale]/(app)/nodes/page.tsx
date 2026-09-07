@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export default async function NodesPage() {
   const t = await getTranslations("nodes");
-  const nodes = await prisma.node.findMany({
+  const rows = await prisma.node.findMany({
     select: {
       id: true,
       name: true,
@@ -22,6 +22,12 @@ export default async function NodesPage() {
     },
     orderBy: { createdAt: "asc" },
   });
+  // Presence booleans only — ciphertext must never reach the client.
+  const nodes = rows.map(({ sshKeyEncrypted, sshPasswordEnc, ...rest }) => ({
+    ...rest,
+    hasKey: !!sshKeyEncrypted,
+    hasPassword: !!sshPasswordEnc,
+  }));
   return (
     <div className="space-y-6">
       <div>

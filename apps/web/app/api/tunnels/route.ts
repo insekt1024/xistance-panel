@@ -37,29 +37,36 @@ export async function GET(request: Request) {
   if (!auth.ok) return auth.response;
   const { searchParams } = new URL(request.url);
   const cursor = searchParams.get("cursor") ? { id: searchParams.get("cursor")! } : undefined;
-  const limit = Math.min(Number(searchParams.get("limit")) || LIST_LIMIT, 100);
-  const where =
-    auth.user.role === "USER"
-      ? { OR: [{ ownerId: auth.user.id }, { ownerId: null }] }
-      : {};
-  const tunnels = await prisma.tunnel.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    take: limit + 1,
-    ...(cursor ? { skip: 1, cursor } : {}),
-    select: {
-      id: true,
-      name: true,
-      method: true,
-      status: true,
-      state: true,
-      port: true,
-      autostart: true,
-      clientNode: { select: { id: true, name: true, type: true } },
-      serverNode: { select: { id: true, name: true, type: true } },
-      owner: { select: { id: true, name: true, email: true } },
-    },
-  });
+  const limit = Math.min(Math.max(Number(searchParams.get("limit")) || LIST_LIMIT, 1), 100);
+  // Ownerless (ownerId null) tunnels 403 on detail for USER, so don't list them either.
+  const where = auth.user.role === "USER" ? { ownerId: auth.user.id } : {};
+  let tunnels;
+  try {
+    tunnels = await prisma.tunnel.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      take: limit + 1,
+      ...(cursor ? { skip: 1, cursor } : {}),
+      select: {
+        id: true,
+        name: true,
+        method: true,
+        status: true,
+        state: true,
+        port: true,
+        autostart: true,
+        clientNode: { select: { id: true, name: true, type: true } },
+        serverNode: { select: { id: true, name: true, type: true } },
+        owner: { select: { id: true, name: true, email: true } },
+      },
+    });
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "P2025" || /cursor/i.test((err as Error).message ?? "")) {
+      return apiError("Invalid cursor", 400);
+    }
+    throw err;
+  }
   const hasNext = tunnels.length > limit;
   const items = hasNext ? tunnels.slice(0, limit) : tunnels;
   const nextCursor = hasNext ? items[items.length - 1].id : null;
@@ -109,14 +116,19 @@ export async function POST(request: Request) {
     }
   }
 
-  const spec = await buildSpec(
-    crypto.randomUUID(),
-    data.name,
-    data.config.method,
-    data.config,
-    clientNode,
-    serverNode,
-  );
+  let spec;
+  try {
+    spec = await buildSpec(
+      crypto.randomUUID(),
+      data.name,
+      data.config.method,
+      data.config,
+      clientNode,
+      serverNode,
+    );
+  } catch {
+    return apiError("Failed to decrypt node credentials", 500);
+  }
 
   try {
     await getEngine().deploy(spec);
@@ -141,5 +153,11 @@ export async function POST(request: Request) {
   });
   await auditLog(auth.user.id, "tunnel.create", tunnel.id, tunnel.name, getClientIp(request));
   invalidateCache();
+  // Don't leak the stored config ciphertext to non-admin callers.
+  if (auth.user.role === "USER") {
+    const { config: _config, ...safeTunnel } = tunnel;
+    void _config;
+    return json({ tunnel: safeTunnel }, 201);
+  }
   return json({ tunnel }, 201);
 }

@@ -144,7 +144,14 @@
     "batchStarted": "Selected tunnels started",
     "batchStopped": "Selected tunnels stopped",
     "batchRestarted": "Selected tunnels restarted",
-    "clearSelection": "Clear"
+    "clearSelection": "Clear",
+    "importUnknownMethod": "Could not detect the tunnel method from this config",
+    "logSearchPlaceholder": "Search logs…",
+    "logLevelAll": "All levels",
+    "logLevelStdout": "stdout",
+    "logLevelStderr": "stderr",
+    "logWaiting": "Waiting for output…",
+    "logNoMatch": "No matching lines"
   },
   "methods": {
     "BACKHAUL": "Backhaul",
@@ -251,7 +258,10 @@
     "addRule": "Add rule",
     "emptyRules": "Add at least one port-forwarding rule",
     "emptyProxies": "Add at least one FRP proxy",
-    "enabled": "Enabled"
+    "enabled": "Enabled",
+    "fieldRequired": "{field} is required",
+    "invalidPort": "{field} must be between 1 and 65535",
+    "sshIncomplete": "SSH needs a host, username, local port and remote port"
   },
   "nodes": {
     "title": "Nodes",
@@ -275,7 +285,8 @@
     "empty": "No nodes yet. Add your servers to start tunneling.",
     "deleteConfirm": "Delete node \"{name}\"?",
     "deleted": "Node deleted",
-    "saved": "Node saved"
+    "saved": "Node saved",
+    "keepExistingKey": "Leave empty to keep existing key"
   },
   "portForward": {
     "title": "Port Forwarding",
@@ -295,7 +306,9 @@
     "deleted": "Rule deleted",
     "saved": "Rule saved",
     "tcp": "TCP",
-    "udp": "UDP"
+    "udp": "UDP",
+    "fieldRequired": "{field} is required",
+    "invalidPort": "{field} must be between 1 and 65535"
   },
   "tools": {
     "title": "Test Tools",
@@ -448,6 +461,9 @@
     "hint": "Type to search across tunnels, nodes and users",
     "tunnels": "Tunnels",
     "nodes": "Nodes",
-    "users": "Users"
+    "users": "Users",
+    "navigate": "navigate",
+    "select": "select",
+    "resultsCount": "{count, plural, one {# result} other {# results}}"
   }
 }

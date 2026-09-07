@@ -54,16 +54,27 @@ export async function requireSession(
   const user = await getSession();
   if (!user) return { ok: false, response: apiError("Unauthorized", 401) };
   const rank: Record<string, number> = { USER: 0, ADMIN: 1, SUPER_ADMIN: 2 };
-  if ((rank[user.role] ?? 0) < rank[minRole]) {
+  // Deny by default: unknown roles get rank -1 (below USER).
+  if ((rank[user.role] ?? -1) < rank[minRole]) {
     return { ok: false, response: apiError("Forbidden", 403) };
   }
   return { ok: true, user };
 }
 
+/**
+ * Best-effort client IP for rate-limit buckets and audit logs.
+ * Proxy headers are attacker-controlled, so they are only trusted when the
+ * operator explicitly sets XT_TRUST_PROXY=true (i.e. a sanitizing reverse
+ * proxy sits in front). Otherwise null — callers must not build bypassable
+ * per-IP-only rate limits on this value.
+ */
 export function getClientIp(request: Request): string | null {
+  if (process.env.XT_TRUST_PROXY !== "true") return null;
   const fwd = request.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0].trim();
-  return request.headers.get("x-real-ip");
+  const raw = (fwd ? fwd.split(",")[0].trim() : request.headers.get("x-real-ip")?.trim()) ?? "";
+  // Sanitize: accept IPs / simple hostnames only, reject header garbage.
+  if (!/^[A-Za-z0-9.:]{1,64}$/.test(raw)) return null;
+  return raw || null;
 }
 
 export async function auditLog(

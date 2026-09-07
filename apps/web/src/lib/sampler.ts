@@ -12,6 +12,11 @@ const SAMPLE_INTERVAL_MS = 60_000;
 const PRUNE_INTERVAL_MS = 60 * 60_000;
 const RETAIN_MS = 7 * 24 * 3600_000;
 const MAX_BATCH = 50;
+// Bound per-tick fan-out: each snapshot() can spawn SSH sessions on remote
+// nodes, so unbounded Promise.all over all tunnels is a thundering herd.
+const SNAPSHOT_CONCURRENCY = 5;
+// Hard cap: skip the tick rather than stampede hundreds of SSH sessions.
+const MAX_MANAGED_PER_TICK = 200;
 
 let started = false;
 let running = false;
@@ -27,8 +32,29 @@ export function startTrafficSampler(): void {
       const tunnels = await prisma.tunnel.findMany({ select: { id: true } });
       const now = Date.now();
       const managed = tunnels.filter((t) => engine.has(t.id));
-      // Snapshot all managed tunnels in parallel, then filter results
-      const snaps = await Promise.all(managed.map((t) => engine.snapshot(t.id)));
+      if (managed.length > MAX_MANAGED_PER_TICK) {
+        console.error(
+          `[sampler] skipping tick: ${managed.length} managed tunnels exceeds cap of ${MAX_MANAGED_PER_TICK}`,
+        );
+        return;
+      }
+      // Snapshot with a bounded worker pool instead of Promise.all over
+      // everything (each snapshot may open SSH sessions to remote nodes).
+      const snaps: Array<Awaited<ReturnType<typeof engine.snapshot>>> = new Array(
+        managed.length,
+      ).fill(null);
+      let next = 0;
+      const workers = Array.from(
+        { length: Math.min(SNAPSHOT_CONCURRENCY, managed.length) },
+        async () => {
+          while (next < managed.length) {
+            const i = next;
+            next += 1;
+            snaps[i] = await engine.snapshot(managed[i].id);
+          }
+        },
+      );
+      await Promise.all(workers);
       const rows: Array<{
         tunnelId: string;
         bytesIn: bigint;

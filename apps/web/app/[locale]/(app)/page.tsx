@@ -1,7 +1,12 @@
 import { Suspense } from "react";
 import { getTranslations } from "next-intl/server";
 import { AutoRefresh } from "@/components/auto-refresh";
-import { StatsSection, DashboardSectionsFallback } from "./dashboard-sections";
+import {
+  ActivitySection,
+  DashboardSectionsFallback,
+  StatsSection,
+  TrafficSection,
+} from "./dashboard-sections";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +26,15 @@ export default async function DashboardPage() {
       <Suspense fallback={<DashboardSectionsFallback />}>
         <StatsSection />
       </Suspense>
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        <Suspense fallback={<DashboardSectionsFallback />}>
+          <TrafficSection />
+        </Suspense>
+        <Suspense fallback={<DashboardSectionsFallback />}>
+          <ActivitySection />
+        </Suspense>
+      </div>
     </div>
   );
 }

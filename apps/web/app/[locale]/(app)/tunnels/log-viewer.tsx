@@ -24,6 +24,12 @@ export function LogViewer({
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const buf = React.useRef<string[]>([]);
   const pausedBuf = React.useRef<string[]>([]);
+  // Whether the reader is pinned near the bottom; only then do we auto-scroll.
+  const stickRef = React.useRef(true);
+  // onClose is an inline fn at the call site — keep it in a ref so effects
+  // below don't re-subscribe on every parent render.
+  const onCloseRef = React.useRef(onClose);
+  onCloseRef.current = onClose;
 
   const isStderr = (line: string) =>
     line.toLowerCase().includes("error") || line.toLowerCase().includes("stderr");
@@ -45,6 +51,19 @@ export function LogViewer({
   const pausedRef = React.useRef(paused);
   pausedRef.current = paused;
 
+  // Track "near bottom" on the Radix viewport (scroll events don't bubble, so
+  // listen natively on the viewport element itself).
+  React.useEffect(() => {
+    const viewport = scrollRef.current?.querySelector("[data-radix-scroll-area-viewport]");
+    if (!viewport) return;
+    const onScroll = () => {
+      const el = viewport as HTMLElement;
+      stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    };
+    viewport.addEventListener("scroll", onScroll, { passive: true });
+    return () => viewport.removeEventListener("scroll", onScroll);
+  }, []);
+
   React.useEffect(() => {
     let disposed = false;
     buf.current = [];
@@ -54,7 +73,7 @@ export function LogViewer({
       .then((r) => r.json())
       .then((d) => {
         if (disposed) return;
-        buf.current = (d.lines ?? []) as string[];
+        buf.current = ((d.lines ?? []) as string[]).slice(-1000);
         if (!pausedRef.current) setLines([...buf.current]);
       })
       .catch(() => {});
@@ -81,6 +100,7 @@ export function LogViewer({
         if (data.type === "log" && data.line) {
           if (pausedRef.current) {
             pausedBuf.current.push(data.line);
+            if (pausedBuf.current.length > 1000) pausedBuf.current = pausedBuf.current.slice(-1000);
           } else {
             buf.current.push(data.line);
             if (buf.current.length > 1000) buf.current = buf.current.slice(-1000);
@@ -102,7 +122,7 @@ export function LogViewer({
   }, [tunnelId]);
 
   React.useEffect(() => {
-    if (!paused) {
+    if (!paused && stickRef.current) {
       bottomRef.current?.scrollIntoView({ block: "end" });
     }
   }, [filteredLines, paused]);
@@ -129,7 +149,7 @@ export function LogViewer({
 
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onCloseRef.current();
     };
     document.addEventListener("keydown", onKey);
     const prevOverflow = document.body.style.overflow;
@@ -138,7 +158,7 @@ export function LogViewer({
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div
@@ -176,7 +196,7 @@ export function LogViewer({
             <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               type="text"
-              placeholder="Search logs…"
+              placeholder={t("logSearchPlaceholder")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="h-8 w-full rounded-md border bg-background pl-8 pr-2 text-xs outline-none focus:ring-1 focus:ring-ring"
@@ -187,9 +207,9 @@ export function LogViewer({
             onChange={(e) => setLevelFilter(e.target.value)}
             className="h-8 rounded-md border bg-background px-2 text-xs outline-none focus:ring-1 focus:ring-ring"
           >
-            <option value="all">All levels</option>
-            <option value="stdout">stdout</option>
-            <option value="stderr">stderr</option>
+            <option value="all">{t("logLevelAll")}</option>
+            <option value="stdout">{t("logLevelStdout")}</option>
+            <option value="stderr">{t("logLevelStderr")}</option>
           </select>
           <Button
             variant={paused ? "default" : "outline"}
@@ -214,7 +234,7 @@ export function LogViewer({
           <div className="p-4">
             {filteredLines.length === 0 && (
               <p className="animate-pulse text-zinc-500">
-                {lines.length === 0 ? "Waiting for output…" : "No matching lines"}
+                {lines.length === 0 ? t("logWaiting") : t("logNoMatch")}
               </p>
             )}
             {filteredLines.map((line, i) => (

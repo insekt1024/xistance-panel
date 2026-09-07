@@ -69,6 +69,23 @@ export function PortForwardView({ rules }: { rules: ForwardRow[] }) {
   const [deleteId, setDeleteId] = React.useState<ForwardRow | null>(null);
 
   async function submit() {
+    // Cheap client-side checks; the server schema remains the authority.
+    if (!form.name.trim()) {
+      toast.error(t("fieldRequired", { field: t("name") }));
+      return;
+    }
+    if (!form.destHost.trim()) {
+      toast.error(t("fieldRequired", { field: t("destHost") }));
+      return;
+    }
+    if (!Number.isInteger(form.sourcePort) || form.sourcePort < 1 || form.sourcePort > 65535) {
+      toast.error(t("invalidPort", { field: t("sourcePort") }));
+      return;
+    }
+    if (!Number.isInteger(form.destPort) || form.destPort < 1 || form.destPort > 65535) {
+      toast.error(t("invalidPort", { field: t("destPort") }));
+      return;
+    }
     setSaving(true);
     const res = await apiFetch("/api/port-forwards", {
       method: "POST",

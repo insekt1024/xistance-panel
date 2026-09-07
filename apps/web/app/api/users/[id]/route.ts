@@ -21,11 +21,26 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
   const body = await parseBody(request, userUpdateSchema);
   if (!body.ok) return body.response;
   const data = body.data;
+  const isSelf = id === auth.user.id;
+  const actorSuper = auth.user.role === "SUPER_ADMIN";
 
-  // Prevent demoting the last super admin to a non-admin role.
-  if (data.role && data.role !== "SUPER_ADMIN" && existing.role === "SUPER_ADMIN") {
-    const superAdmins = await prisma.user.count({ where: { role: "SUPER_ADMIN" } });
-    if (superAdmins <= 1) return apiError("Cannot demote the last super admin", 400);
+  // Promoting anyone to SUPER_ADMIN requires SUPER_ADMIN.
+  if (data.role === "SUPER_ADMIN" && existing.role !== "SUPER_ADMIN" && !actorSuper) {
+    return apiError("Only super admins can grant super admin role", 403);
+  }
+  // Changing a SUPER_ADMIN's role, password, or active flag requires
+  // SUPER_ADMIN (prevents ADMIN takeover of higher-privileged accounts).
+  // Self-service is allowed so users can always update their own profile.
+  if (existing.role === "SUPER_ADMIN" && !isSelf && !actorSuper &&
+      (data.role !== undefined || data.password !== undefined || data.active !== undefined)) {
+    return apiError("Only super admins can modify super admin accounts", 403);
+  }
+
+  // Prevent demoting/deactivating the last super admin to a non-admin role.
+  if (existing.role === "SUPER_ADMIN" &&
+      ((data.role && data.role !== "SUPER_ADMIN") || data.active === false)) {
+    const superAdmins = await prisma.user.count({ where: { role: "SUPER_ADMIN", active: true } });
+    if (superAdmins <= 1) return apiError("Cannot demote or deactivate the last active super admin", 400);
   }
 
   const user = await prisma.user.update({
@@ -48,8 +63,13 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
   if (!auth.ok) return auth.response;
   const { id } = await ctx.params;
   if (id === auth.user.id) return apiError("You cannot delete yourself", 400);
-  const existing = await prisma.user.findUnique({ where: { id }, select: { email: true } });
+  const existing = await prisma.user.findUnique({ where: { id }, select: { email: true, role: true } });
   if (!existing) return apiError("User not found", 404);
+  // Prevent deleting the last active super admin (lockout).
+  if (existing.role === "SUPER_ADMIN") {
+    const superAdmins = await prisma.user.count({ where: { role: "SUPER_ADMIN", active: true } });
+    if (superAdmins <= 1) return apiError("Cannot delete the last active super admin", 400);
+  }
   await prisma.user.delete({ where: { id } });
   await auditLog(auth.user.id, "user.delete", id, existing.email, getClientIp(request));
   return json({ ok: true });

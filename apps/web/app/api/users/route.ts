@@ -47,6 +47,11 @@ export async function POST(request: Request) {
   if (!body.ok) return body.response;
   const data = body.data;
 
+  // Only SUPER_ADMINs may create SUPER_ADMINs; an ADMIN requesting one gets 403.
+  if (data.role === "SUPER_ADMIN" && auth.user.role !== "SUPER_ADMIN") {
+    return apiError("Only super admins can create super admin accounts", 403);
+  }
+
   const existing = await prisma.user.findUnique({ where: { email: data.email.toLowerCase() }, select: { id: true } });
   if (existing) return apiError("Email already in use", 409);
 

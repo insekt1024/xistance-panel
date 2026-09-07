@@ -1,7 +1,7 @@
 import { prisma } from "@xistance/db";
 import { getEngine } from "@/lib/engine";
 import { cached } from "@/lib/query-cache";
-import { DashboardStats } from "./dashboard-stats";
+import { ActivityPanel, StatCards, TrafficPanel, TunnelsTable } from "./dashboard-stats";
 import { DashboardSkeleton } from "./dashboard-skeleton";
 
 const CHART_BUCKET_MS = 30 * 60_000;
@@ -27,7 +27,7 @@ function aggregateTraffic(
 }
 
 export async function StatsSection() {
-  const [tunnels, totalNodes, onlineNodes, portForwards] = await Promise.all([
+  const [tunnels, totalTunnels, totalNodes, onlineNodes, portForwards] = await Promise.all([
     prisma.tunnel.findMany({
       orderBy: { createdAt: "desc" },
       take: 8,
@@ -37,6 +37,7 @@ export async function StatsSection() {
         serverNode: { select: { name: true } },
       },
     }),
+    prisma.tunnel.count(),
     prisma.node.count(),
     prisma.node.count({ where: { status: "online" } }),
     prisma.portForward.count(),
@@ -45,11 +46,46 @@ export async function StatsSection() {
   const engine = getEngine();
   const liveTunnels = await Promise.all(
     tunnels.map(async (tun) => {
-      const live = engine.has(tun.id) ? await engine.status(tun.id) : tun.state;
+      let live = tun.state;
+      if (engine.has(tun.id)) {
+        try {
+          live = await engine.status(tun.id);
+        } catch {
+          // One bad tunnel must not crash the whole section.
+          live = "unknown";
+        }
+      }
       return { ...tun, liveState: live };
     }),
   );
 
+  const running = liveTunnels.filter((x) => x.liveState === "running").length;
+
+  return (
+    <>
+      <StatCards
+        totalTunnels={totalTunnels}
+        activeTunnels={running}
+        totalNodes={totalNodes}
+        onlineNodes={onlineNodes}
+        portForwards={portForwards}
+      />
+      <TunnelsTable
+        tunnels={liveTunnels.map((x) => ({
+          id: x.id,
+          name: x.name,
+          method: x.method,
+          status: x.liveState,
+          port: x.port,
+          clientNode: x.clientNode?.name ?? "—",
+          serverNode: x.serverNode?.name ?? "—",
+        }))}
+      />
+    </>
+  );
+}
+
+export async function TrafficSection() {
   const HOUR_MS = 3600_000;
   const samples = await cached("dashboard:traffic", 10_000, async () => {
     const since = new Date(Date.now() - 24 * HOUR_MS); // eslint-disable-line react-hooks/purity
@@ -61,31 +97,18 @@ export async function StatsSection() {
     return aggregateTraffic(rawSamples);
   });
 
+  return <TrafficPanel samples={samples} />;
+}
+
+export async function ActivitySection() {
   const recentLogs = await prisma.auditLog.findMany({
     include: { actor: { select: { name: true, email: true } } },
     orderBy: { createdAt: "desc" },
     take: 8,
   });
 
-  const running = liveTunnels.filter((x) => x.liveState === "running").length;
-
   return (
-    <DashboardStats
-      totalTunnels={tunnels.length}
-      activeTunnels={running}
-      totalNodes={totalNodes}
-      onlineNodes={onlineNodes}
-      portForwards={portForwards}
-      tunnels={liveTunnels.map((x) => ({
-        id: x.id,
-        name: x.name,
-        method: x.method,
-        status: x.liveState,
-        port: x.port,
-        clientNode: x.clientNode?.name ?? "—",
-        serverNode: x.serverNode?.name ?? "—",
-      }))}
-      samples={samples}
+    <ActivityPanel
       recentActivity={recentLogs.map((l) => ({
         action: l.action,
         target: l.target ?? "",

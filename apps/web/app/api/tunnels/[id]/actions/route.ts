@@ -37,33 +37,51 @@ export async function POST(
    // Fetch only what we need for authorization check
    const tunnel = await prisma.tunnel.findUnique({
      where: { id },
-     select: { id: true, name: true, ownerId: true, clientNodeId: true, serverNodeId: true, method: true },
+     select: { id: true, name: true, ownerId: true, port: true, clientNodeId: true, serverNodeId: true, method: true },
    });
    if (!tunnel) return apiError("Tunnel not found", 404);
    if (auth.user.role === "USER" && tunnel.ownerId !== auth.user.id) {
      return apiError("Forbidden", 403);
    }
 
-   if (!hasTunnel) {
-     if (action === "stop") {
-       await prisma.tunnel.update({ where: { id }, data: { state: "stopped", status: "stopped" } });
-       return json({ ok: true });
-     }
-     // Fetch config and node records in parallel when deploying (avoids sequential round-trips)
-     const [withConfig, client, server] = await Promise.all([
-       prisma.tunnel.findUnique({
-         where: { id },
-         select: { id: true, name: true, method: true, config: true, clientNodeId: true, serverNodeId: true },
-       }),
-       prisma.node.findUnique({
-         where: { id: tunnel.clientNodeId ?? "" },
-         select: { id: true, host: true, sshUser: true, sshPort: true, authMethod: true, sshKeyEncrypted: true, sshPasswordEnc: true },
-       }),
-       prisma.node.findUnique({
-         where: { id: tunnel.serverNodeId ?? "" },
-         select: { id: true, host: true, sshUser: true, sshPort: true, authMethod: true, sshKeyEncrypted: true, sshPasswordEnc: true },
-       }),
-     ]);
+    // Port-conflict check mirrors create: refuse to start when another
+    // running/starting tunnel already holds the port.
+    // NOTE: check-then-act leaves a residual race under concurrent starts;
+    // acceptable — the engine deploy/start path is the final arbiter.
+    if ((action === "start" || action === "restart") && tunnel.port != null) {
+      const conflicting = await prisma.tunnel.findFirst({
+        where: { port: tunnel.port, status: { in: ["running", "starting"] }, NOT: { id } },
+        select: { id: true, name: true },
+      });
+      if (conflicting) {
+        return apiError(`Port ${tunnel.port} is already in use by tunnel "${conflicting.name}"`, 409);
+      }
+    }
+
+    if (!hasTunnel) {
+      if (action === "stop") {
+        await prisma.tunnel.update({ where: { id }, data: { state: "stopped", status: "stopped" } });
+        return json({ ok: true });
+      }
+      const { clientNodeId, serverNodeId } = tunnel;
+      if (!clientNodeId || !serverNodeId) {
+        return apiError("Tunnel has no nodes assigned", 422);
+      }
+      // Fetch config and node records in parallel when deploying (avoids sequential round-trips)
+      const [withConfig, client, server] = await Promise.all([
+        prisma.tunnel.findUnique({
+          where: { id },
+          select: { id: true, name: true, method: true, config: true, clientNodeId: true, serverNodeId: true },
+        }),
+        prisma.node.findUnique({
+          where: { id: clientNodeId },
+          select: { id: true, host: true, sshUser: true, sshPort: true, authMethod: true, sshKeyEncrypted: true, sshPasswordEnc: true },
+        }),
+        prisma.node.findUnique({
+          where: { id: serverNodeId },
+          select: { id: true, host: true, sshUser: true, sshPort: true, authMethod: true, sshKeyEncrypted: true, sshPasswordEnc: true },
+        }),
+      ]);
      if (!withConfig) return apiError("Tunnel not found", 404);
      await engine.deploy(await buildDeploySpec(withConfig, client, server));
    }

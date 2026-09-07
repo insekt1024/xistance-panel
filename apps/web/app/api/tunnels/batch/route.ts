@@ -38,6 +38,7 @@ export async function POST(request: Request) {
       name: true,
       ownerId: true,
       method: true,
+      port: true,
       clientNodeId: true,
       serverNodeId: true,
     },
@@ -83,6 +84,20 @@ export async function POST(request: Request) {
   // Process tunnels sequentially to avoid overwhelming SSH
   for (const tunnel of owned) {
     const hasTunnel = engine.has(tunnel.id);
+    // Port-conflict check mirrors create: refuse to start when another
+    // running/starting tunnel already holds the port.
+    // NOTE: check-then-act leaves a residual race under concurrent starts;
+    // acceptable — the engine deploy/start path is the final arbiter.
+    if (action !== "stop" && tunnel.port != null) {
+      const conflicting = await prisma.tunnel.findFirst({
+        where: { port: tunnel.port, status: { in: ["running", "starting"] }, NOT: { id: tunnel.id } },
+        select: { id: true, name: true },
+      });
+      if (conflicting) {
+        results.push({ id: tunnel.id, ok: false, error: `Port ${tunnel.port} is already in use by tunnel "${conflicting.name}"` });
+        continue;
+      }
+    }
     try {
       if (!hasTunnel) {
         if (action === "stop") {
@@ -129,7 +144,7 @@ export async function POST(request: Request) {
   const foundIds = new Set(tunnels.map((t) => t.id));
   for (const id of tunnelIds) {
     if (!foundIds.has(id)) {
-      results.push({ id, ok: false, error: "Tunnel not found" });
+      results.push({ id, ok: false, error: "Tunnel not found or access denied" });
     }
   }
 

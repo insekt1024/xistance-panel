@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { ArrowDown, ArrowUp, Clock, Gauge } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatBytes } from "@/lib/client";
 import { Button } from "@/components/ui/button";
 
 type Range = "1h" | "6h" | "24h" | "7d";
@@ -26,13 +27,6 @@ const RANGES: { key: Range; label: string }[] = [
   { key: "24h", label: "24h" },
   { key: "7d", label: "7d" },
 ];
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
-}
 
 function formatSpeed(bytesPerSec: number): string {
   if (bytesPerSec < 1024) return `${bytesPerSec.toFixed(0)} B/s`;
@@ -56,22 +50,47 @@ export function TrafficChart({
   const [data, setData] = React.useState(initialData);
   const [loading, setLoading] = React.useState(false);
   const abortRef = React.useRef<AbortController | null>(null);
+  // Monotonic id so a slow earlier range fetch can't overwrite a newer one.
+  const requestIdRef = React.useRef(0);
+  // Unique gradient ids per instance so two charts on one page don't collide.
+  const uid = React.useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const downId = `gDown-${uid}`;
+  const upId = `gUp-${uid}`;
+
+  // NOTE: no resync effect — the parent remounts via key={samples.length}
+  // on fresh data, so initialData is always current at mount.
 
   const fetchRange = React.useCallback(async (r: Range) => {
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     setLoading(true);
     try {
       const res = await fetch(`/api/traffic?range=${r}`, { signal: ac.signal });
       if (res.ok) {
-        const json = await res.json();
-        if (json.ok) setData(json.data);
+        const json = (await res.json()) as { ok?: boolean; data?: unknown };
+        if (json?.ok && Array.isArray(json.data)) {
+          const clean: Array<{ ts: string; bytesIn: number; bytesOut: number }> = [];
+          for (const row of json.data) {
+            const rec = row as Record<string, unknown>;
+            const bytesIn = Number(rec?.bytesIn);
+            const bytesOut = Number(rec?.bytesOut);
+            const ts = String(rec?.ts ?? "");
+            if (Number.isNaN(bytesIn) || Number.isNaN(bytesOut)) continue;
+            if (!ts || Number.isNaN(new Date(ts).getTime())) continue;
+            clean.push({ ts, bytesIn, bytesOut });
+          }
+          if (requestIdRef.current === requestId) setData(clean);
+        } else {
+          console.error("Unexpected traffic response shape", json);
+        }
       }
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
     } finally {
-      if (!ac.signal.aborted) setLoading(false);
+      if (!ac.signal.aborted && requestIdRef.current === requestId) setLoading(false);
     }
   }, []);
 
@@ -94,13 +113,7 @@ export function TrafficChart({
   const avgSpeedIn = rangeMs > 0 ? totalIn / (rangeMs / 1000) : 0;
   const avgSpeedOut = rangeMs > 0 ? totalOut / (rangeMs / 1000) : 0;
 
-  if (data.length === 0 && !loading) {
-    return (
-      <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
-        No traffic yet
-      </div>
-    );
-  }
+  const showEmpty = data.length === 0 && !loading;
 
   const points = data.map((d) => ({
     name: new Date(d.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
@@ -176,37 +189,43 @@ export function TrafficChart({
       </div>
 
       {/* Chart */}
+      {showEmpty ? (
+        <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
+          No traffic yet
+        </div>
+      ) : (
       <ResponsiveContainer width="100%" height={224}>
         {chartType === "area" ? (
           <AreaChart data={points} margin={{ top: 4, right: 4, bottom: 0, left: -16 }}>
             <defs>
-              <linearGradient id="gDown" x1="0" y1="0" x2="0" y2="1">
+              <linearGradient id={downId} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="var(--color-primary)" stopOpacity={0.3} />
                 <stop offset="100%" stopColor="var(--color-primary)" stopOpacity={0} />
               </linearGradient>
-              <linearGradient id="gUp" x1="0" y1="0" x2="0" y2="1">
+              <linearGradient id={upId} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor="var(--color-success)" stopOpacity={0.3} />
                 <stop offset="100%" stopColor="var(--color-success)" stopOpacity={0} />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
             <XAxis dataKey="name" {...sharedAxisProps} minTickGap={40} />
-            <YAxis {...sharedAxisProps} tickFormatter={(v: number) => `${v}K`} />
+            <YAxis {...sharedAxisProps} tickFormatter={(v: number) => formatBytes(v * 1024)} />
             <Tooltip formatter={tooltipFormatter} contentStyle={tooltipStyle} cursor={{ stroke: "var(--color-muted-foreground)", strokeOpacity: 0.3 }} animationDuration={150} />
-            <Area type="monotone" dataKey="down" stroke="var(--color-primary)" strokeWidth={2} fill="url(#gDown)" animationDuration={700} animationEasing="ease-out" activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--color-background)" }} />
-            <Area type="monotone" dataKey="up" stroke="var(--color-success)" strokeWidth={2} fill="url(#gUp)" animationDuration={900} animationEasing="ease-out" activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--color-background)" }} />
+            <Area type="monotone" dataKey="down" stroke="var(--color-primary)" strokeWidth={2} fill={`url(#${downId})`} animationDuration={700} animationEasing="ease-out" activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--color-background)" }} />
+            <Area type="monotone" dataKey="up" stroke="var(--color-success)" strokeWidth={2} fill={`url(#${upId})`} animationDuration={900} animationEasing="ease-out" activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--color-background)" }} />
           </AreaChart>
         ) : (
           <LineChart data={points} margin={{ top: 4, right: 4, bottom: 0, left: -16 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false} />
             <XAxis dataKey="name" {...sharedAxisProps} minTickGap={40} />
-            <YAxis {...sharedAxisProps} tickFormatter={(v: number) => `${v}K`} />
+            <YAxis {...sharedAxisProps} tickFormatter={(v: number) => formatBytes(v * 1024)} />
             <Tooltip formatter={tooltipFormatter} contentStyle={tooltipStyle} cursor={{ stroke: "var(--color-muted-foreground)", strokeOpacity: 0.3 }} animationDuration={150} />
             <Line type="monotone" dataKey="down" stroke="var(--color-primary)" strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--color-background)" }} animationDuration={700} animationEasing="ease-out" />
             <Line type="monotone" dataKey="up" stroke="var(--color-success)" strokeWidth={2} dot={false} activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--color-background)" }} animationDuration={900} animationEasing="ease-out" />
           </LineChart>
         )}
       </ResponsiveContainer>
+      )}
 
       {/* Summary stats row */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
