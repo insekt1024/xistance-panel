@@ -1,6 +1,6 @@
 {
   "name": "@xistance/web",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "scripts": {
     "predev": "npx tsc -p ../../packages/types/tsconfig.build.json && npx tsc -p ../../packages/tunnel-core/tsconfig.build.json && npx tsc -p ../../packages/i18n/tsconfig.build.json",
