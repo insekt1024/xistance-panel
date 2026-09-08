@@ -46,8 +46,15 @@ export type SafeUser = Pick<
   "id" | "email" | "name" | "role" | "quota" | "locale" | "active" | "createdAt"
 >;
 
-export async function createSession(user: SafeUser): Promise<void> {
+/**
+ * Create a session. `secure` controls the Secure cookie flag: it must only be
+ * set when the client actually uses HTTPS, otherwise browsers (and curl)
+ * silently drop the cookies and login appears broken over plain HTTP.
+ * Defaults to NODE_ENV-based detection for callers without request context.
+ */
+export async function createSession(user: SafeUser, opts?: { secure?: boolean }): Promise<void> {
   const store = await cookies();
+  const useSecure = opts?.secure ?? secure();
   const refresh = randomToken(48);
   await prisma.session.create({
     data: {
@@ -66,7 +73,7 @@ export async function createSession(user: SafeUser): Promise<void> {
   const common = {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: secure(),
+    secure: useSecure,
     path: "/",
   };
   store.set(ACCESS_COOKIE, access, { ...common, maxAge: ACCESS_TTL_S });

@@ -46,15 +46,23 @@ export async function POST(request: Request) {
   }
   await auditLog(user.id, "auth.login", undefined, undefined, getClientIp(request));
 
-  await createSession({
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    quota: user.quota,
-    locale: user.locale,
-    active: user.active,
-    createdAt: user.createdAt,
-  });
+  // Secure cookies are dropped by clients on plain HTTP — only set the flag
+  // when the request actually arrived over HTTPS (direct or via proxy).
+  const isHttps =
+    request.url.startsWith("https:") ||
+    request.headers.get("x-forwarded-proto") === "https";
+  await createSession(
+    {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      quota: user.quota,
+      locale: user.locale,
+      active: user.active,
+      createdAt: user.createdAt,
+    },
+    { secure: isHttps },
+  );
   return json({ ok: true });
 }
