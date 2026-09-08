@@ -1,5 +1,5 @@
 # ── Stage 1: Build ────────────────────────────────────────────────────
-FROM node:22-slim AS builder
+FROM node:26-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3 make g++ && \
@@ -27,7 +27,7 @@ ENV TURBO_DISABLE=true
 RUN npm run build
 
 # ── Stage 2: Production ──────────────────────────────────────────────
-FROM node:22-slim AS runner
+FROM node:26-slim AS runner
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       curl openssh-client sshpass iputils-ping && \
