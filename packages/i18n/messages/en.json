@@ -11,6 +11,7 @@
     "tools": "Test Tools",
     "audit": "Audit Log",
     "users": "Users",
+    "activity": "Activity",
     "webhooks": "Webhooks",
     "settings": "Settings"
   },
@@ -405,9 +406,6 @@
     "system": "System",
     "empty": "No activity logs found",
     "forbidden": "You don't have permission to view user activity."
-  },
-  "nav": {
-    "activity": "Activity"
   },
   "role": {
     "SUPER_ADMIN": "Super admin",

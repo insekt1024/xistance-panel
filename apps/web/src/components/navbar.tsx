@@ -51,6 +51,7 @@ interface NavbarProps {
 
 export function Navbar({ userName, userEmail }: NavbarProps) {
   const t = useTranslations("nav");
+  const tCommon = useTranslations("common");
   const pathname = usePathname();
   const router = useRouter();
 
@@ -137,7 +138,7 @@ export function Navbar({ userName, userEmail }: NavbarProps) {
             onClick={() => window.dispatchEvent(new CustomEvent("open-search"))}
           >
             <Search className="h-4 w-4" />
-            <span className="hidden lg:inline text-xs">{t("search", { ns: "common" })}</span>
+            <span className="hidden lg:inline text-xs">{tCommon("search")}</span>
           </Button>
           <ConnectionStatus />
           <ThemeToggle />
@@ -171,7 +172,7 @@ export function Navbar({ userName, userEmail }: NavbarProps) {
                 }}
               >
                 <LogOut className="h-4 w-4" />
-                Log out
+                {tCommon("logout")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

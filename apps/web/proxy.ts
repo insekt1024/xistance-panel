@@ -1,7 +1,7 @@
 import createMiddleware from "next-intl/middleware";
 import { routing } from "./src/i18n/routing";
 
-// Next.js 16: Middleware is now "Proxy". Runs locale negotiation/redirects.
+// Runs locale negotiation/redirects via next-intl.
 export default createMiddleware(routing);
 
 export const config = {
