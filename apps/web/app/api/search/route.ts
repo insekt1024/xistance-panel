@@ -22,7 +22,8 @@ export async function GET(request: Request) {
   }
 
   const like = escapeLike(q);
-  const isUser = auth.user.role === "ADMIN" || auth.user.role === "SUPER_ADMIN";
+  // canSeeUsers, not "is a USER": admins may search the user directory.
+  const canSeeUsers = auth.user.role === "ADMIN" || auth.user.role === "SUPER_ADMIN";
 
   const [tunnels, nodes, users] = await Promise.all([
     prisma.tunnel.findMany({
@@ -52,7 +53,7 @@ export async function GET(request: Request) {
       },
       orderBy: { name: "asc" },
     }),
-    isUser
+    canSeeUsers
       ? prisma.user.findMany({
           where: {
             OR: [

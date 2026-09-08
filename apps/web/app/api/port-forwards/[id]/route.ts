@@ -27,6 +27,14 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
   const body = await parseBody(request, updateSchema);
   if (!body.ok) return body.response;
 
+  if (body.data.nodeId) {
+    const node = await prisma.node.findUnique({
+      where: { id: body.data.nodeId },
+      select: { id: true },
+    });
+    if (!node) return apiError("Node not found", 404);
+  }
+
   const rule = await prisma.portForward.update({
     where: { id },
     data: { ...body.data, status: "pending" },

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { hashPassword, randomPassword } from "@xistance/tunnel-core";
-import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
+import { apiError, auditLog, getClientIp, invalidCursorResponse, json, paginationParams, parseBody, requireSession } from "@/lib/api";
 
 const userCreateSchema = z.object({
   email: z.string().email(),
@@ -18,22 +18,28 @@ export async function GET(request: Request) {
   const auth = await requireSession(request, "ADMIN");
   if (!auth.ok) return auth.response;
   const { searchParams } = new URL(request.url);
-  const cursor = searchParams.get("cursor") ? { id: searchParams.get("cursor")! } : undefined;
-  const limit = Math.min(Number(searchParams.get("limit")) || LIST_LIMIT, 100);
-  const users = await prisma.user.findMany({
-    select: {
-      id: true,
-      email: true,
-      name: true,
-      role: true,
-      quota: true,
-      active: true,
-      createdAt: true,
-    },
-    orderBy: { createdAt: "asc" },
-    take: limit + 1,
-    ...(cursor ? { skip: 1, cursor } : {}),
-  });
+  const { cursor, limit } = paginationParams(searchParams, LIST_LIMIT);
+  let users;
+  try {
+    users = await prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        quota: true,
+        active: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "asc" },
+      take: limit + 1,
+      ...(cursor ? { skip: 1, cursor } : {}),
+    });
+  } catch (err) {
+    const res = invalidCursorResponse(err);
+    if (res) return res;
+    throw err;
+  }
   const hasNext = users.length > limit;
   const items = hasNext ? users.slice(0, limit) : users;
   const nextCursor = hasNext ? items[items.length - 1].id : null;

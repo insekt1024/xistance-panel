@@ -62,6 +62,16 @@ export async function POST(request: Request) {
   const body = await parseBody(request, ruleSchema);
   if (!body.ok) return body.response;
 
+  // Validate pinned node upfront: invalid UUID already rejected by schema,
+  // but a well-formed unknown id must 404 instead of Prisma P2003 500.
+  if (body.data.nodeId) {
+    const node = await prisma.node.findUnique({
+      where: { id: body.data.nodeId },
+      select: { id: true },
+    });
+    if (!node) return apiError("Node not found", 404);
+  }
+
   const rule = await prisma.portForward.create({
     data: {
       name: body.data.name,

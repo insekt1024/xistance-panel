@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { z } from "zod";
 import { prisma } from "@xistance/db";
 import { assertCsrf, getSession, originAllowed, type SafeUser } from "./auth";
+import { invalidateCache } from "./query-cache";
 
 // ---------------------------------------------------------------------------
 // Small helpers shared by route handlers: JSON responses, Zod body parsing,
@@ -40,6 +41,25 @@ export function csrfGuard(request: Request): NextResponse | null {
   if (["POST", "PUT", "PATCH", "DELETE"].includes(request.method)) {
     if (!originAllowed(request)) return apiError("Cross-origin request rejected", 403);
     if (!assertCsrf(request)) return apiError("CSRF token mismatch", 403);
+  }
+  return null;
+}
+
+/** Parse + clamp cursor pagination params (limit defaults, 1..100). */
+export function paginationParams(
+  searchParams: URLSearchParams,
+  def = 50,
+): { cursor?: { id: string }; limit: number } {
+  const cursor = searchParams.get("cursor") ? { id: searchParams.get("cursor")! } : undefined;
+  const limit = Math.min(Math.max(Number(searchParams.get("limit")) || def, 1), 100);
+  return { cursor, limit };
+}
+
+/** Map Prisma cursor errors (bad/nonexistent ?cursor=) to a 400, else null. */
+export function invalidCursorResponse(err: unknown): NextResponse | null {
+  const code = (err as { code?: string }).code;
+  if (code === "P2025" || /cursor/i.test((err as Error).message ?? "")) {
+    return apiError("Invalid cursor", 400);
   }
   return null;
 }
@@ -91,4 +111,7 @@ export async function auditLog(
   } catch {
     // Audit failures must never break the main request.
   }
+  // New audit rows can introduce new action types, so the cached
+  // activity:actions list (and any aggregate) must be recomputed.
+  invalidateCache();
 }

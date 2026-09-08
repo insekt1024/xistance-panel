@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { hashPassword, verifyPassword } from "@xistance/tunnel-core";
-import { apiError, json, parseBody, requireSession } from "@/lib/api";
+import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 import { rateLimit } from "@/lib/rate-limit";
 
 const passwordSchema = z.object({
@@ -31,5 +31,6 @@ export async function POST(request: Request) {
     where: { userId: auth.user.id, revokedAt: null },
     data: { revokedAt: new Date() },
   });
+  await auditLog(auth.user.id, "user.password-change", auth.user.id, undefined, getClientIp(request));
   return json({ ok: true });
 }

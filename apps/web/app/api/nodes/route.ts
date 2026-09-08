@@ -2,7 +2,7 @@ import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { encryptSecret } from "@xistance/tunnel-core";
 import { NodeConfigSchema } from "@xistance/types";
-import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
+import { apiError, auditLog, getClientIp, invalidCursorResponse, json, paginationParams, parseBody, requireSession } from "@/lib/api";
 import { clearNodeCache } from "@/lib/forward-supervisor";
 import { redactNode } from "@/lib/tunnels";
 import { invalidateCache } from "@/lib/query-cache";
@@ -17,19 +17,25 @@ export async function GET(request: Request) {
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
   const { searchParams } = new URL(request.url);
-  const cursor = searchParams.get("cursor") ? { id: searchParams.get("cursor")! } : undefined;
-  const limit = Math.min(Number(searchParams.get("limit")) || LIST_LIMIT, 100);
-  const nodes = await prisma.node.findMany({
-    orderBy: { createdAt: "desc" },
-    take: limit + 1,
-    ...(cursor ? { skip: 1, cursor } : {}),
-    select: {
-      id: true, name: true, type: true, host: true, sshPort: true,
-      sshUser: true, authMethod: true, sshKeyEncrypted: true,
-      sshPasswordEnc: true, apiTokenEncrypted: true,
-      status: true, lastSeen: true, health: true, createdAt: true, updatedAt: true,
-    },
-  });
+  const { cursor, limit } = paginationParams(searchParams, LIST_LIMIT);
+  let nodes;
+  try {
+    nodes = await prisma.node.findMany({
+      orderBy: { createdAt: "desc" },
+      take: limit + 1,
+      ...(cursor ? { skip: 1, cursor } : {}),
+      select: {
+        id: true, name: true, type: true, host: true, sshPort: true,
+        sshUser: true, authMethod: true, sshKeyEncrypted: true,
+        sshPasswordEnc: true, apiTokenEncrypted: true,
+        status: true, lastSeen: true, health: true, createdAt: true, updatedAt: true,
+      },
+    });
+  } catch (err) {
+    const res = invalidCursorResponse(err);
+    if (res) return res;
+    throw err;
+  }
   const hasNext = nodes.length > limit;
   const items = hasNext ? nodes.slice(0, limit) : nodes;
   const nextCursor = hasNext ? items[items.length - 1].id : null;

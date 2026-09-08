@@ -142,7 +142,7 @@ export function TrafficChart({
   };
 
   return (
-    <div className={cn("space-y-3", loading && "opacity-60 pointer-events-none")}>
+    <div className={cn("space-y-3", loading && "opacity-60")}>
       {/* Controls row */}
       <div className="flex items-center justify-between gap-2">
         {/* Time range selector */}

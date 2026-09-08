@@ -94,6 +94,7 @@ model Node {
   tunnelsServer      Tunnel[]   @relation("serverNode")
 
   @@unique([name, type])
+  @@index([createdAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +131,7 @@ model Tunnel {
   @@index([ownerId])
   @@index([status])
   @@index([state])
+  @@index([createdAt])
 }
 
 model TrafficSample {
@@ -144,7 +146,8 @@ model TrafficSample {
 
   @@index([tunnelId, ts])
   @@index([ts])
-  @@index([ts, bytesIn, bytesOut])
+  // NOTE: no covering (ts, bytesIn, bytesOut) index — the ts index serves
+  // range prune/aggregate and a wider index only bloats writes.
 }
 
 model PortForward {
@@ -167,6 +170,7 @@ model PortForward {
   @@index([nodeId])
   @@index([userId])
   @@index([direction])
+  @@index([createdAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -185,6 +189,7 @@ model AuditLog {
 
   @@index([actorId, createdAt])
   @@index([createdAt])
+  @@index([action])
 }
 
 model NotificationWebhook {

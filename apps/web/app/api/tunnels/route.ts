@@ -8,7 +8,8 @@ import { rateLimit } from "@/lib/rate-limit";
 import { invalidateCache } from "@/lib/query-cache";
 
 const tunnelCreateSchema = z.object({
-  name: z.string().min(1).max(80),
+  // No line breaks: names flow into systemd unit Descriptions.
+  name: z.string().min(1).max(80).regex(/^[^\r\n]*$/, "Name must not contain line breaks"),
   clientNodeId: z.string().uuid(),
   serverNodeId: z.string().uuid(),
   config: TunnelConfigSchema,
@@ -116,33 +117,17 @@ export async function POST(request: Request) {
     }
   }
 
-  let spec;
-  try {
-    spec = await buildSpec(
-      crypto.randomUUID(),
-      data.name,
-      data.config.method,
-      data.config,
-      clientNode,
-      serverNode,
-    );
-  } catch {
-    return apiError("Failed to decrypt node credentials", 500);
-  }
-
-  try {
-    await getEngine().deploy(spec);
-  } catch (err) {
-    return apiError(`Deploy failed: ${(err as Error).message}`, 500);
-  }
-
+  // Create-first-then-deploy: the DB row owns the tunnel lifecycle, so a
+  // failed deploy leaves a visible "starting → stopped + errorMessage" row
+  // instead of a ghost running process with no record.
+  const id = crypto.randomUUID();
   const tunnel = await prisma.tunnel.create({
     data: {
-      id: spec.id,
+      id,
       name: data.name,
       method: data.config.method,
-      status: "running",
-      state: "running",
+      status: "starting",
+      state: "starting",
       clientNodeId: data.clientNodeId,
       serverNodeId: data.serverNodeId,
       ownerId: auth.user.id,
@@ -151,13 +136,46 @@ export async function POST(request: Request) {
       autostart: data.autostart,
     },
   });
-  await auditLog(auth.user.id, "tunnel.create", tunnel.id, tunnel.name, getClientIp(request));
+  const failCreate = async (message: string) => {
+    await prisma.tunnel.update({
+      where: { id },
+      data: { status: "stopped", state: "stopped", errorMessage: message },
+    }).catch(() => {});
+    invalidateCache();
+    return apiError(message, 500);
+  };
+
+  let spec;
+  try {
+    spec = await buildSpec(
+      id,
+      data.name,
+      data.config.method,
+      data.config,
+      clientNode,
+      serverNode,
+    );
+  } catch {
+    return failCreate("Failed to decrypt node credentials");
+  }
+
+  try {
+    await getEngine().deploy(spec);
+  } catch (err) {
+    return failCreate(`Deploy failed: ${(err as Error).message}`);
+  }
+
+  const created = await prisma.tunnel.update({
+    where: { id },
+    data: { status: "running", state: "running", errorMessage: null },
+  });
+  await auditLog(auth.user.id, "tunnel.create", created.id, created.name, getClientIp(request));
   invalidateCache();
   // Don't leak the stored config ciphertext to non-admin callers.
   if (auth.user.role === "USER") {
-    const { config: _config, ...safeTunnel } = tunnel;
+    const { config: _config, ...safeTunnel } = created;
     void _config;
     return json({ tunnel: safeTunnel }, 201);
   }
-  return json({ tunnel }, 201);
+  return json({ tunnel: created }, 201);
 }

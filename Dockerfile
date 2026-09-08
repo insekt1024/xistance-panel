@@ -30,11 +30,15 @@ RUN npm run build
 FROM node:22-slim AS runner
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      curl && \
+      curl openssh-client sshpass iputils-ping && \
     rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
 ENV PORT=3000
+# Engine binaries (gost/backhaul/frp), tunnel configs, and SQLite live here.
+# Mount a volume: docker run -v xistance-data:/data ...
+ENV XT_DATA_DIR=/data
+VOLUME /data
 
 RUN addgroup --system --gid 1001 nodejs && \
     adduser  --system --uid 1001 nextjs

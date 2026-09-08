@@ -57,7 +57,8 @@ export async function GET(request: Request) {
         byStatus: nodeByStatus,
       },
       engine: {
-        activeProcesses: engineSize,
+        // Managed tunnel runtimes (not OS processes) — see engine.size().
+        managedTunnels: engineSize,
       },
       traffic: {
         window: "24h",

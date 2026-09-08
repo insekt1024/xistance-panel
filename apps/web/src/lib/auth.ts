@@ -79,7 +79,7 @@ export async function createSession(user: SafeUser): Promise<void> {
 }
 
 /**
- * getSession memoisation: RSC pages plus the 5s AutoRefresh re-run getSession on
+ * getSession memoisation: RSC pages plus the 30s AutoRefresh re-run getSession on
  * every render/poll. Cache the verified payload for a couple of seconds keyed by
  * the access token so the users table isn't queried dozens of times per minute.
  * Worst-case staleness is SESSION_CACHE_TTL; logout/rotation produce a new token

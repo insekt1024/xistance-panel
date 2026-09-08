@@ -45,6 +45,8 @@ export async function GET(request: Request) {
       }),
     ]);
 
+  await auditLog(auth.user.id, "settings.backup-export", undefined, undefined, getClientIp(request));
+
   return json({
     backup: {
       version: 1,

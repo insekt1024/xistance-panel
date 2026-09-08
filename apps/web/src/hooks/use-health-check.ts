@@ -31,6 +31,7 @@ export function useHealthCheck(options: UseHealthCheckOptions = {}) {
     try {
       const res = await fetch("/api/health", {
         signal: abortControllerRef.current.signal,
+        cache: "no-store",
       });
       const data = await res.json();
 

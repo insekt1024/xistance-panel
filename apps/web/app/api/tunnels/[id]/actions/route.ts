@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { prisma } from "@xistance/db";
-import { apiError, json, parseBody, requireSession } from "@/lib/api";
+import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 import { getEngine } from "@/lib/engine";
 import { buildDeploySpec } from "@/lib/tunnels";
 import { rateLimit } from "@/lib/rate-limit";
@@ -99,6 +99,7 @@ export async function POST(
     where: { id },
     data: { state, status: state, errorMessage: null },
   });
+  await auditLog(auth.user.id, `tunnel.${action}`, id, tunnel.name, getClientIp(request));
   invalidateCache();
   return json({ ok: true, state });
 }

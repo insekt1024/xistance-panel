@@ -13,6 +13,12 @@ import { PrismaClient } from "../packages/db/generated/client/index.js";
 import { filterExtraArgs, hashPassword, sanitizeUnitText, verifyPassword } from "../packages/tunnel-core/src/index.ts";
 import { SshConfigSchema } from "../packages/types/src/index.ts";
 import { cached, invalidateCache } from "../apps/web/src/lib/query-cache.ts";
+// NOTE: lib/api.ts must be dynamically imported INSIDE tests (like tests
+// 18-21 do): it pulls the @xistance/db singleton, which resolves
+// DATABASE_URL at import time. A static import would hoist above the
+// test-DB env assignment and point the singleton at the dev database.
+import enMessages from "../packages/i18n/messages/en.json";
+import faMessages from "../packages/i18n/messages/fa.json";
 import { rateLimit } from "../apps/web/src/lib/rate-limit.ts";
 import { isBlockedTarget, isPrivateIp } from "../apps/web/src/lib/ssrf.ts";
 import path from "node:path";
@@ -552,6 +558,68 @@ async function main() {
     const dummy = hashPassword("xistance-never-matches-any-login");
     if (verifyPassword("wrong-password", dummy)) throw new Error("Dummy must never verify");
     if (verifyPassword("x", "scrypt:dummy:dummy")) throw new Error("Malformed must not verify");
+  });
+
+  // Test 40: paginationParams clamps limit and parses cursor
+  await test("Pagination: helper clamps limit 1..100", async () => {
+    const { paginationParams } = await import("../apps/web/src/lib/api.ts");
+    const a = paginationParams(new URLSearchParams("limit=-5"), 50);
+    if (a.limit !== 1) throw new Error("Negative limit must clamp to 1, got " + a.limit);
+    const b = paginationParams(new URLSearchParams("limit=500"), 50);
+    if (b.limit !== 100) throw new Error("Huge limit must clamp to 100, got " + b.limit);
+    const c = paginationParams(new URLSearchParams(""), 50);
+    if (c.limit !== 50 || c.cursor !== undefined) throw new Error("Defaults wrong");
+    const d = paginationParams(new URLSearchParams("cursor=abc&limit=10"), 50);
+    if (d.cursor?.id !== "abc" || d.limit !== 10) throw new Error("Cursor/limit parse wrong");
+  });
+
+  // Test 41: invalidCursorResponse maps Prisma cursor errors to 400
+  await test("Pagination: cursor errors map to 400 response", async () => {
+    const { invalidCursorResponse } = await import("../apps/web/src/lib/api.ts");
+    const res = invalidCursorResponse(Object.assign(new Error("Record not found for cursor"), { code: "P2025" }));
+    if (!res || res.status !== 400) throw new Error("P2025 must map to 400");
+    const res2 = invalidCursorResponse(new Error("An error occurred with your cursor query"));
+    if (!res2 || res2.status !== 400) throw new Error("Cursor message must map to 400");
+    const res3 = invalidCursorResponse(new Error("boom"));
+    if (res3 !== null) throw new Error("Unrelated errors must rethrow (null)");
+  });
+
+  // Test 42: auditLog invalidates cached aggregates
+  await test("Audit: auditLog() invalidates cache", async () => {
+    const { auditLog } = await import("../apps/web/src/lib/api.ts");
+    let calls = 0;
+    const key = "sec:audit-inv";
+    await cached(key, 60_000, async () => `v${++calls}`);
+    await auditLog(null, "sec.test-action");
+    const v = await cached(key, 60_000, async () => `v${++calls}`);
+    if (calls !== 2) throw new Error(`Cache survived auditLog (calls=${calls}, v=${v})`);
+    invalidateCache("sec:");
+  });
+
+  // Test 43: fa direction arrows match en (bidi mirrors → correctly in RTL)
+  await test("i18n: fa arrows use logical → like en", async () => {
+    const pairs: Array<[string, string]> = [
+      [(enMessages as Record<string, Record<string, string>>).wizard?.iranToForeign, (faMessages as Record<string, Record<string, string>>).wizard?.iranToForeign],
+      [(enMessages as Record<string, Record<string, string>>).wizard?.foreignToIran, (faMessages as Record<string, Record<string, string>>).wizard?.foreignToIran],
+    ];
+    for (const [en, fa] of pairs) {
+      if (!en || !fa) throw new Error("Missing arrow keys");
+      const enArrow = en.includes("→") ? "→" : "?";
+      const faArrow = fa.includes("→") ? "→" : fa.includes("←") ? "←" : "?";
+      if (enArrow !== "→" || faArrow !== "→") throw new Error(`Arrow mismatch en=${en} fa=${fa}`);
+    }
+  });
+
+  // Test 44: hot-path indexes exist in migrated schema
+  await test("Schema: createdAt/action indexes exist", async () => {
+    const rows = await prisma.$queryRaw<Array<{ name: string; tbl: string }>>`
+      SELECT name, tbl_name as tbl FROM sqlite_master
+      WHERE type = 'index' AND tbl_name IN ('Tunnel', 'Node', 'PortForward', 'AuditLog')`;
+    const names = rows.map((r) => r.name).join(",");
+    for (const t of ["Tunnel", "Node", "PortForward", "AuditLog"]) {
+      if (!rows.some((r) => r.tbl === t)) throw new Error(`No indexes found for ${t}: ${names}`);
+    }
+    if (/bytesIn/.test(names)) throw new Error("Redundant covering index still present: " + names);
   });
 
   // Print results

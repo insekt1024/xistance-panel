@@ -4,14 +4,14 @@ import { useHealthCheck } from "@/hooks/use-health-check";
 import { cn } from "@/lib/utils";
 
 export function ConnectionStatus() {
-  const { isHealthy, lastChecked } = useHealthCheck({ interval: 30000 });
+  const { isHealthy, lastChecked, error } = useHealthCheck({ interval: 30000 });
 
   return (
     <div
       className="group relative flex items-center"
       title={
         lastChecked
-          ? `${isHealthy ? "Connected" : "Disconnected"} — checked ${lastChecked.toLocaleTimeString()}`
+          ? `${isHealthy ? "Connected" : "Disconnected"} — checked ${lastChecked.toLocaleTimeString()}${!isHealthy && error ? ` (${error})` : ""}`
           : "Checking connection…"
       }
     >

@@ -1,5 +1,5 @@
 import { prisma } from "@xistance/db";
-import { apiError, json, requireSession } from "@/lib/api";
+import { apiError, invalidCursorResponse, json, paginationParams, requireSession } from "@/lib/api";
 import { rateLimit } from "@/lib/rate-limit";
 
 const LIST_LIMIT = 50;
@@ -11,24 +11,30 @@ export async function GET(request: Request) {
   if (!rl.ok) return apiError("Too many requests, slow down", 429);
 
   const { searchParams } = new URL(request.url);
-  const cursor = searchParams.get("cursor") ? { id: searchParams.get("cursor")! } : undefined;
-  const limit = Math.min(Number(searchParams.get("limit")) || LIST_LIMIT, 100);
+  const { cursor, limit } = paginationParams(searchParams, LIST_LIMIT);
 
-  const logs = await prisma.auditLog.findMany({
-    orderBy: { createdAt: "desc" },
-    take: limit + 1,
-    ...(cursor ? { skip: 1, cursor } : {}),
-    select: {
-      id: true,
-      actorId: true,
-      action: true,
-      target: true,
-      details: true,
-      ip: true,
-      createdAt: true,
-      actor: { select: { id: true, name: true, email: true } },
-    },
-  });
+  let logs;
+  try {
+    logs = await prisma.auditLog.findMany({
+      orderBy: { createdAt: "desc" },
+      take: limit + 1,
+      ...(cursor ? { skip: 1, cursor } : {}),
+      select: {
+        id: true,
+        actorId: true,
+        action: true,
+        target: true,
+        details: true,
+        ip: true,
+        createdAt: true,
+        actor: { select: { id: true, name: true, email: true } },
+      },
+    });
+  } catch (err) {
+    const res = invalidCursorResponse(err);
+    if (res) return res;
+    throw err;
+  }
 
   const hasNext = logs.length > limit;
   const items = hasNext ? logs.slice(0, limit) : logs;

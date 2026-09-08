@@ -34,7 +34,7 @@ const docs: DocsResponse = {
     "REST API for managing tunnels, nodes, port-forwarding rules, users, and diagnostics in the Xistance tunnel management panel.",
   auth: {
     description:
-      "Most endpoints require a session cookie obtained via POST /api/auth/login. State-changing requests also require a CSRF token in the xt_csrf header that matches the xt_csrf cookie.",
+      "Most endpoints require a session cookie obtained via POST /api/auth/login. State-changing requests also require the Origin to match plus a CSRF token in the x-csrf-token header that matches the xt_csrf cookie.",
     roles: ["USER", "ADMIN", "SUPER_ADMIN"],
     session:
       "POST /api/auth/login with { email, password } to create a session. POST /api/auth/logout to destroy it.",

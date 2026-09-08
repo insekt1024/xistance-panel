@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { hashPassword, verifyPassword } from "@xistance/tunnel-core";
-import { apiError, getClientIp, json, parseBody } from "@/lib/api";
+import { apiError, auditLog, getClientIp, json, parseBody } from "@/lib/api";
 import { createSession } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -39,7 +39,12 @@ export async function POST(request: Request) {
   // Always run a verification to equalize timing; dummy hash never matches.
   const hashToCheck = user?.passwordHash ?? DUMMY_HASH;
   const passwordOk = user?.active ? verifyPassword(body.data.password, hashToCheck) : false;
-  if (!user || !user.active || !passwordOk) return apiError("Invalid email or password", 401);
+  if (!user || !user.active || !passwordOk) {
+    // Throttled endpoint: safe to log failures for brute-force visibility.
+    await auditLog(null, "auth.login-failed", undefined, email, getClientIp(request));
+    return apiError("Invalid email or password", 401);
+  }
+  await auditLog(user.id, "auth.login", undefined, undefined, getClientIp(request));
 
   await createSession({
     id: user.id,
