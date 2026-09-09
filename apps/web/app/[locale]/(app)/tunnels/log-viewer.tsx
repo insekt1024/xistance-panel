@@ -17,6 +17,7 @@ export function LogViewer({
   const t = useTranslations("tunnels");
   const [lines, setLines] = React.useState<string[]>([]);
   const [connected, setConnected] = React.useState(false);
+  const [loadError, setLoadError] = React.useState(false);
   const [paused, setPaused] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [levelFilter, setLevelFilter] = React.useState<string>("all");
@@ -76,7 +77,12 @@ export function LogViewer({
         buf.current = ((d.lines ?? []) as string[]).slice(-1000);
         if (!pausedRef.current) setLines([...buf.current]);
       })
-      .catch(() => {});
+      .catch((err) => {
+        // Surface history-load failures instead of leaving the viewer
+        // stuck on "waiting" — the live stream below may still connect.
+        console.error(`[log-viewer] failed to load log history for ${tunnelId}:`, err);
+        if (!disposed) setLoadError(true);
+      });
 
     const es = new EventSource(`/api/tunnels/${tunnelId}/events`);
     let rafId: number | null = null;
@@ -234,7 +240,7 @@ export function LogViewer({
           <div className="p-4">
             {filteredLines.length === 0 && (
               <p className="animate-pulse text-zinc-500">
-                {lines.length === 0 ? t("logWaiting") : t("logNoMatch")}
+                {lines.length === 0 ? (loadError ? t("logLoadError") : t("logWaiting")) : t("logNoMatch")}
               </p>
             )}
             {filteredLines.map((line, i) => (

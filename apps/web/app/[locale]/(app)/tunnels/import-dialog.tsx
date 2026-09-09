@@ -126,7 +126,15 @@ export function ImportDialog({ nodes }: { nodes: ImportNode[] }) {
   }
 
   function handlePaste() {
-    navigator.clipboard.readText().then(tryParse).catch(() => {});
+    navigator.clipboard
+      .readText()
+      .then(tryParse)
+      .catch(() => {
+        // Clipboard reads commonly fail on permissions — tell the user
+        // instead of silently doing nothing.
+        setParsed(null);
+        setParseError(t("clipboardError"));
+      });
   }
 
   async function deploy() {

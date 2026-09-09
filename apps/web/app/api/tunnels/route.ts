@@ -137,10 +137,16 @@ export async function POST(request: Request) {
     },
   });
   const failCreate = async (message: string) => {
-    await prisma.tunnel.update({
-      where: { id },
-      data: { status: "stopped", state: "stopped", errorMessage: message },
-    }).catch(() => {});
+    await prisma.tunnel
+      .update({
+        where: { id },
+        data: { status: "stopped", state: "stopped", errorMessage: message },
+      })
+      .catch((err) => {
+        // Rollback marker is best-effort, but a failure here leaves the DB
+        // claiming a state with no process behind it — make it visible.
+        console.error(`[tunnels] failed to mark ${id} stopped after create failure:`, err);
+      });
     invalidateCache();
     return apiError(message, 500);
   };

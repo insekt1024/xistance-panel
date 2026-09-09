@@ -27,8 +27,8 @@ export function startMaintenance(): void {
       if (audits.count > 0) {
         console.log(`[maintenance] pruned ${audits.count} audit logs older than ${AUDIT_RETAIN_DAYS}d`);
       }
-    } catch {
-      /* best effort */
+    } catch (err) {
+      console.error("[maintenance] audit prune failed:", err);
     }
     try {
       const sessionCutoff = new Date(now - STALE_SESSION_DAYS * 24 * 3600_000);
@@ -43,8 +43,8 @@ export function startMaintenance(): void {
       if (sessions.count > 0) {
         console.log(`[maintenance] pruned ${sessions.count} stale sessions`);
       }
-    } catch {
-      /* best effort */
+    } catch (err) {
+      console.error("[maintenance] session prune failed:", err);
     }
   };
 

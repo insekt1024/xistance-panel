@@ -1,9 +1,11 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { useHealthCheck } from "@/hooks/use-health-check";
 import { cn } from "@/lib/utils";
 
 export function ConnectionStatus() {
+  const t = useTranslations("common");
   const { isHealthy, lastChecked, error } = useHealthCheck({ interval: 30000 });
 
   return (
@@ -11,8 +13,8 @@ export function ConnectionStatus() {
       className="group relative flex items-center"
       title={
         lastChecked
-          ? `${isHealthy ? "Connected" : "Disconnected"} — checked ${lastChecked.toLocaleTimeString()}${!isHealthy && error ? ` (${error})` : ""}`
-          : "Checking connection…"
+          ? `${isHealthy ? t("connected") : t("disconnected")} — ${t("lastChecked", { time: lastChecked.toLocaleTimeString() })}${!isHealthy && error ? ` (${error})` : ""}`
+          : t("checkingConnection")
       }
     >
       <span
@@ -27,7 +29,7 @@ export function ConnectionStatus() {
       </span>
 
       <span className="pointer-events-none absolute right-full top-1/2 mr-2 -translate-y-1/2 whitespace-nowrap rounded-md bg-popover px-2 py-1 text-xs text-popover-foreground shadow-md opacity-0 transition-opacity group-hover:opacity-100">
-        {isHealthy ? "Connected" : "Disconnected"}
+        {isHealthy ? t("connected") : t("disconnected")}
       </span>
     </div>
   );

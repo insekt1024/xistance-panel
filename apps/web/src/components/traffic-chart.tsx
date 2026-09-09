@@ -122,10 +122,10 @@ export function TrafficChart({
   }));
 
   const tooltipFormatter = (value: unknown, name: unknown) =>
-    [`${Number(value).toLocaleString()} KB`, name === "down" ? "↓ Down" : "↑ Up"] as [
-      string,
-      string,
-    ];
+    [
+      `${Number(value).toLocaleString()} KB`,
+      name === "down" ? `↓ ${t("download")}` : `↑ ${t("upload")}`,
+    ] as [string, string];
 
   const tooltipStyle = {
     background: "var(--color-popover)",
@@ -172,7 +172,7 @@ export function TrafficChart({
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            Area
+            {t("chartArea")}
           </button>
           <button
             onClick={() => setChartType("line")}
@@ -183,7 +183,7 @@ export function TrafficChart({
                 : "text-muted-foreground hover:text-foreground",
             )}
           >
-            Line
+            {t("chartLine")}
           </button>
         </div>
       </div>
@@ -191,7 +191,7 @@ export function TrafficChart({
       {/* Chart */}
       {showEmpty ? (
         <div className="flex h-56 items-center justify-center text-sm text-muted-foreground">
-          No traffic yet
+          {t("noTraffic")}
         </div>
       ) : (
       <ResponsiveContainer width="100%" height={224}>

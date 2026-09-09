@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import {
   decryptSecret,
   encryptSecret,
+  isLoopback,
   type NodeEndpoint,
   type TunnelDeploySpec,
 } from "@xistance/tunnel-core";
@@ -61,9 +62,7 @@ async function ensureKeyFile(nodeId: string, pem: string): Promise<string> {
 export function isPanelHost(host: string): boolean {
   const panelHost = process.env.XT_PANEL_HOST;
   return (
-    ["127.0.0.1", "::1", "localhost", "local", "self", "0.0.0.0"].includes(
-      host.trim().toLowerCase(),
-    ) || (!!panelHost && host.trim() === panelHost.trim())
+    isLoopback(host) || (!!panelHost && host.trim() === panelHost.trim())
   );
 }
 

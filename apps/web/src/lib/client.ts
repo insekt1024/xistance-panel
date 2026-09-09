@@ -15,11 +15,15 @@ export async function apiFetch<T = unknown>(
   path: string,
   init?: RequestInit,
 ): Promise<ApiResult<T>> {
+  // fetch() defaults to GET and normalizes the method to uppercase — mirror
+  // that here so the CSRF header decision can't be fooled by a missing or
+  // lowercase method, and don't send Content-Type on bodyless requests.
+  const method = (init?.method ?? "GET").toUpperCase();
   const res = await fetch(path, {
     ...init,
     headers: {
-      "Content-Type": "application/json",
-      ...(init?.method && init.method !== "GET" ? { "X-CSRF-Token": csrfToken() } : {}),
+      ...(init?.body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...(method !== "GET" && method !== "HEAD" ? { "X-CSRF-Token": csrfToken() } : {}),
       ...init?.headers,
     },
   });

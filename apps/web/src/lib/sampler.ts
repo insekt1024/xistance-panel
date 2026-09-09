@@ -50,7 +50,14 @@ export function startTrafficSampler(): void {
           while (next < managed.length) {
             const i = next;
             next += 1;
-            snaps[i] = await engine.snapshot(managed[i].id);
+            try {
+              snaps[i] = await engine.snapshot(managed[i].id);
+            } catch (err) {
+              // Isolate per-tunnel failures so one bad tunnel doesn't
+              // starve the rest of this worker's queue for the tick.
+              console.error(`[sampler] snapshot failed for ${managed[i].id}:`, err);
+              snaps[i] = null;
+            }
           }
         },
       );

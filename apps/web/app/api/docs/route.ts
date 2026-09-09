@@ -1,4 +1,5 @@
 import { json } from "@/lib/api";
+import { APP_VERSION } from "@/lib/version";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +30,7 @@ interface DocsResponse {
 
 const docs: DocsResponse = {
   name: "Xistance Panel API",
-  version: "1.0",
+  version: APP_VERSION,
   description:
     "REST API for managing tunnels, nodes, port-forwarding rules, users, and diagnostics in the Xistance tunnel management panel.",
   auth: {
@@ -50,9 +51,9 @@ const docs: DocsResponse = {
       method: "POST",
       path: "/api/auth/login",
       auth: "none",
-      description: "Authenticate and create a session. Rate-limited to 5 attempts per IP per minute.",
+      description: "Authenticate and create a session. Rate-limited to 10 attempts per email and 20 per IP per minute.",
       params: "{ email: string, password: string }",
-      rateLimit: "5/min per IP",
+      rateLimit: "10/min per email, 20/min per IP",
     },
     {
       method: "GET",

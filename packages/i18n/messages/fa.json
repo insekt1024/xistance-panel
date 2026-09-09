@@ -47,7 +47,11 @@
     "perSecond": "/ثانیه",
     "actions": "عملیات",
     "networkError": "خطای شبکه — اتصال خود را بررسی کنید و دوباره تلاش کنید",
-    "retry": "تلاش مجدد"
+    "retry": "تلاش مجدد",
+    "connected": "متصل",
+    "disconnected": "قطع شده",
+    "checkingConnection": "در حال بررسی اتصال…",
+    "lastChecked": "بررسی در {time}"
   },
   "auth": {
     "signIn": "ورود",
@@ -93,7 +97,12 @@
     "port": "پورت",
     "status": "وضعیت",
     "errorTitle": "مشکلی پیش آمد",
-    "errorMessage": "خطای غیرمنتظره‌ای در بارگذاری داشبورد رخ داد."
+    "errorMessage": "خطای غیرمنتظره‌ای در بارگذاری داشبورد رخ داد.",
+    "chartArea": "ناحیه‌ای",
+    "chartLine": "خطی",
+    "noTraffic": "هنوز ترافیکی ثبت نشده",
+    "speedIn": "سرعت دریافت",
+    "speedOut": "سرعت ارسال"
   },
   "tunnels": {
     "title": "تونل‌ها",
@@ -132,6 +141,7 @@
     "jsonConfig": "پیکربندی JSON",
     "uploadFile": "آپلود فایل",
     "pasteFromClipboard": "چسباندن از کلیپ‌بورد",
+    "clipboardError": "خواندن کلیپ‌بورد ناموفق بود — دسترسی مرورگر را بررسی کنید و دوباره تلاش کنید.",
     "detectedMethod": "روش تشخیص داده شده",
     "namePlaceholder": "نام تونل را وارد کنید",
     "selectAll": "انتخاب همه",
@@ -152,7 +162,8 @@
     "logLevelStdout": "stdout",
     "logLevelStderr": "stderr",
     "logWaiting": "در انتظار خروجی…",
-    "logNoMatch": "خط منطبقی یافت نشد"
+    "logNoMatch": "خط منطبقی یافت نشد",
+    "logLoadError": "بارگذاری لاگ‌های اخیر ناموفق بود — ممکن است پخش زنده همچنان وصل شود."
   },
   "methods": {
     "BACKHAUL": "بک‌هاول",

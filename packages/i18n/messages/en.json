@@ -47,7 +47,11 @@
     "perSecond": "/s",
     "actions": "Actions",
     "networkError": "Network error — check your connection and try again",
-    "retry": "Retry"
+    "retry": "Retry",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "checkingConnection": "Checking connection…",
+    "lastChecked": "checked {time}"
   },
   "auth": {
     "signIn": "Sign in",
@@ -93,7 +97,12 @@
     "port": "Port",
     "status": "Status",
     "errorTitle": "Something went wrong",
-    "errorMessage": "An unexpected error occurred while loading the dashboard."
+    "errorMessage": "An unexpected error occurred while loading the dashboard.",
+    "chartArea": "Area",
+    "chartLine": "Line",
+    "noTraffic": "No traffic yet",
+    "speedIn": "Download speed",
+    "speedOut": "Upload speed"
   },
   "tunnels": {
     "title": "Tunnels",
@@ -132,6 +141,7 @@
     "jsonConfig": "JSON Config",
     "uploadFile": "Upload File",
     "pasteFromClipboard": "Paste from Clipboard",
+    "clipboardError": "Could not read clipboard — check browser permission and try again.",
     "detectedMethod": "Detected method",
     "namePlaceholder": "Enter tunnel name",
     "selectAll": "Select all",
@@ -152,7 +162,8 @@
     "logLevelStdout": "stdout",
     "logLevelStderr": "stderr",
     "logWaiting": "Waiting for output…",
-    "logNoMatch": "No matching lines"
+    "logNoMatch": "No matching lines",
+    "logLoadError": "Failed to load recent logs — the live stream may still connect."
   },
   "methods": {
     "BACKHAUL": "Backhaul",

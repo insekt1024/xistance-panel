@@ -108,8 +108,10 @@ export async function auditLog(
     await prisma.auditLog.create({
       data: { actorId, action, target, details, ip },
     });
-  } catch {
-    // Audit failures must never break the main request.
+  } catch (err) {
+    // Audit failures must never break the main request, but a silent gap
+    // in the audit trail is a compliance issue — always log it.
+    console.error(`[audit] failed to record ${action}:`, err);
   }
   // New audit rows can introduce new action types, so the cached
   // activity:actions list (and any aggregate) must be recomputed.

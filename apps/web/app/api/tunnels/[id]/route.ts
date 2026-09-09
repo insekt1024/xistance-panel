@@ -71,8 +71,10 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
   if (getEngine().has(id)) {
     try {
       await getEngine().remove(id);
-    } catch {
-      /* best-effort stop */
+    } catch (err) {
+      // Best-effort stop, but an orphaned process keeps ports bound —
+      // make it visible so it can be reaped.
+      console.error(`[tunnels] best-effort engine remove failed for ${id}:`, err);
     }
   }
   await prisma.tunnel.delete({ where: { id } });

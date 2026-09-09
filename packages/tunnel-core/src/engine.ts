@@ -16,7 +16,7 @@ import { buildFrpPair } from "./config/frp.js";
 import { buildGostCommand } from "./config/gost.js";
 import { buildSshCommand } from "./config/ssh.js";
 import { ProcessManager, type ProcessHandle, type ProcessSpec } from "./process.js";
-import { LocalRunner, RemoteRunner, type Runner } from "./runner.js";
+import { LocalRunner, RemoteRunner, isLoopback, type Runner } from "./runner.js";
 import { EventBus } from "./eventbus.js";
 import fs from "node:fs";
 
@@ -123,7 +123,7 @@ export class TunnelEngine {
 
   private ctxFor(node: NodeEndpoint | null | undefined): NodeCtx | null {
     if (!node) return null;
-    const isRemote = !node.isLocal && !isLoopbackHost(node.host);
+    const isRemote = !node.isLocal && !isLoopback(node.host);
     const runner: Runner = isRemote
       ? new RemoteRunner({
           host: node.host,
@@ -587,6 +587,14 @@ export class TunnelEngine {
         return this.planSsh(spec, cfg.ssh);
       case "PORT_FORWARD":
         return this.planPortForward(spec, cfg.portForwards);
+      default: {
+        // Compile-time exhaustiveness: adding a TunnelMethod without a
+        // planner breaks the build here instead of returning undefined.
+        const exhaustive: never = cfg;
+        throw new Error(
+          `Unsupported tunnel method: ${JSON.stringify((exhaustive as { method?: unknown }).method)}`,
+        );
+      }
     }
   }
 
@@ -737,12 +745,6 @@ export class TunnelEngine {
 }
 
 // ---------------------------------------------------------------------------
-
-function isLoopbackHost(host: string): boolean {
-  return ["127.0.0.1", "::1", "localhost", "local", "self", "0.0.0.0"].includes(
-    host.trim().toLowerCase(),
-  );
-}
 
 function processSpec(
   spec: TunnelDeploySpec,

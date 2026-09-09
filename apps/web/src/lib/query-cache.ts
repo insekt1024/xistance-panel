@@ -17,18 +17,16 @@ const inflight = new Map<string, Promise<unknown>>();
 // if its generation is still current (kills stale write-back).
 const generation = new Map<string, number>();
 
-function evictOldest(): void {
-  if (store.size < MAX_ENTRIES) return;
-  // Evict the entry with the oldest `at` timestamp (expired first).
-  let oldestKey = "";
-  let oldestAt = Infinity;
-  for (const [k, v] of store) {
-    if (v.at < oldestAt) {
-      oldestAt = v.at;
-      oldestKey = k;
-    }
+function storeEntry(key: string, value: unknown): void {
+  // delete-then-set refreshes recency: Map iterates in insertion order, so
+  // the first key is always the stalest — O(1) eviction, no full scan.
+  if (store.has(key)) {
+    store.delete(key);
+  } else if (store.size >= MAX_ENTRIES) {
+    const oldest = store.keys().next();
+    if (!oldest.done) store.delete(oldest.value);
   }
-  if (oldestKey) store.delete(oldestKey);
+  store.set(key, { at: Date.now(), value });
 }
 
 export async function cached<T>(
@@ -50,8 +48,7 @@ export async function cached<T>(
       // Invalidated mid-flight: return value to the original caller but do
       // NOT repopulate the store with stale data.
       if ((generation.get(key) ?? 0) !== gen) return value;
-      evictOldest();
-      store.set(key, { at: Date.now(), value });
+      storeEntry(key, value);
       return value;
     })
     .finally(() => {
