@@ -4,7 +4,7 @@ import { apiError, json, parseBody, requireSession, auditLog, getClientIp } from
 import { getEngine } from "@/lib/engine";
 import { buildDeploySpec } from "@/lib/tunnels";
 import { rateLimit } from "@/lib/rate-limit";
-import { invalidateCache } from "@/lib/query-cache";
+import { CACHE_METRICS, invalidateCache } from "@/lib/query-cache";
 
 const batchSchema = z.object({
   action: z.enum(["start", "stop", "restart"]),
@@ -149,7 +149,7 @@ export async function POST(request: Request) {
   }
 
   await auditLog(auth.user.id, `tunnel.batch.${action}`, undefined, `ids: ${tunnelIds.join(",")}`, getClientIp(request));
-  invalidateCache();
+  invalidateCache(CACHE_METRICS);
 
   return json({
     ok: results.every((r) => r.ok),

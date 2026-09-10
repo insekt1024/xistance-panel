@@ -2,7 +2,6 @@ import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 import { reconcilePortForwards } from "@/lib/forward-supervisor";
-import { invalidateCache } from "@/lib/query-cache";
 
 const ruleSchema = z.object({
   name: z.string().min(1).max(80),
@@ -88,6 +87,5 @@ export async function POST(request: Request) {
   });
   await reconcilePortForwards();
   await auditLog(auth.user.id, "portforward.create", rule.id, rule.name, getClientIp(request));
-  invalidateCache();
   return json({ rule }, 201);
 }

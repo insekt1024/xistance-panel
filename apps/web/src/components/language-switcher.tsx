@@ -1,6 +1,5 @@
 "use client";
 
-import * as React from "react";
 import { useTranslations } from "next-intl";
 import { Check, Languages } from "lucide-react";
 import { locales, localeInfo } from "@xistance/i18n";

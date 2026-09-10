@@ -4,6 +4,23 @@
 // Only safe for server-side, non-user-specific data.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Cache key namespaces. Every key MUST start with one of these so writers can
+// invalidate exactly the reads they affect. Passing no prefix to
+// invalidateCache() clears everything, which throws away the traffic
+// aggregates — by far the most expensive reads here — so reach for that only
+// when the whole dataset is replaced (e.g. a backup restore).
+// ---------------------------------------------------------------------------
+
+/** Tunnel + node status counts and the 24h traffic totals (/api/metrics). */
+export const CACHE_METRICS = "metrics:";
+/** Distinct audit action list backing the activity filter dropdown. */
+export const CACHE_ACTIVITY = "activity:";
+/** Per-range traffic aggregates (/api/traffic). */
+export const CACHE_TRAFFIC = "traffic:";
+/** The dashboard's 24h traffic chart. */
+export const CACHE_DASHBOARD_TRAFFIC = "dashboard:traffic";
+
 const MAX_ENTRIES = 500;
 
 interface Entry<T> {

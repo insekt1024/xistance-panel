@@ -96,6 +96,8 @@ export async function POST(request: Request) {
   const attempted = [payload.users, payload.nodes, payload.tunnels, payload.portForwards, payload.webhooks, payload.settings].filter(
     (a) => a?.length,
   ).length;
+  // Restore rewrites whole tables, so every cached read is suspect —
+  // this is the one place a full, unscoped clear is correct.
   invalidateCache();
   if (attempted > 0 && errors.length >= attempted) {
     return apiError(`Restore failed: ${errors.join("; ")}`, 500);

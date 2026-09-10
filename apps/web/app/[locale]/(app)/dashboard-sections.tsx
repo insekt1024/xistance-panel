@@ -1,30 +1,11 @@
 import { prisma } from "@xistance/db";
 import { getEngine } from "@/lib/engine";
-import { cached } from "@/lib/query-cache";
+import { CACHE_DASHBOARD_TRAFFIC, cached } from "@/lib/query-cache";
+import { aggregateTrafficSince } from "@/lib/traffic";
 import { ActivityPanel, StatCards, TrafficPanel, TunnelsTable } from "./dashboard-stats";
 import { DashboardSkeleton } from "./dashboard-skeleton";
 
 const CHART_BUCKET_MS = 30 * 60_000;
-
-function aggregateTraffic(
-  rows: Array<{ bytesIn: bigint; bytesOut: bigint; ts: Date }>,
-): Array<{ ts: string; bytesIn: number; bytesOut: number }> {
-  const buckets = new Map<number, { ts: number; bytesIn: bigint; bytesOut: bigint }>();
-  for (const r of rows) {
-    const key = Math.floor(r.ts.getTime() / CHART_BUCKET_MS) * CHART_BUCKET_MS;
-    const b = buckets.get(key) ?? { ts: key, bytesIn: BigInt(0), bytesOut: BigInt(0) };
-    b.bytesIn += r.bytesIn;
-    b.bytesOut += r.bytesOut;
-    buckets.set(key, b);
-  }
-  return [...buckets.values()]
-    .sort((a, b) => a.ts - b.ts)
-    .map((b) => ({
-      ts: new Date(b.ts).toISOString(),
-      bytesIn: Number(b.bytesIn),
-      bytesOut: Number(b.bytesOut),
-    }));
-}
 
 export async function StatsSection() {
   const [tunnels, totalTunnels, totalNodes, onlineNodes, portForwards] = await Promise.all([
@@ -87,15 +68,10 @@ export async function StatsSection() {
 
 export async function TrafficSection() {
   const HOUR_MS = 3600_000;
-  const samples = await cached("dashboard:traffic", 10_000, async () => {
-    const since = new Date(Date.now() - 24 * HOUR_MS); // eslint-disable-line react-hooks/purity
-    const rawSamples = await prisma.trafficSample.findMany({
-      where: { ts: { gte: since } },
-      select: { bytesIn: true, bytesOut: true, ts: true },
-      orderBy: { ts: "asc" },
-    });
-    return aggregateTraffic(rawSamples);
-  });
+  const samples = await cached(CACHE_DASHBOARD_TRAFFIC, 10_000, () =>
+    // eslint-disable-next-line react-hooks/purity
+    aggregateTrafficSince(new Date(Date.now() - 24 * HOUR_MS), CHART_BUCKET_MS),
+  );
 
   return <TrafficPanel samples={samples} />;
 }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { z } from "zod";
 import { prisma } from "@xistance/db";
 import { assertCsrf, getSession, originAllowed, type SafeUser } from "./auth";
-import { invalidateCache } from "./query-cache";
+import { CACHE_ACTIVITY, invalidateCache } from "./query-cache";
 
 // ---------------------------------------------------------------------------
 // Small helpers shared by route handlers: JSON responses, Zod body parsing,
@@ -113,7 +113,8 @@ export async function auditLog(
     // in the audit trail is a compliance issue — always log it.
     console.error(`[audit] failed to record ${action}:`, err);
   }
-  // New audit rows can introduce new action types, so the cached
-  // activity:actions list (and any aggregate) must be recomputed.
-  invalidateCache();
+  // A new audit row can introduce an action type the filter dropdown has
+  // not seen, so only that list needs recomputing. Clearing everything here
+  // would evict the traffic aggregates on every audited action.
+  invalidateCache(CACHE_ACTIVITY);
 }

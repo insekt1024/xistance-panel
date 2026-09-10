@@ -5,7 +5,7 @@ import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from
 import { getEngine } from "@/lib/engine";
 import { buildSpec, storeTunnelConfig } from "@/lib/tunnels";
 import { rateLimit } from "@/lib/rate-limit";
-import { invalidateCache } from "@/lib/query-cache";
+import { CACHE_METRICS, invalidateCache } from "@/lib/query-cache";
 
 const tunnelCreateSchema = z.object({
   // No line breaks: names flow into systemd unit Descriptions.
@@ -121,7 +121,7 @@ export async function POST(request: Request) {
   // failed deploy leaves a visible "starting → stopped + errorMessage" row
   // instead of a ghost running process with no record.
   const id = crypto.randomUUID();
-  const tunnel = await prisma.tunnel.create({
+  await prisma.tunnel.create({
     data: {
       id,
       name: data.name,
@@ -147,7 +147,7 @@ export async function POST(request: Request) {
         // claiming a state with no process behind it — make it visible.
         console.error(`[tunnels] failed to mark ${id} stopped after create failure:`, err);
       });
-    invalidateCache();
+    invalidateCache(CACHE_METRICS);
     return apiError(message, 500);
   };
 
@@ -176,7 +176,7 @@ export async function POST(request: Request) {
     data: { status: "running", state: "running", errorMessage: null },
   });
   await auditLog(auth.user.id, "tunnel.create", created.id, created.name, getClientIp(request));
-  invalidateCache();
+  invalidateCache(CACHE_METRICS);
   // Don't leak the stored config ciphertext to non-admin callers.
   if (auth.user.role === "USER") {
     const { config: _config, ...safeTunnel } = created;

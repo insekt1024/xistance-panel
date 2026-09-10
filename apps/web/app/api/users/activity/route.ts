@@ -1,7 +1,7 @@
 import { prisma } from "@xistance/db";
 import { apiError, invalidCursorResponse, json, paginationParams, requireSession } from "@/lib/api";
 import { rateLimit } from "@/lib/rate-limit";
-import { cached } from "@/lib/query-cache";
+import { CACHE_ACTIVITY, cached } from "@/lib/query-cache";
 
 const LIST_LIMIT = 50;
 
@@ -20,7 +20,7 @@ export async function GET(request: Request) {
   if (userId) where.actorId = userId;
   if (action) where.action = { contains: action };
 
-  const actionTypes = await cached("activity:actions", 60_000, () =>
+  const actionTypes = await cached(`${CACHE_ACTIVITY}actions`, 60_000, () =>
     prisma.auditLog.findMany({
       select: { action: true },
       distinct: ["action"],

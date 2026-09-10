@@ -2,7 +2,7 @@ import { prisma } from "@xistance/db";
 import { getEngine } from "@/lib/engine";
 import { apiError, requireSession, json } from "@/lib/api";
 import { rateLimit } from "@/lib/rate-limit";
-import { cached } from "@/lib/query-cache";
+import { CACHE_METRICS, cached } from "@/lib/query-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,7 @@ export async function GET(request: Request) {
   const rl = rateLimit(`metrics:${session.user.id}`, 20, 60_000);
   if (!rl.ok) return apiError("Too many requests, slow down", 429);
 
-  const data = await cached("metrics:summary", 20_000, async () => {
+  const data = await cached(`${CACHE_METRICS}summary`, 20_000, async () => {
     const [
       tunnelCounts,
       nodeCounts,

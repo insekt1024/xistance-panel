@@ -5,7 +5,7 @@ import { NodeConfigSchema } from "@xistance/types";
 import { apiError, auditLog, getClientIp, invalidCursorResponse, json, paginationParams, parseBody, requireSession } from "@/lib/api";
 import { clearNodeCache } from "@/lib/forward-supervisor";
 import { redactNode } from "@/lib/tunnels";
-import { invalidateCache } from "@/lib/query-cache";
+import { CACHE_METRICS, invalidateCache } from "@/lib/query-cache";
 
 const nodeCreateSchema = NodeConfigSchema.extend({
   apiToken: z.string().optional(),
@@ -71,6 +71,6 @@ export async function POST(request: Request) {
   });
   await auditLog(auth.user.id, "node.create", node.id, node.name, getClientIp(request));
   clearNodeCache();
-  invalidateCache();
+  invalidateCache(CACHE_METRICS);
   return json({ node: redactNode(node) }, 201);
 }
