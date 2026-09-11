@@ -119,6 +119,7 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
     localPort: 8080,
     remoteHost: "127.0.0.1",
     remotePort: 80,
+    useAutossh: true,
   });
   // Port forward rules
   const [rules, setRules] = React.useState([
@@ -209,6 +210,11 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
             remoteBindAddr: "0.0.0.0",
             dynamicBindAddr: "127.0.0.1",
             extraArgs: [],
+            useAutossh: ssh.useAutossh,
+            // 0 = rely on ssh's own ServerAlive keepalive rather than
+            // autossh's echo-port monitor, which needs two spare ports.
+            autosshMonitorPort: 0,
+            autosshPoll: 60,
           },
         };
       case "PORT_FORWARD":
@@ -915,6 +921,18 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
                     />
                   </Field>
                 )}
+                <div className="flex items-start gap-2">
+                  <Switch
+                    checked={ssh.useAutossh}
+                    onCheckedChange={(c) => setSsh({ ...ssh, useAutossh: c })}
+                  />
+                  <div className="space-y-0.5">
+                    <Label>{t("autoReconnect")}</Label>
+                    <p className="text-xs text-muted-foreground">
+                      {t("autoReconnectHint")}
+                    </p>
+                  </div>
+                </div>
                 {ssh.mode !== "dynamic" && (
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field label={ssh.mode === "remote" ? t("localPort") : t("remotePortSvc")}>

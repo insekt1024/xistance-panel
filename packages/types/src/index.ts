@@ -290,6 +290,15 @@ export const SshConfigSchema = z.object({
   // The panel UI always sends []. Defense-in-depth filtering also lives in
   // buildSshCommand (tunnel-core).
   extraArgs: z.array(z.string()).max(0).default([]),
+  // Prefer the autossh wrapper for resilient reconnection (auto-restarts the
+  // underlying ssh process when a connection drops). The engine falls back to
+  // a plain `ssh` command when autossh is not installed on the target node.
+  useAutossh: z.boolean().default(true),
+  // autossh -M monitor port. 0 disables the built-in echo-port monitor and
+  // relies solely on ssh ServerAliveInterval/CountMax (recommended).
+  autosshMonitorPort: z.number().int().min(0).max(65535).default(0),
+  // autossh poll interval (seconds) between connection health checks.
+  autosshPoll: z.number().int().min(1).max(3600).default(60),
 });
 export type SshConfig = z.infer<typeof SshConfigSchema>;
 

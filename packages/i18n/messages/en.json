@@ -273,7 +273,9 @@
     "enabled": "Enabled",
     "fieldRequired": "{field} is required",
     "invalidPort": "{field} must be between 1 and 65535",
-    "sshIncomplete": "SSH needs a host, username, local port and remote port"
+    "sshIncomplete": "SSH needs a host, username, local port and remote port",
+    "autoReconnect": "Auto-reconnect (autossh)",
+    "autoReconnectHint": "Restarts the SSH client automatically when the link drops. Falls back to plain ssh if autossh is not installed on the node."
   },
   "nodes": {
     "title": "Nodes",

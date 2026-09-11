@@ -378,7 +378,7 @@ install_deps() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -y || die "apt-get update failed. Check network/DNS." "به‌روزرسانی apt ناموفق بود."
   apt-get install -y --no-install-recommends \
-    ca-certificates curl unzip jq sqlite3 openssh-client sshpass tar gnupg \
+    ca-certificates curl unzip jq sqlite3 openssh-client sshpass autossh tar gnupg \
     systemd ufw openssl iproute2 || die "apt-get install failed." "نصب بسته‌ها ناموفق بود."
   for cmd in curl jq sshpass openssl; do
     command -v "$cmd" >/dev/null 2>&1 || die "Required command '$cmd' not found after install." \

@@ -88,3 +88,26 @@ export function filterExtraArgs(extras: string[]): string[] {
 export function sshRequiresPass(cfg: SshConfig): boolean {
   return cfg.auth === "password" && Boolean(cfg.password);
 }
+
+// ---------------------------------------------------------------------------
+// autossh command builder. autossh wraps the ssh client and restarts it
+// whenever the connection drops, giving SSH tunnels the same resilience the
+// engine's other tunnel methods already rely on. The ssh arguments are
+// identical to buildSshCommand (minus the leading "ssh" token); autossh's own
+// -M monitor-port flag is prepended.
+//
+// The engine must supply AUTOSSH_GATETIME=0 (don't wait 30s before monitoring
+// kicks in — lets systemd report a clean startup immediately), AUTOSSH_POLL
+// and AUTOSSH_LOGLEVEL via the ProcessSpec env (see engine.planSsh).
+// ---------------------------------------------------------------------------
+
+export function buildAutosshCommand(
+  cfg: SshConfig,
+  opts: { keyPath?: string; password?: string },
+): string[] {
+  const sshArgs = buildSshCommand(cfg, opts);
+  // Drop the leading "ssh" token; autossh supplies its own program name.
+  const [, ...rest] = sshArgs;
+  const monitorPort = cfg.autosshMonitorPort ?? 0;
+  return ["autossh", "-M", String(monitorPort), ...rest];
+}

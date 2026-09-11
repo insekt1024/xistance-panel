@@ -14,7 +14,7 @@ import {
 import { buildBackhaulConfig } from "./config/backhaul.js";
 import { buildFrpPair } from "./config/frp.js";
 import { buildGostCommand } from "./config/gost.js";
-import { buildSshCommand } from "./config/ssh.js";
+import { buildAutosshCommand, buildSshCommand } from "./config/ssh.js";
 import { ProcessManager, type ProcessHandle, type ProcessSpec } from "./process.js";
 import { LocalRunner, RemoteRunner, isLoopback, type Runner } from "./runner.js";
 import { EventBus } from "./eventbus.js";
@@ -97,7 +97,10 @@ interface Runtime {
 export class TunnelEngine {
   private readonly runtimes = new Map<string, Runtime>();
   private readonly mgrCache = new Map<string, ProcessManager>();
-  private readonly systemBinCache = new Map<string, { at: number; path: string }>();
+  // `path: null` records a *negative* lookup (tool absent) so optional
+  // tools are not re-probed on every deploy — each probe is an SSH
+  // round-trip on a remote node.
+  private readonly systemBinCache = new Map<string, { at: number; path: string | null }>();
   private static readonly SYSTEM_BIN_CACHE_TTL = 10 * 60_000;
   readonly bus: EventBus;
 
@@ -173,15 +176,41 @@ export class TunnelEngine {
    *  per node+tool — `which` costs a full SSH round-trip on remote nodes. */
   private async systemBin(ctx: NodeCtx, name: string): Promise<string> {
     const key = `${ctx.name}:${name}`;
+    const missing = () =>
+      new Error(
+        `Required system tool "${name}" is missing on ${ctx.name}. ` +
+          `Install it (Ubuntu/Debian: apt install ${name}) and retry.`,
+      );
+    const hit = this.systemBinCache.get(key);
+    if (hit && Date.now() - hit.at < TunnelEngine.SYSTEM_BIN_CACHE_TTL) {
+      // A cached negative from systemBinOptional (shared cache) must still
+      // fail loudly here rather than leaking null into a command array.
+      if (hit.path === null) throw missing();
+      return hit.path;
+    }
+    const res = await ctx.runner.run(["which", name]);
+    const found = res.stdout.trim();
+    if (res.exitCode !== 0 || !found) {
+      this.systemBinCache.set(key, { at: Date.now(), path: null });
+      throw missing();
+    }
+    this.systemBinCache.set(key, { at: Date.now(), path: found });
+    return found;
+  }
+
+  /** Like systemBin, but returns null instead of throwing when the tool is
+   *  absent. Used for optional tools (autossh) where a graceful fallback
+   *  exists. Negative lookups are cached so a missing tool is not re-probed
+   *  on every deploy. */
+  private async systemBinOptional(ctx: NodeCtx, name: string): Promise<string | null> {
+    const key = `${ctx.name}:${name}`;
     const hit = this.systemBinCache.get(key);
     if (hit && Date.now() - hit.at < TunnelEngine.SYSTEM_BIN_CACHE_TTL) return hit.path;
     const res = await ctx.runner.run(["which", name]);
     const found = res.stdout.trim();
     if (res.exitCode !== 0 || !found) {
-      throw new Error(
-        `Required system tool "${name}" is missing on ${ctx.name}. ` +
-          `Install it (Ubuntu/Debian: apt install ${name}) and retry.`,
-      );
+      this.systemBinCache.set(key, { at: Date.now(), path: null });
+      return null;
     }
     this.systemBinCache.set(key, { at: Date.now(), path: found });
     return found;
@@ -677,13 +706,42 @@ export class TunnelEngine {
     const ctx = this.ctxFor(target);
     if (!ctx) return [];
     const usePass = c.auth === "password";
-    const args = buildSshCommand(c, { keyPath: target?.keyPath });
     const sshBin = await this.systemBin(ctx, "ssh");
+
+    // autossh respawns the ssh client the moment a link drops, instead of
+    // waiting for the process to exit and systemd's RestartSec. It is
+    // optional: a node without it falls back to plain ssh.
+    const autosshBin = c.useAutossh
+      ? await this.systemBinOptional(ctx, "autossh")
+      : null;
+
+    // Command builders emit a leading program token ("ssh" / "autossh");
+    // planners drop it and substitute the path resolved on the target, the
+    // same way planGost does. Passing it through made key-auth tunnels run
+    // `ssh ssh -N ... user@host`, where ssh reads the stray token as the
+    // destination host and the real destination as a remote command.
+    const [, ...args] = autosshBin
+      ? buildAutosshCommand(c, { keyPath: target?.keyPath })
+      : buildSshCommand(c, { keyPath: target?.keyPath });
+    const runBin = autosshBin ?? sshBin;
+
     const command = usePass
-      ? [await this.systemBin(ctx, "sshpass"), "-e", ...args]
-      : [sshBin, ...args];
+      ? [await this.systemBin(ctx, "sshpass"), "-e", runBin, ...args]
+      : [runBin, ...args];
+
     const specObj = processSpec(spec, "ssh", command, ctx);
-    if (usePass && c.password) specObj.env = { SSHPASS: c.password };
+    const env: Record<string, string> = {};
+    if (usePass && c.password) env.SSHPASS = c.password;
+    if (autosshBin) {
+      // Monitor from the first second rather than autossh's 30s grace period,
+      // so systemd sees a clean start instead of a unit that looks hung.
+      env.AUTOSSH_GATETIME = "0";
+      env.AUTOSSH_POLL = String(c.autosshPoll ?? 60);
+      // Pin the client autossh spawns to the one resolved above, so both
+      // agree on which ssh runs even if PATH differs under systemd.
+      env.AUTOSSH_PATH = sshBin;
+    }
+    if (Object.keys(env).length > 0) specObj.env = env;
     return [{ ctx, files: [], spec: specObj }];
   }
 

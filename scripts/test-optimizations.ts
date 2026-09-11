@@ -10,7 +10,15 @@ process.env.JWT_SECRET = "test-jwt-secret";
 process.env.NODE_ENV = "test";
 
 import { PrismaClient } from "../packages/db/generated/client/index.js";
-import { filterExtraArgs, hashPassword, sanitizeUnitText, verifyPassword } from "../packages/tunnel-core/src/index.ts";
+import {
+  buildAutosshCommand,
+  buildSshCommand,
+  buildUnit,
+  filterExtraArgs,
+  hashPassword,
+  sanitizeUnitText,
+  verifyPassword,
+} from "../packages/tunnel-core/src/index.ts";
 import { SshConfigSchema } from "../packages/types/src/index.ts";
 import { cached, invalidateCache } from "../apps/web/src/lib/query-cache.ts";
 // NOTE: lib/api.ts must be dynamically imported INSIDE tests (like tests
@@ -585,15 +593,33 @@ async function main() {
   });
 
   // Test 42: auditLog invalidates cached aggregates
-  await test("Audit: auditLog() invalidates cache", async () => {
+  await test("Audit: auditLog() invalidates activity but spares traffic", async () => {
     const { auditLog } = await import("../apps/web/src/lib/api.ts");
-    let calls = 0;
-    const key = "sec:audit-inv";
-    await cached(key, 60_000, async () => `v${++calls}`);
+    const { CACHE_ACTIVITY, CACHE_TRAFFIC } = await import(
+      "../apps/web/src/lib/query-cache.ts"
+    );
+    let activityCalls = 0;
+    let trafficCalls = 0;
+    const activityKey = `${CACHE_ACTIVITY}actions`;
+    const trafficKey = `${CACHE_TRAFFIC}24h`;
+    await cached(activityKey, 60_000, async () => `a${++activityCalls}`);
+    await cached(trafficKey, 60_000, async () => `t${++trafficCalls}`);
+
     await auditLog(null, "sec.test-action");
-    const v = await cached(key, 60_000, async () => `v${++calls}`);
-    if (calls !== 2) throw new Error(`Cache survived auditLog (calls=${calls}, v=${v})`);
-    invalidateCache("sec:");
+
+    // A new audit row can introduce an unseen action type, so the filter
+    // list must be recomputed.
+    await cached(activityKey, 60_000, async () => `a${++activityCalls}`);
+    if (activityCalls !== 2) {
+      throw new Error(`activity cache survived auditLog (calls=${activityCalls})`);
+    }
+    // ...but traffic aggregates are the most expensive reads here and no
+    // audited action can change a TrafficSample, so they must survive.
+    await cached(trafficKey, 60_000, async () => `t${++trafficCalls}`);
+    if (trafficCalls !== 1) {
+      throw new Error(`auditLog evicted the traffic cache (calls=${trafficCalls})`);
+    }
+    invalidateCache();
   });
 
   // Test 43: fa direction arrows match en (bidi mirrors → correctly in RTL)
@@ -620,6 +646,130 @@ async function main() {
       if (!rows.some((r) => r.tbl === t)) throw new Error(`No indexes found for ${t}: ${names}`);
     }
     if (/bytesIn/.test(names)) throw new Error("Redundant covering index still present: " + names);
+  });
+
+
+  // Regression: buildSshCommand emits a leading "ssh" program token that
+  // planSsh must strip before prefixing the resolved binary. Passing it
+  // through produced `ssh ssh -N ... user@host`, where ssh reads the stray
+  // token as the destination host — every key-auth SSH tunnel failed.
+  await test("SSH: argv carries no stray program token", async () => {
+    const cfg = SshConfigSchema.parse({
+      mode: "local",
+      host: "203.0.113.10",
+      port: 22,
+      username: "root",
+      auth: "key",
+      localPort: 8080,
+      remoteHost: "127.0.0.1",
+      remotePort: 80,
+    });
+
+    const sshArgs = buildSshCommand(cfg, { keyPath: "/etc/xistance/id" });
+    if (sshArgs[0] !== "ssh") throw new Error("builder should lead with its program name");
+
+    // What planSsh assembles: drop the token, prefix the resolved path.
+    const [, ...rest] = sshArgs;
+    const argv = ["/usr/bin/ssh", ...rest];
+    if (argv.slice(1).includes("ssh")) {
+      throw new Error("stray 'ssh' token left in argv: " + argv.join(" "));
+    }
+    if (argv[argv.length - 1] !== "root@203.0.113.10") {
+      throw new Error("destination must be the final token: " + argv.join(" "));
+    }
+  });
+
+  await test("SSH: autossh argv keeps -M and the real destination", async () => {
+    const cfg = SshConfigSchema.parse({
+      mode: "remote",
+      host: "203.0.113.10",
+      port: 22,
+      username: "root",
+      auth: "key",
+      localPort: 8080,
+      remoteHost: "127.0.0.1",
+      remotePort: 80,
+      autosshMonitorPort: 0,
+    });
+
+    const args = buildAutosshCommand(cfg, { keyPath: "/etc/xistance/id" });
+    if (args[0] !== "autossh") throw new Error("expected leading autossh token");
+    if (args[1] !== "-M" || args[2] !== "0") throw new Error("expected -M 0 monitor flag");
+
+    const [, ...rest] = args;
+    const argv = ["/usr/bin/autossh", ...rest];
+    if (argv.slice(1).some((a) => a === "ssh" || a === "autossh")) {
+      throw new Error("stray program token in argv: " + argv.join(" "));
+    }
+    if (argv[argv.length - 1] !== "root@203.0.113.10") {
+      throw new Error("destination must be the final token: " + argv.join(" "));
+    }
+    if (!argv.includes("-R")) throw new Error("remote mode must use -R");
+  });
+
+  await test("SSH: useAutossh defaults on, monitor port defaults to 0", async () => {
+    const cfg = SshConfigSchema.parse({
+      mode: "local",
+      host: "203.0.113.10",
+      port: 22,
+      username: "root",
+      auth: "key",
+      localPort: 8080,
+      remoteHost: "127.0.0.1",
+      remotePort: 80,
+    });
+    if (cfg.useAutossh !== true) throw new Error("useAutossh should default to true");
+    if (cfg.autosshMonitorPort !== 0) throw new Error("monitor port should default to 0");
+    if (cfg.autosshPoll !== 60) throw new Error("poll should default to 60");
+  });
+
+  // The unit file is the only place a password-auth tunnel's secret lands on
+  // disk, so the Environment= rendering must survive quoting and injection.
+  await test("Systemd: unit renders env and resists directive injection", async () => {
+    const unit = buildUnit({
+      unitName: "xt-test",
+      name: "test",
+      command: ["/usr/bin/autossh", "-M", "0", "-N"],
+      dataDir: "/var/lib/xistance",
+      env: {
+        AUTOSSH_GATETIME: "0",
+        AUTOSSH_POLL: "60",
+        SSHPASS: 'p a"ss\\word',
+      },
+    } as Parameters<typeof buildUnit>[0]);
+
+    if (!unit.includes("Environment=AUTOSSH_GATETIME=\"0\"")) {
+      throw new Error("AUTOSSH_GATETIME not rendered:\n" + unit);
+    }
+    if (!unit.includes("Environment=SSHPASS=")) throw new Error("SSHPASS not rendered");
+    // Quote and backslash must be escaped so the value cannot terminate the
+    // directive early.
+    const line = unit.split("\n").find((l) => l.startsWith("Environment=SSHPASS="))!;
+    if (!line.includes('\\"')) throw new Error("quote not escaped: " + line);
+    // Drop the escape pairs, then the only quotes left must be the two
+    // delimiters — anything else means the value could end the directive.
+    const value = line.slice("Environment=SSHPASS=".length);
+    const bare = value.replaceAll("\\\\", "").replaceAll('\\"', "");
+    if (bare.split('"').length - 1 !== 2) {
+      throw new Error("value escapes its own quoting: " + line);
+    }
+    if (!bare.startsWith('"') || !bare.endsWith('"')) {
+      throw new Error("value not wrapped in delimiters: " + line);
+    }
+  });
+
+  await test("Systemd: newlines in env cannot inject a directive", async () => {
+    const unit = buildUnit({
+      unitName: "xt-test",
+      name: "test",
+      command: ["/usr/bin/ssh", "-N"],
+      dataDir: "/var/lib/xistance",
+      env: { SSHPASS: "abc\nExecStartPre=/bin/rm -rf /" },
+    } as Parameters<typeof buildUnit>[0]);
+
+    if (/^ExecStartPre=/m.test(unit)) {
+      throw new Error("env value injected a systemd directive:\n" + unit);
+    }
   });
 
   // Print results

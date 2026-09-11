@@ -52,13 +52,28 @@ export function sanitizeUnitText(s: string): string {
   return s.replaceAll(/[\r\n]+/g, " ").slice(0, 200);
 }
 
-function buildUnit(spec: ProcessSpec): string {
+/** Quote an env value for a systemd `Environment=` directive. Strips control
+ *  characters (which could otherwise break out of the directive) and escapes
+ *  the two characters systemd treats specially inside double quotes. */
+function systemdQuote(s: string): string {
+  const cleaned = s.replaceAll(/[\r\n\x00]+/g, "");
+  return `"${cleaned.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+}
+
+export function buildUnit(spec: ProcessSpec): string {
   const envFile = spec.envFile ? `EnvironmentFile=${spec.envFile}\n` : "";
   const exec = spec.command.map(shellQuote).join(" ");
   const cd = spec.workdir ? `WorkingDirectory=${spec.workdir}\n` : "";
   const desc = sanitizeUnitText(
     spec.description ?? `Xistance tunnel: ${spec.name}`,
   );
+  // Inline per-unit environment (e.g. AUTOSSH_* or SSHPASS). Written as
+  // Environment= directives so both systemd and remote nodes inherit them.
+  const envLines = Object.entries(spec.env ?? {})
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => `Environment=${k}=${systemdQuote(String(v))}`)
+    .join("\n");
+  const envBlock = envLines ? `${envLines}\n` : "";
   return `[Unit]
 Description=${desc}
 After=network-online.target
@@ -67,7 +82,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=${exec}
-${cd}${envFile}Restart=on-failure
+${cd}${envFile}${envBlock}Restart=on-failure
 RestartSec=5
 User=root
 RuntimeDirectoryMode=0750
@@ -100,7 +115,9 @@ export class SystemdProcessHandle implements ProcessHandle {
     const cfgDir = path.join(this.spec.dataDir, "systemd");
     const unitPath = path.join(cfgDir, this.unit());
     await this.runner.makeDir(cfgDir);
-    await this.runner.writeFile(unitPath, buildUnit(this.spec));
+    // 0600: the unit can carry secrets (SSHPASS) in Environment= lines,
+    // and the default umask would leave them world-readable on the node.
+    await this.runner.writeFile(unitPath, buildUnit(this.spec), 0o600);
     await this.systemctl("daemon-reload");
     await this.systemctl("enable");
     await this.systemctl("start");

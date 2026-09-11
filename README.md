@@ -44,6 +44,10 @@
 - **Tunnels** — Backhaul, FRP, GOST and SSH relays; TCP & UDP; per-node roles
   (Iran / Foreign); live logs with search/filter, batch start/stop/restart,
   JSON import/export.
+- **Resilient SSH** — SSH tunnels run under `autossh` by default, so the client
+  is respawned the moment a link drops instead of waiting for the process to
+  exit. Toggle it per tunnel in the wizard; nodes without `autossh` installed
+  fall back to plain `ssh` automatically.
 - **Nodes** — register Iran/Foreign servers, test SSH connectivity, track
   status/traffic; one-liner prep script for remote VPS bootstrapping.
 - **Port forwarding** — quick relay rules (local forwarder, node-based).
@@ -134,8 +138,9 @@ What the installer does:
 
 - Preflight checks (root, arch, Ubuntu/Debian version, disk/RAM, port free,
   systemd, connectivity), then installs OS deps (`curl unzip jq sqlite3
-  openssh-client sshpass tar gnupg systemd ufw openssl iproute2`), Node ≥ 22,
-  and `backhaul` / `frp` / `gost` binaries into `/var/lib/xistance/bin`.
+  openssh-client sshpass autossh tar gnupg systemd ufw openssl iproute2`),
+  Node ≥ 22, and `backhaul` / `frp` / `gost` binaries into
+  `/var/lib/xistance/bin`.
   Hosts with < 1.5G RAM automatically get a 2G `/swapfile` (skippable with
   `--no-swap`) so `npm ci` / the Next.js build don't OOM.
 - Writes config to `/etc/xistance/xistance.env` (auto-generated `XTENC_KEY`
@@ -211,7 +216,8 @@ Working TOML / command examples for each relay live in `tunnels/examples/`
 - `npm run lint` — ESLint
 - `npm run typecheck` — TypeScript across all packages + app
 - `npm run version:show` / `version:check` / `version:bump -- patch` — version tools
-- `TURBO_DISABLE=true npx tsx scripts/test-optimizations.ts` — 31 dynamic DB tests
+- `TURBO_DISABLE=true npx tsx scripts/test-optimizations.ts` — 49 dynamic tests
+  (DB selects/pagination, cache scoping, rate limits, SSRF, SSH argv, systemd units)
 
 ## Versioning
 
@@ -233,7 +239,7 @@ node scripts/version.mjs patch --commit  # bump + git commit + tag vX.Y.Z
 ## CI/CD
 
 - **CI** (`ci.yml`, `TURBO_DISABLE=true`): `verify` job (`version:check` →
-  lint → typecheck → 31 optimization tests → non-blocking audit), then `build`
+  lint → typecheck → 49 optimization tests → non-blocking audit), then `build`
   job (`next build` + `docker build` validation). Standalone artifact uploaded
   on push.
 - **Release** (`release.yml`, `workflow_dispatch` with `patch|minor|major` +
