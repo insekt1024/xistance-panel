@@ -28,6 +28,7 @@ import { cached, invalidateCache } from "../apps/web/src/lib/query-cache.ts";
 import enMessages from "../packages/i18n/messages/en.json";
 import faMessages from "../packages/i18n/messages/fa.json";
 import { rateLimit } from "../apps/web/src/lib/rate-limit.ts";
+import { ENGINE_CONCURRENCY, mapPool } from "../apps/web/src/lib/pool.ts";
 import { isBlockedTarget, isPrivateIp } from "../apps/web/src/lib/ssrf.ts";
 import path from "node:path";
 import fs from "node:fs";
@@ -769,6 +770,47 @@ async function main() {
 
     if (/^ExecStartPre=/m.test(unit)) {
       throw new Error("env value injected a systemd directive:\n" + unit);
+    }
+  });
+
+
+  // Engine calls can each open an SSH session, so the pages that fan out over
+  // every tunnel must stay bounded (the sampler already was; the tunnels page
+  // and dashboard were not).
+  await test("Pool: preserves input order", async () => {
+    const items = Array.from({ length: 25 }, (_, i) => i);
+    const out = await mapPool(items, 4, async (n) => {
+      // Finish in reverse order to prove ordering is by index, not completion.
+      await new Promise((r) => setTimeout(r, (25 - n) % 7));
+      return n * 2;
+    });
+    const expected = items.map((n) => n * 2);
+    if (JSON.stringify(out) !== JSON.stringify(expected)) {
+      throw new Error("order not preserved: " + out.join(","));
+    }
+  });
+
+  await test("Pool: never exceeds the concurrency cap", async () => {
+    let active = 0;
+    let peak = 0;
+    const items = Array.from({ length: 40 }, (_, i) => i);
+    await mapPool(items, ENGINE_CONCURRENCY, async () => {
+      active += 1;
+      peak = Math.max(peak, active);
+      await new Promise((r) => setTimeout(r, 2));
+      active -= 1;
+      return null;
+    });
+    if (peak > ENGINE_CONCURRENCY) {
+      throw new Error(`peak concurrency ${peak} exceeded cap ${ENGINE_CONCURRENCY}`);
+    }
+    if (peak < 2) throw new Error("pool did not run concurrently at all");
+  });
+
+  await test("Pool: empty input resolves to empty array", async () => {
+    const out = await mapPool([], ENGINE_CONCURRENCY, async () => "x");
+    if (!Array.isArray(out) || out.length !== 0) {
+      throw new Error("expected [] for empty input");
     }
   });
 

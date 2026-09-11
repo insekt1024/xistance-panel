@@ -1,5 +1,6 @@
 import { prisma } from "@xistance/db";
 import { getEngine } from "@/lib/engine";
+import { ENGINE_CONCURRENCY, mapPool } from "@/lib/pool";
 import { CACHE_DASHBOARD_TRAFFIC, cached } from "@/lib/query-cache";
 import { aggregateTrafficSince } from "@/lib/traffic";
 import { ActivityPanel, StatCards, TrafficPanel, TunnelsTable } from "./dashboard-stats";
@@ -25,20 +26,18 @@ export async function StatsSection() {
   ]);
 
   const engine = getEngine();
-  const liveTunnels = await Promise.all(
-    tunnels.map(async (tun) => {
-      let live = tun.state;
-      if (engine.has(tun.id)) {
-        try {
-          live = await engine.status(tun.id);
-        } catch {
-          // One bad tunnel must not crash the whole section.
-          live = "unknown";
-        }
+  const liveTunnels = await mapPool(tunnels, ENGINE_CONCURRENCY, async (tun) => {
+    let live = tun.state;
+    if (engine.has(tun.id)) {
+      try {
+        live = await engine.status(tun.id);
+      } catch {
+        // One bad tunnel must not crash the whole section.
+        live = "unknown";
       }
-      return { ...tun, liveState: live };
-    }),
-  );
+    }
+    return { ...tun, liveState: live };
+  });
 
   const running = liveTunnels.filter((x) => x.liveState === "running").length;
 

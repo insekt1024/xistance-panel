@@ -1,5 +1,6 @@
 import { prisma } from "@xistance/db";
 import { getEngine } from "./engine";
+import { mapPool } from "./pool";
 
 // ---------------------------------------------------------------------------
 // Traffic sampler: every 60s, snapshot every engine-managed tunnel and persist
@@ -38,30 +39,18 @@ export function startTrafficSampler(): void {
         );
         return;
       }
-      // Snapshot with a bounded worker pool instead of Promise.all over
-      // everything (each snapshot may open SSH sessions to remote nodes).
-      const snaps: Array<Awaited<ReturnType<typeof engine.snapshot>>> = new Array(
-        managed.length,
-      ).fill(null);
-      let next = 0;
-      const workers = Array.from(
-        { length: Math.min(SNAPSHOT_CONCURRENCY, managed.length) },
-        async () => {
-          while (next < managed.length) {
-            const i = next;
-            next += 1;
-            try {
-              snaps[i] = await engine.snapshot(managed[i].id);
-            } catch (err) {
-              // Isolate per-tunnel failures so one bad tunnel doesn't
-              // starve the rest of this worker's queue for the tick.
-              console.error(`[sampler] snapshot failed for ${managed[i].id}:`, err);
-              snaps[i] = null;
-            }
-          }
-        },
-      );
-      await Promise.all(workers);
+      // Bounded worker pool instead of Promise.all over everything (each
+      // snapshot may open SSH sessions to remote nodes).
+      const snaps = await mapPool(managed, SNAPSHOT_CONCURRENCY, async (t) => {
+        try {
+          return await engine.snapshot(t.id);
+        } catch (err) {
+          // Isolate per-tunnel failures so one bad tunnel doesn't starve the
+          // rest of this worker's queue for the tick.
+          console.error(`[sampler] snapshot failed for ${t.id}:`, err);
+          return null;
+        }
+      });
       const rows: Array<{
         tunnelId: string;
         bytesIn: bigint;

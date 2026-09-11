@@ -1,6 +1,7 @@
 import { getTranslations } from "next-intl/server";
 import { prisma } from "@xistance/db";
 import { getEngine } from "@/lib/engine";
+import { ENGINE_CONCURRENCY, mapPool } from "@/lib/pool";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/routing";
@@ -28,25 +29,30 @@ export default async function TunnelsPage() {
     }),
   ]);
   const engine = getEngine();
-  const rows = await Promise.all(
-    tunnels.map(async (tun) => {
-      const live = engine.has(tun.id) ? await engine.status(tun.id) : tun.state;
-      const snap = engine.has(tun.id) ? await engine.snapshot(tun.id) : null;
-      return {
-        id: tun.id,
-        name: tun.name,
-        method: tun.method,
-        state: live,
-        port: tun.port,
-        clientNode: tun.clientNode?.name ?? "—",
-        serverNode: tun.serverNode?.name ?? "—",
-        autostart: tun.autostart,
-        bytesIn: snap?.bytesIn ?? 0,
-        bytesOut: snap?.bytesOut ?? 0,
-        createdAt: tun.createdAt.toISOString(),
-      };
-    }),
-  );
+  // snapshot() already resolves status internally and returns it, so asking
+  // for status() first was a second, sequential round-trip per tunnel. The
+  // pool keeps the remaining fan-out flat — each call can open an SSH
+  // session on a remote node, and this page re-renders every 30s.
+  const rows = await mapPool(tunnels, ENGINE_CONCURRENCY, async (tun) => {
+    const snap = engine.has(tun.id)
+      ? await engine.snapshot(tun.id).catch(() => null)
+      : null;
+    // One bad tunnel must not blank the whole table.
+    const live = snap?.status ?? tun.state;
+    return {
+      id: tun.id,
+      name: tun.name,
+      method: tun.method,
+      state: live,
+      port: tun.port,
+      clientNode: tun.clientNode?.name ?? "—",
+      serverNode: tun.serverNode?.name ?? "—",
+      autostart: tun.autostart,
+      bytesIn: snap?.bytesIn ?? 0,
+      bytesOut: snap?.bytesOut ?? 0,
+      createdAt: tun.createdAt.toISOString(),
+    };
+  });
 
   return (
     <div className="space-y-6">
