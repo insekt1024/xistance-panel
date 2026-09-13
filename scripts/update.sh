@@ -6,6 +6,7 @@
 # Run from a repository checkout on the server:
 #
 #   sudo bash scripts/update.sh [master]
+#   sudo bash scripts/update.sh --branch v1.1.2
 #
 set -euo pipefail
 
@@ -15,7 +16,20 @@ die() { printf '%s✗ %s%s\n' "$C_RED" "$1" "$C_RST" >&2; exit 1; }
 
 INSTALL_DIR="/opt/xistance"
 ENV_FILE="/etc/xistance/xistance.env"
-BRANCH="${1:-master}"
+# Accept --branch <name> / --branch=<name> (as sent by install.sh --menu)
+# as well as a bare positional branch for backwards compatibility.
+BRANCH="master"
+_prev=""
+for _arg in "$@"; do
+  if [[ "$_prev" == "--branch" ]]; then BRANCH="$_arg"; _prev=""; continue; fi
+  case "$_arg" in
+    --branch=*) BRANCH="${_arg#*=}";;
+    --branch) _prev="--branch";;
+    -*) ;;
+    *) BRANCH="$_arg";;
+  esac
+done
+unset _prev _arg
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -41,9 +55,11 @@ else
   printf '%sNot a git checkout; skipping pull. Building current tree.%s\n' "$C_YEL" "$C_RST"
 fi
 
-# 3. Build
+# 3. Build (TURBO_DISABLE is mandatory: Turbopack chokes on tunnels/bin/gost)
+export TURBO_DISABLE=true
+export NEXT_TELEMETRY_DISABLED=1
 printf '%sInstalling dependencies…%s\n' "$C_YEL" "$C_RST"
-( cd "$REPO_ROOT" && npm ci --no-audit --no-fund )
+( cd "$REPO_ROOT" && npm ci --no-audit --no-fund --prefer-offline )
 printf '%sBuilding panel…%s\n' "$C_YEL" "$C_RST"
 ( cd "$REPO_ROOT" && npm run build )
 
