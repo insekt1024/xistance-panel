@@ -20,7 +20,7 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@prisma/client": "^6.6.0",
+    "@prisma/client": "^7.10.0",
     "@xistance/types": "*"
   },
   "devDependencies": {
