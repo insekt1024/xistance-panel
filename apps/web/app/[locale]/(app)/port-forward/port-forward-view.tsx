@@ -63,10 +63,28 @@ export function PortForwardView({ rules }: { rules: ForwardRow[] }) {
   const router = useRouter();
 
   const [open, setOpen] = React.useState(false);
+  const [simple, setSimple] = React.useState(true);
   const [form, setForm] = React.useState(EMPTY);
   const [saving, setSaving] = React.useState(false);
+  const [autoPortBusy, setAutoPortBusy] = React.useState(false);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [deleteId, setDeleteId] = React.useState<ForwardRow | null>(null);
+
+  async function fetchFreePort(): Promise<number | null> {
+    setAutoPortBusy(true);
+    try {
+      const res = await apiFetch(`/api/port-forwards?free=1&protocol=${form.protocol}`);
+      const port = (res.data as { port?: number })?.port;
+      if (res.ok && port) {
+        setForm((f) => ({ ...f, sourcePort: port }));
+        return port;
+      }
+      toast.error(t("freePortFail"));
+      return null;
+    } finally {
+      setAutoPortBusy(false);
+    }
+  }
 
   async function submit() {
     // Cheap client-side checks; the server schema remains the authority.
@@ -78,7 +96,7 @@ export function PortForwardView({ rules }: { rules: ForwardRow[] }) {
       toast.error(t("fieldRequired", { field: t("destHost") }));
       return;
     }
-    if (!Number.isInteger(form.sourcePort) || form.sourcePort < 1 || form.sourcePort > 65535) {
+    if (!simple && (!Number.isInteger(form.sourcePort) || form.sourcePort < 1 || form.sourcePort > 65535)) {
       toast.error(t("invalidPort", { field: t("sourcePort") }));
       return;
     }
@@ -87,9 +105,12 @@ export function PortForwardView({ rules }: { rules: ForwardRow[] }) {
       return;
     }
     setSaving(true);
+    // Simple mode: sourcePort 0 + auto flag → server allocates a free port
+    // and resolves the node. Advanced mode sends exactly what was typed.
+    const payload = simple ? { ...form, sourcePort: 0, auto: true, nodeId: null } : form;
     const res = await apiFetch("/api/port-forwards", {
       method: "POST",
-      body: JSON.stringify(form),
+      body: JSON.stringify(payload),
     });
     setSaving(false);
     if (res.ok) {
@@ -203,6 +224,13 @@ export function PortForwardView({ rules }: { rules: ForwardRow[] }) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("addRule")}</DialogTitle>
+            <p className="text-xs text-muted-foreground">
+              {simple ? t("simpleHint") : t("advancedHint")}
+            </p>
+            <div className="flex items-center gap-2 pt-1">
+              <Switch checked={simple} onCheckedChange={setSimple} />
+              <Label>{simple ? t("simpleMode") : t("advancedMode")}</Label>
+            </div>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -245,17 +273,36 @@ export function PortForwardView({ rules }: { rules: ForwardRow[] }) {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
-                <Label>{t("sourcePort")}</Label>
-                <Input
-                  type="number"
-                  value={form.sourcePort}
-                  onChange={(e) =>
-                    setForm({ ...form, sourcePort: Number(e.target.value) })
-                  }
-                />
-              </div>
+              {!simple && (
+                <div className="space-y-1.5">
+                  <Label>{t("sourcePort")}</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      type="number"
+                      value={form.sourcePort || ""}
+                      onChange={(e) =>
+                        setForm({ ...form, sourcePort: Number(e.target.value) })
+                      }
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={autoPortBusy}
+                      onClick={() => fetchFreePort()}
+                    >
+                      {autoPortBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                      {t("autoPort")}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
+            {simple && (
+              <p className="rounded-md border bg-muted/40 p-2 text-xs text-muted-foreground">
+                {t("autoPortHint")}
+              </p>
+            )}
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label>{t("destHost")}</Label>

@@ -38,14 +38,14 @@ interface ImportedConfig {
   config?: unknown;
 }
 
-const KNOWN_METHODS = ["BACKHAUL", "FRP", "GOST", "SSH", "PORT_FORWARD"];
+const KNOWN_METHODS = ["BACKHAUL", "FRP", "GOST", "SSH", "PORT_FORWARD", "DIRECT", "REVERSE", "XRAY", "XUI"];
 
 // The server validates `config` against a discriminated union on `method`,
 // so derive the method from the config shape itself (the authoritative source).
 function deriveMethod(cfg: unknown): string | null {
   if (!cfg || typeof cfg !== "object") return null;
   const c = cfg as Record<string, unknown>;
-  for (const k of ["backhaul", "frp", "gost", "ssh"]) {
+  for (const k of ["backhaul", "frp", "gost", "ssh", "direct", "reverse", "xray", "xui"]) {
     if (c[k] !== undefined) return k.toUpperCase();
   }
   if (Array.isArray(c.portForwards)) return "PORT_FORWARD";

@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
+import Image from "next/image";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/routing";
-import { Activity, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,8 +43,14 @@ export function LoginForm() {
   return (
     <Card className="animate-fade-in-up w-full max-w-sm">
       <CardHeader className="text-center">
-        <div className="mx-auto mb-2 flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/25 transition-transform duration-300 hover:scale-105">
-          <Activity className="h-6 w-6" />
+        <div className="mx-auto mb-2 transition-transform duration-300 hover:scale-105">
+          <Image
+            src="/xistance-logo.svg"
+            alt="Xistance Panel logo"
+            className="h-11 w-11 rounded-xl shadow-lg"
+            width={44}
+            height={44}
+          />
         </div>
         <CardTitle>{t("welcomeBack")}</CardTitle>
         <CardDescription>{t("signInSubtitle")}</CardDescription>

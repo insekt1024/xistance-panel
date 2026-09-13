@@ -36,7 +36,7 @@ export interface WizardNode {
   host: string;
 }
 
-const METHODS: TunnelMethod[] = ["BACKHAUL", "FRP", "GOST", "SSH", "PORT_FORWARD"];
+const METHODS: TunnelMethod[] = ["BACKHAUL", "FRP", "GOST", "SSH", "PORT_FORWARD", "DIRECT", "REVERSE", "XRAY", "XUI"];
 
 function randomToken(): string {
   return [...crypto.getRandomValues(new Uint8Array(18))]
@@ -121,6 +121,42 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
     remotePort: 80,
     useAutossh: true,
   });
+  // DIRECT (single-node forward)
+  const [direct, setDirect] = React.useState({
+    protocol: "tcp",
+    listenPort: 8080,
+    targetHost: "",
+    targetPort: 80,
+  });
+  // REVERSE (Iran dials out, Foreign exposes)
+  const [reverse, setReverse] = React.useState({
+    protocol: "tcp",
+    listenPort: 8080,
+    forwardHost: "127.0.0.1",
+    forwardPort: 80,
+  });
+  // XRAY (xray-core outbound, 3X-UI compatible)
+  const [xray, setXray] = React.useState({
+    listenPort: 10808,
+    protocol: "vless",
+    address: "",
+    port: 443,
+    uuid: "",
+    network: "tcp",
+    security: "none",
+    sni: "",
+    path: "",
+  });
+  // XUI (X-UI / 3X-UI panel integration, no binary)
+  const [xui, setXui] = React.useState({
+    panelUrl: "",
+    username: "",
+    password: "",
+    inboundId: "",
+    remark: "",
+  });
+  const [xuiCheck, setXuiCheck] = React.useState<null | { reachable: boolean; loginPath: string | null }>(null);
+  const [xuiChecking, setXuiChecking] = React.useState(false);
   // Port forward rules
   const [rules, setRules] = React.useState([
     {
@@ -230,6 +266,54 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
             enabled: r.enabled,
           })),
         };
+      case "DIRECT":
+        return {
+          method: "DIRECT",
+          direct: {
+            protocol: direct.protocol as "tcp" | "udp",
+            bindAddr: "0.0.0.0",
+            listenPort: direct.listenPort,
+            targetHost: direct.targetHost,
+            targetPort: direct.targetPort,
+          },
+        };
+      case "REVERSE":
+        return {
+          method: "REVERSE",
+          reverse: {
+            protocol: reverse.protocol as "tcp" | "udp",
+            listenPort: reverse.listenPort,
+            forwardHost: reverse.forwardHost,
+            forwardPort: reverse.forwardPort,
+          },
+        };
+      case "XRAY":
+        return {
+          method: "XRAY",
+          xray: {
+            listenPort: xray.listenPort,
+            protocol: xray.protocol as "vless" | "vmess" | "trojan" | "shadowsocks",
+            address: xray.address,
+            port: xray.port,
+            uuid: xray.uuid,
+            network: xray.network as "tcp" | "ws" | "grpc",
+            security: xray.security as "none" | "tls" | "reality",
+            sni: xray.sni || undefined,
+            path: xray.path || undefined,
+          },
+        };
+      case "XUI":
+        return {
+          method: "XUI",
+          xui: {
+            panelUrl: xui.panelUrl,
+            username: xui.username,
+            password: xui.password,
+            inboundId: xui.inboundId ? Number(xui.inboundId) : undefined,
+            remark: xui.remark || undefined,
+            syncInterval: 300,
+          },
+        };
       default:
         return null;
     }
@@ -328,6 +412,26 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
             return fail(t("invalidPort", { field: `${t("sourcePort")}/${t("destPort")} (#${i + 1})` }));
           }
         }
+        return true;
+      }
+      case "DIRECT": {
+        if (!isPort(direct.listenPort) || !isPort(direct.targetPort)) return fail(t("invalidPort", { field: t("listenPort") }));
+        if (!direct.targetHost.trim()) return fail(t("fieldRequired", { field: t("forwardHost") }));
+        return true;
+      }
+      case "REVERSE": {
+        if (!isPort(reverse.listenPort) || !isPort(reverse.forwardPort)) return fail(t("invalidPort", { field: t("listenPort") }));
+        if (!reverse.forwardHost.trim()) return fail(t("fieldRequired", { field: t("forwardHost") }));
+        return true;
+      }
+      case "XRAY": {
+        if (!isPort(xray.listenPort) || !isPort(xray.port)) return fail(t("invalidPort", { field: t("listenPort") }));
+        if (!xray.address.trim()) return fail(t("fieldRequired", { field: t("host") }));
+        if (!xray.uuid.trim()) return fail(t("fieldRequired", { field: "UUID / password" }));
+        return true;
+      }
+      case "XUI": {
+        if (!xui.panelUrl.trim() || !xui.username.trim() || !xui.password) return fail(t("xuiIncomplete"));
         return true;
       }
       default:
@@ -1041,6 +1145,27 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
                         setRules(next);
                       }}
                     />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      title={t("autoPort")}
+                      onClick={async () => {
+                        const res = await apiFetch(
+                          `/api/port-forwards?free=1&protocol=${r.protocol}`,
+                        );
+                        const port = (res.data as { port?: number })?.port;
+                        if (res.ok && port) {
+                          const next = [...rules];
+                          next[i] = { ...r, sourcePort: port };
+                          setRules(next);
+                        } else {
+                          toast.error(t("freePortFail"));
+                        }
+                      }}
+                    >
+                      {t("autoPort")}
+                    </Button>
                     <span className="text-muted-foreground">→</span>
                     <Input
                       className="w-32"
@@ -1081,6 +1206,178 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
                     </Button>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {method === "DIRECT" && (
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground">{t("directHint")}</p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Field label={t("protocol")}>
+                    <Select value={direct.protocol} onValueChange={(v) => setDirect({ ...direct, protocol: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="tcp">TCP</SelectItem>
+                        <SelectItem value="udp">UDP</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label={t("listenPort")}>
+                    <Input type="number" value={direct.listenPort} onChange={(e) => setDirect({ ...direct, listenPort: Number(e.target.value) })} />
+                  </Field>
+                  <Field label={t("forwardPort")}>
+                    <Input type="number" value={direct.targetPort} onChange={(e) => setDirect({ ...direct, targetPort: Number(e.target.value) })} />
+                  </Field>
+                </div>
+                <Field label={t("forwardHost")} hint={t("forwardHostHint")}>
+                  <Input value={direct.targetHost} onChange={(e) => setDirect({ ...direct, targetHost: e.target.value })} placeholder="127.0.0.1" />
+                </Field>
+              </div>
+            )}
+
+            {method === "REVERSE" && (
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground">{t("reverseHint")}</p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Field label={t("protocol")}>
+                    <Select value={reverse.protocol} onValueChange={(v) => setReverse({ ...reverse, protocol: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="tcp">TCP</SelectItem>
+                        <SelectItem value="udp">UDP</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label={t("listenPort")} hint={t("reverseListenHint")}>
+                    <Input type="number" value={reverse.listenPort} onChange={(e) => setReverse({ ...reverse, listenPort: Number(e.target.value) })} />
+                  </Field>
+                  <Field label={t("forwardPort")}>
+                    <Input type="number" value={reverse.forwardPort} onChange={(e) => setReverse({ ...reverse, forwardPort: Number(e.target.value) })} />
+                  </Field>
+                </div>
+                <Field label={t("forwardHost")} hint={t("forwardHostHint")}>
+                  <Input value={reverse.forwardHost} onChange={(e) => setReverse({ ...reverse, forwardHost: e.target.value })} />
+                </Field>
+              </div>
+            )}
+
+            {method === "XRAY" && (
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground">{t("xrayHint")}</p>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Field label={t("listenPort")}>
+                    <Input type="number" value={xray.listenPort} onChange={(e) => setXray({ ...xray, listenPort: Number(e.target.value) })} />
+                  </Field>
+                  <Field label={t("protocol")}>
+                    <Select value={xray.protocol} onValueChange={(v) => setXray({ ...xray, protocol: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="vless">VLESS</SelectItem>
+                        <SelectItem value="vmess">VMess</SelectItem>
+                        <SelectItem value="trojan">Trojan</SelectItem>
+                        <SelectItem value="shadowsocks">Shadowsocks</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label={t("network")}>
+                    <Select value={xray.network} onValueChange={(v) => setXray({ ...xray, network: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="tcp">TCP</SelectItem>
+                        <SelectItem value="ws">WebSocket</SelectItem>
+                        <SelectItem value="grpc">gRPC</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={t("host")}>
+                    <Input value={xray.address} onChange={(e) => setXray({ ...xray, address: e.target.value })} placeholder="vpn.example.com" />
+                  </Field>
+                  <Field label={t("remotePort")}>
+                    <Input type="number" value={xray.port} onChange={(e) => setXray({ ...xray, port: Number(e.target.value) })} />
+                  </Field>
+                </div>
+                <Field label="UUID / password" hint={t("xrayUuidHint")}>
+                  <Input value={xray.uuid} onChange={(e) => setXray({ ...xray, uuid: e.target.value })} className="font-mono" placeholder="paste from 3X-UI inbound" />
+                </Field>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Field label={t("security")}>
+                    <Select value={xray.security} onValueChange={(v) => setXray({ ...xray, security: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None</SelectItem>
+                        <SelectItem value="tls">TLS</SelectItem>
+                        <SelectItem value="reality">Reality</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="SNI">
+                    <Input value={xray.sni} onChange={(e) => setXray({ ...xray, sni: e.target.value })} placeholder="vpn.example.com" />
+                  </Field>
+                  <Field label={t("path")}>
+                    <Input value={xray.path} onChange={(e) => setXray({ ...xray, path: e.target.value })} placeholder="/ or serviceName" />
+                  </Field>
+                </div>
+              </div>
+            )}
+
+            {method === "XUI" && (
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground">{t("xuiHint")}</p>
+                <Field label={t("xuiPanelUrl")}>
+                  <Input value={xui.panelUrl} onChange={(e) => { setXui({ ...xui, panelUrl: e.target.value }); setXuiCheck(null); }} placeholder="http://203.0.113.10:2053" dir="ltr" />
+                </Field>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={t("username")}>
+                    <Input value={xui.username} onChange={(e) => setXui({ ...xui, username: e.target.value })} />
+                  </Field>
+                  <Field label={t("password")}>
+                    <Input type="password" value={xui.password} onChange={(e) => setXui({ ...xui, password: e.target.value })} />
+                  </Field>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={t("xuiInboundId")} hint={t("optional")}>
+                    <Input type="number" value={xui.inboundId} onChange={(e) => setXui({ ...xui, inboundId: e.target.value })} placeholder="1" />
+                  </Field>
+                  <Field label={t("xuiRemark")} hint={t("optional")}>
+                    <Input value={xui.remark} onChange={(e) => setXui({ ...xui, remark: e.target.value })} />
+                  </Field>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={xuiChecking || !xui.panelUrl || !xui.username || !xui.password}
+                    onClick={async () => {
+                      setXuiChecking(true);
+                      setXuiCheck(null);
+                      try {
+                        const res = await apiFetch("/api/xui/test", {
+                          method: "POST",
+                          body: JSON.stringify({ panelUrl: xui.panelUrl, username: xui.username, password: xui.password }),
+                        });
+                        const r = (res.data as { result?: { reachable: boolean; loginPath: string | null } })?.result;
+                        setXuiCheck(r ?? { reachable: false, loginPath: null });
+                        if (res.ok && r?.reachable) toast.success(t("xuiReachable"));
+                        else toast.error(t("xuiUnreachable"));
+                      } catch {
+                        toast.error(tCommon("networkError"));
+                      } finally {
+                        setXuiChecking(false);
+                      }
+                    }}
+                  >
+                    {xuiChecking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    {t("xuiTest")}
+                  </Button>
+                  {xuiCheck && (
+                    <span className="text-xs text-muted-foreground">
+                      {xuiCheck.reachable ? `${t("xuiReachable")} (${xuiCheck.loginPath})` : t("xuiUnreachable")}
+                    </span>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -1164,6 +1461,15 @@ function maskSecrets(config: TunnelConfig | null): unknown {
   if (copy.ssh) {
     if (copy.ssh.key) copy.ssh.key = masked;
     if (copy.ssh.password) copy.ssh.password = masked;
+  }
+  if (copy.xray) copy.xray.uuid = masked;
+  if (copy.xui) {
+    if (copy.xui.password) copy.xui.password = masked;
+    if (copy.xui.username) copy.xui.username = masked;
+  }
+  if (copy.reverse) {
+    const r = copy.reverse as Record<string, unknown>;
+    if (r.token) r.token = masked;
   }
   return copy;
 }

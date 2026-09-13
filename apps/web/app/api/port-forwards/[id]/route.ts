@@ -34,6 +34,36 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
     if (!node) return apiError("Node not found", 404);
   }
 
+  // Same collision guard as create: moving a rule onto an occupied
+  // protocol+port in the same node scope must 409, not double-bind.
+  if (body.data.sourcePort !== undefined || body.data.protocol !== undefined || body.data.nodeId !== undefined || body.data.direction !== undefined) {
+    const current = await prisma.portForward.findUnique({
+      where: { id },
+      select: { protocol: true, sourcePort: true, nodeId: true, direction: true },
+    });
+    const protocol = body.data.protocol ?? current?.protocol;
+    const sourcePort = body.data.sourcePort ?? current?.sourcePort;
+    const nodeId = body.data.nodeId !== undefined ? body.data.nodeId : current?.nodeId;
+    const direction = body.data.direction ?? current?.direction;
+    if (protocol && sourcePort && direction) {
+      const clash = await prisma.portForward.findFirst({
+        where: {
+          id: { not: id },
+          protocol,
+          sourcePort,
+          ...(nodeId ? { nodeId } : { nodeId: null, direction }),
+        },
+        select: { id: true, name: true },
+      });
+      if (clash) {
+        return apiError(
+          `Port ${sourcePort}/${protocol} is already forwarded by "${clash.name}" — pick another port or edit that rule`,
+          409,
+        );
+      }
+    }
+  }
+
   const rule = await prisma.portForward.update({
     where: { id },
     data: { ...body.data, status: "pending" },

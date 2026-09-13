@@ -28,6 +28,14 @@ export function extractPort(config: TunnelConfig): number | null {
       return config.ssh.localPort;
     case "PORT_FORWARD":
       return config.portForwards[0]?.sourcePort ?? null;
+    case "DIRECT":
+      return config.direct.listenPort;
+    case "REVERSE":
+      return config.reverse.listenPort;
+    case "XRAY":
+      return config.xray.listenPort;
+    case "XUI":
+      return config.xui.listenPort ?? null;
   }
 }
 

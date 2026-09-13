@@ -25,8 +25,8 @@ export const metadata: Metadata = {
   },
   description: "Self-hosted bilingual tunneling control panel",
   icons: {
-    icon: "/icon.png",
-    apple: "/apple-icon.png",
+    icon: "/icon.svg",
+    apple: "/icon.svg",
   },
 };
 
