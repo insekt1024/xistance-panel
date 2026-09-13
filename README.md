@@ -36,7 +36,7 @@ tunnel for you.
 
 | Tunnel | Use it when… |
 | --- | --- |
-| **Reverse** (recommended) | Your Iran server is behind a firewall/NAT. Iran connects *out*, so nothing needs to be opened in Iran. |
+| **Reverse** (recommended) | Your Iran server is behind a firewall/NAT. Iran connects *out* over SSH (`-R`, TCP), so nothing needs to be opened in Iran. |
 | **Direct** | Both servers can reach each other directly. Simplest option, one server only. |
 | **Backhaul** | You want the fastest reverse tunnel with extra tuning (multiplexing, congestion control). |
 | **FRP** | You need many ports/protocols or HTTP routing from one tunnel. |

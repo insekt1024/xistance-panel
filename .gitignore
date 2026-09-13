@@ -58,3 +58,7 @@ tunnels/*
 
 # local desktop tool state (not part of the project)
 .freebuff/
+.remember/
+
+# local agent loop state (machine-local, see .opencode/ralph-loop.local.md)
+.opencode/

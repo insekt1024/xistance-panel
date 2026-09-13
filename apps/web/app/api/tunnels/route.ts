@@ -110,7 +110,14 @@ export async function POST(request: Request) {
     prisma.node.findUnique({ where: { id: data.serverNodeId }, select: nodeSelect }),
   ]);
   if (!clientNode || !serverNode) return apiError("One or both nodes not found", 404);
-  if (clientNode.id === serverNode.id) {
+  // Single-node methods (DIRECT/XRAY run one process, XUI is metadata-only)
+  // may use the same node twice so users are not forced to pick a dummy
+  // second node. Relay methods still need two distinct ends.
+  const singleNode =
+    data.config.method === "DIRECT" ||
+    data.config.method === "XRAY" ||
+    data.config.method === "XUI";
+  if (clientNode.id === serverNode.id && !singleNode) {
     return apiError("Client and server nodes must be different", 422);
   }
 

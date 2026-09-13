@@ -128,12 +128,18 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
     targetHost: "",
     targetPort: 80,
   });
-  // REVERSE (Iran dials out, Foreign exposes)
+  // REVERSE (Iran dials out over ssh -R, Foreign exposes)
   const [reverse, setReverse] = React.useState({
-    protocol: "tcp",
     listenPort: 8080,
     forwardHost: "127.0.0.1",
     forwardPort: 80,
+    sshHost: "",
+    sshPort: 22,
+    username: "root",
+    auth: "key",
+    key: "",
+    password: "",
+    useAutossh: true,
   });
   // XRAY (xray-core outbound, 3X-UI compatible)
   const [xray, setXray] = React.useState({
@@ -172,6 +178,15 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
 
   const iranNodes = nodes.filter((n) => n.type === "IRAN");
   const foreignNodes = nodes.filter((n) => n.type === "FOREIGN");
+  // DIRECT/XRAY run a single process and XUI is metadata-only: one node is
+  // enough, so the picker fills both slots with it (the API accepts a
+  // repeated node id for exactly these methods).
+  const isSingleNode = method === "DIRECT" || method === "XRAY" || method === "XUI";
+
+  function setSingleNode(id: string) {
+    setClientNodeId(id);
+    setServerNodeId(id);
+  }
 
   function buildConfig(): TunnelConfig | null {
     switch (method) {
@@ -277,16 +292,30 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
             targetPort: direct.targetPort,
           },
         };
-      case "REVERSE":
+      case "REVERSE": {
+        // Empty host = dial the selected Foreign node (resolved at deploy).
+        const foreignHost = nodes.find((n) => n.id === serverNodeId)?.host ?? "";
         return {
           method: "REVERSE",
           reverse: {
-            protocol: reverse.protocol as "tcp" | "udp",
+            protocol: "tcp" as const,
             listenPort: reverse.listenPort,
             forwardHost: reverse.forwardHost,
             forwardPort: reverse.forwardPort,
+            host: reverse.sshHost.trim() || foreignHost,
+            port: reverse.sshPort,
+            username: reverse.username,
+            auth: reverse.auth as "key" | "password",
+            key: reverse.auth === "key" ? reverse.key || undefined : undefined,
+            password: reverse.auth === "password" ? reverse.password || undefined : undefined,
+            remoteBindAddr: "0.0.0.0",
+            extraArgs: [],
+            useAutossh: reverse.useAutossh,
+            autosshMonitorPort: 0,
+            autosshPoll: 60,
           },
         };
+      }
       case "XRAY":
         return {
           method: "XRAY",
@@ -324,7 +353,7 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
       toast.error(t("invalidMethod"));
       return;
     }
-    if (step === 1 && (!clientNodeId || !serverNodeId)) {
+    if (step === 1 && (!clientNodeId || (!serverNodeId && !isSingleNode))) {
       toast.error(t("invalidNodes"));
       return;
     }
@@ -422,6 +451,8 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
       case "REVERSE": {
         if (!isPort(reverse.listenPort) || !isPort(reverse.forwardPort)) return fail(t("invalidPort", { field: t("listenPort") }));
         if (!reverse.forwardHost.trim()) return fail(t("fieldRequired", { field: t("forwardHost") }));
+        if (!reverse.username.trim()) return fail(t("fieldRequired", { field: t("username") }));
+        if (!isPort(reverse.sshPort)) return fail(t("invalidPort", { field: t("remotePort") }));
         return true;
       }
       case "XRAY": {
@@ -521,6 +552,25 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
         {step === 1 && (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold">{t("step2Title")}</h2>
+            {isSingleNode && (
+              <p className="text-xs text-muted-foreground">{t("singleNodeHint")}</p>
+            )}
+            {isSingleNode ? (
+              <Field label={t("node")}>
+                <Select value={clientNodeId || undefined} onValueChange={setSingleNode}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="—" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {nodes.map((n) => (
+                      <SelectItem key={n.id} value={n.id}>
+                        {n.name} ({n.type === "IRAN" ? t("iranNode") : t("foreignNode")})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            ) : (
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label={t("iranNode")}>
                 <Select value={clientNodeId || undefined} onValueChange={setClientNodeId}>
@@ -551,6 +601,7 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
                 </Select>
               </Field>
             </div>
+            )}
           </div>
         )}
 
@@ -1238,16 +1289,7 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
             {method === "REVERSE" && (
               <div className="space-y-4">
                 <p className="text-xs text-muted-foreground">{t("reverseHint")}</p>
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <Field label={t("protocol")}>
-                    <Select value={reverse.protocol} onValueChange={(v) => setReverse({ ...reverse, protocol: v })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="tcp">TCP</SelectItem>
-                        <SelectItem value="udp">UDP</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </Field>
+                <div className="grid gap-4 sm:grid-cols-2">
                   <Field label={t("listenPort")} hint={t("reverseListenHint")}>
                     <Input type="number" value={reverse.listenPort} onChange={(e) => setReverse({ ...reverse, listenPort: Number(e.target.value) })} />
                   </Field>
@@ -1258,6 +1300,49 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
                 <Field label={t("forwardHost")} hint={t("forwardHostHint")}>
                   <Input value={reverse.forwardHost} onChange={(e) => setReverse({ ...reverse, forwardHost: e.target.value })} />
                 </Field>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Field label={t("host")} hint={t("reverseSshHint")} className="sm:col-span-2">
+                    <Input value={reverse.sshHost} onChange={(e) => setReverse({ ...reverse, sshHost: e.target.value })} placeholder={nodes.find((n) => n.id === serverNodeId)?.host ?? "203.0.113.10"} dir="ltr" />
+                  </Field>
+                  <Field label={t("remotePort")}>
+                    <Input type="number" value={reverse.sshPort} onChange={(e) => setReverse({ ...reverse, sshPort: Number(e.target.value) })} />
+                  </Field>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={t("username")}>
+                    <Input value={reverse.username} onChange={(e) => setReverse({ ...reverse, username: e.target.value })} />
+                  </Field>
+                  <Field label={t("auth")}>
+                    <Select value={reverse.auth} onValueChange={(v) => setReverse({ ...reverse, auth: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="key">{t("authKey")}</SelectItem>
+                        <SelectItem value="password">{t("authPassword")}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                {reverse.auth === "key" ? (
+                  <Field label={t("keyPem")} hint={tCommon("optional")}>
+                    <textarea
+                      className="min-h-24 w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                      value={reverse.key}
+                      onChange={(e) => setReverse({ ...reverse, key: e.target.value })}
+                    />
+                  </Field>
+                ) : (
+                  <Field label={t("password")}>
+                    <Input type="password" value={reverse.password} onChange={(e) => setReverse({ ...reverse, password: e.target.value })} />
+                  </Field>
+                )}
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={reverse.useAutossh}
+                    onCheckedChange={(c) => setReverse({ ...reverse, useAutossh: c })}
+                  />
+                  <Label>{t("autoReconnect")}</Label>
+                </div>
               </div>
             )}
 
@@ -1337,10 +1422,10 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
                   </Field>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label={t("xuiInboundId")} hint={t("optional")}>
+                  <Field label={t("xuiInboundId")} hint={tCommon("optional")}>
                     <Input type="number" value={xui.inboundId} onChange={(e) => setXui({ ...xui, inboundId: e.target.value })} placeholder="1" />
                   </Field>
-                  <Field label={t("xuiRemark")} hint={t("optional")}>
+                  <Field label={t("xuiRemark")} hint={tCommon("optional")}>
                     <Input value={xui.remark} onChange={(e) => setXui({ ...xui, remark: e.target.value })} />
                   </Field>
                 </div>
@@ -1469,7 +1554,8 @@ function maskSecrets(config: TunnelConfig | null): unknown {
   }
   if (copy.reverse) {
     const r = copy.reverse as Record<string, unknown>;
-    if (r.token) r.token = masked;
+    if (r.key) r.key = masked;
+    if (r.password) r.password = masked;
   }
   return copy;
 }

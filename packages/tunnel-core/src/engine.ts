@@ -19,7 +19,7 @@ import { buildBackhaulConfig } from "./config/backhaul.js";
 import { buildFrpPair } from "./config/frp.js";
 import { buildGostCommand } from "./config/gost.js";
 import { buildDirectCommand } from "./config/direct.js";
-import { buildReverseCommand } from "./config/reverse.js";
+import { reverseToSshConfig } from "./config/reverse.js";
 import { buildXrayConfig } from "./config/xray.js";
 import { normalizePanelUrl } from "./config/xui.js";
 import { buildAutosshCommand, buildSshCommand } from "./config/ssh.js";
@@ -98,6 +98,8 @@ interface RunningProcess {
 
 interface Runtime {
   processes: RunningProcess[];
+  /** tunnel method — lets status() treat metadata-only (XUI) runtimes correctly */
+  method: TunnelMethod;
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +238,15 @@ export class TunnelEngine {
       this.runtimes.delete(spec.id);
     }
     const plan = await this.buildPlan(spec);
+    // Only XUI is metadata-only. Any other method planning zero processes
+    // (e.g. a node that resolved to nothing) is a mis-deploy: fail here so
+    // the caller marks the tunnel stopped+error instead of reporting a
+    // "running" tunnel with nothing behind it.
+    if (plan.length === 0 && spec.method !== "XUI") {
+      throw new Error(
+        `Deploy planned no processes for ${spec.method} tunnel "${spec.name}". Check the tunnel's nodes and config.`,
+      );
+    }
     await this.ensureBinaries(spec);
     const procs: RunningProcess[] = [];
     for (const entry of plan) {
@@ -256,7 +267,7 @@ export class TunnelEngine {
     }
     // Parallelize process starts
     await Promise.all(procs.map((p) => p.handle.start()));
-    this.runtimes.set(spec.id, { processes: procs });
+    this.runtimes.set(spec.id, { processes: procs, method: spec.method });
     this.invalidateStatus(spec.id);
   }
 
@@ -414,8 +425,11 @@ export class TunnelEngine {
     const rt = this.runtimes.get(id);
     if (!rt) return TunnelStatus.STOPPED;
     // XUI tunnels are metadata-only (no local process): a tracked runtime
-    // means the last 3X-UI sync succeeded, so report running.
-    if (rt.processes.length === 0) return TunnelStatus.RUNNING;
+    // means the last 3X-UI sync succeeded, so report running. Any other
+    // method with zero processes is a mis-deploy, not a running tunnel.
+    if (rt.processes.length === 0) {
+      return rt.method === "XUI" ? TunnelStatus.RUNNING : TunnelStatus.STOPPED;
+    }
     const states = await Promise.all(rt.processes.map(async (p) => {
       const cacheKey = p.spec.unitName || p.spec.id || String(p.constructor.name);
       const cached = this.processRunningCache.get(cacheKey);
@@ -584,15 +598,13 @@ export class TunnelEngine {
         }
         break;
       case "DIRECT":
+        // DIRECT runs on one node (prefer server/Foreign) and reuses the
+        // already-installed gost binary — no new dependency on low-RAM hosts.
+        add(spec.serverNode ?? spec.clientNode, "gost");
+        break;
       case "REVERSE":
-        // DIRECT runs on one node (prefer server/Foreign), REVERSE on both.
-        // Both reuse the gost binary — no new dependency on low-RAM hosts.
-        if (cfg.method === "DIRECT") {
-          add(spec.serverNode ?? spec.clientNode, "gost");
-        } else {
-          add(spec.serverNode, "gost");
-          add(spec.clientNode, "gost");
-        }
+        // SSH -R via the system ssh client (autossh when present), resolved
+        // at plan time like SSH tunnels — no preflight binary needed here.
         break;
       case "XRAY":
         add(spec.clientNode ?? spec.serverNode, "xray");
@@ -752,29 +764,18 @@ export class TunnelEngine {
     ];
   }
 
-  private planReverse(spec: TunnelDeploySpec, c: ReverseConfig): PlanEntry[] {
-    const plan: PlanEntry[] = [];
-    const foreign = this.ctxFor(spec.serverNode);
-    if (foreign) {
-      const [, ...rest] = buildReverseCommand(c, "FOREIGN");
-      plan.push({
-        ctx: foreign,
-        files: [],
-        spec: processSpec(spec, "foreign", [this.binPath(foreign, "gost"), ...rest], foreign),
-      });
+  private async planReverse(spec: TunnelDeploySpec, c: ReverseConfig): Promise<PlanEntry[]> {
+    // One process on the Iran node: ssh -R exposes listenPort on the Foreign
+    // side, backed by forwardHost:forwardPort locally. Empty host dials the
+    // Foreign node's address (the common case) — no extra config needed.
+    const sshCfg = reverseToSshConfig(c, spec.serverNode?.host ?? "");
+    if (!sshCfg.host) {
+      throw new Error(
+        "Reverse tunnel needs an SSH target: set host or attach a Foreign node.",
+      );
     }
-    const iran = this.ctxFor(spec.clientNode);
-    if (iran) {
-      const [, ...rest] = buildReverseCommand(c, "IRAN", {
-        peerHost: spec.serverNode?.host,
-      });
-      plan.push({
-        ctx: iran,
-        files: [],
-        spec: processSpec(spec, "iran", [this.binPath(iran, "gost"), ...rest], iran),
-      });
-    }
-    return plan;
+    const entry = await this.sshPlanEntry(spec, spec.clientNode, sshCfg, "reverse");
+    return entry ? [entry] : [];
   }
 
   private planXray(spec: TunnelDeploySpec, c: XrayConfig): PlanEntry[] {
@@ -811,8 +812,23 @@ export class TunnelEngine {
 
   private async planSsh(spec: TunnelDeploySpec, c: SshConfig): Promise<PlanEntry[]> {
     const target = c.mode === "remote" ? spec.serverNode : spec.clientNode;
+    const entry = await this.sshPlanEntry(spec, target, c, "ssh");
+    return entry ? [entry] : [];
+  }
+
+  /**
+   * Shared ssh/autossh plan entry (SSH tunnels + REVERSE one-click tunnels).
+   * Resolves the real binaries on the target node, wraps passwords in
+   * sshpass, and exports the AUTOSSH_* env the wrapper needs.
+   */
+  private async sshPlanEntry(
+    spec: TunnelDeploySpec,
+    target: NodeEndpoint | null | undefined,
+    c: SshConfig,
+    role: string,
+  ): Promise<PlanEntry | null> {
     const ctx = this.ctxFor(target);
-    if (!ctx) return [];
+    if (!ctx) return null;
     const usePass = c.auth === "password";
     const sshBin = await this.systemBin(ctx, "ssh");
 
@@ -837,7 +853,7 @@ export class TunnelEngine {
       ? [await this.systemBin(ctx, "sshpass"), "-e", runBin, ...args]
       : [runBin, ...args];
 
-    const specObj = processSpec(spec, "ssh", command, ctx);
+    const specObj = processSpec(spec, role, command, ctx);
     const env: Record<string, string> = {};
     if (usePass && c.password) env.SSHPASS = c.password;
     if (autosshBin) {
@@ -850,7 +866,7 @@ export class TunnelEngine {
       env.AUTOSSH_PATH = sshBin;
     }
     if (Object.keys(env).length > 0) specObj.env = env;
-    return [{ ctx, files: [], spec: specObj }];
+    return { ctx, files: [], spec: specObj };
   }
 
   private async planPortForward(

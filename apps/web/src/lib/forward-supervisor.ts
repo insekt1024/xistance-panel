@@ -91,6 +91,25 @@ export async function reconcilePortForwards(): Promise<void> {
     statuses.set(rule.id, "stopped");
   }
 
+  // Legacy data may hold two enabled rules with the same protocol+port on
+  // one node (the API 409-guard only covers new writes). They would share a
+  // systemd unit name and the second bind would fail the whole group deploy,
+  // so keep the first and report the rest as error instead.
+  for (const [nodeId, nodeRules] of groups) {
+    const seen = new Set<string>();
+    const unique: RuleRow[] = [];
+    for (const rule of nodeRules) {
+      const k = `${rule.protocol}:${rule.sourcePort}`;
+      if (seen.has(k)) {
+        statuses.set(rule.id, "error");
+        continue;
+      }
+      seen.add(k);
+      unique.push(rule);
+    }
+    groups.set(nodeId, unique);
+  }
+
   // Deploy/replace one PORT_FORWARD tunnel per node group (in parallel).
   const deployResults = await Promise.all(
     [...groups.entries()].map(async ([nodeId, nodeRules]) => {

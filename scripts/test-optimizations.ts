@@ -837,7 +837,7 @@ async function main() {
     const { TunnelConfigSchema } = await import("../packages/types/src/index.ts");
     const cases = [
       { method: "DIRECT", direct: { protocol: "tcp", bindAddr: "0.0.0.0", listenPort: 8080, targetHost: "127.0.0.1", targetPort: 80 } },
-      { method: "REVERSE", reverse: { protocol: "tcp", listenPort: 8080, forwardHost: "127.0.0.1", forwardPort: 80 } },
+      { method: "REVERSE", reverse: { protocol: "tcp", listenPort: 8080, forwardHost: "127.0.0.1", forwardPort: 80, host: "", port: 22, username: "root", auth: "key", remoteBindAddr: "0.0.0.0", extraArgs: [], useAutossh: true, autosshMonitorPort: 0, autosshPoll: 60 } },
       { method: "XRAY", xray: { listenPort: 10808, protocol: "vless", address: "vpn.example.com", port: 443, uuid: "550e8400-e29b-41d4-a716-446655440000", network: "tcp", security: "none" } },
       { method: "XUI", xui: { panelUrl: "http://203.0.113.10:2053", username: "admin", password: "secret", syncInterval: 300 } },
     ];
@@ -851,12 +851,29 @@ async function main() {
     const core = await import("../packages/tunnel-core/src/index.ts");
     const d = core.buildDirectCommand({ protocol: "tcp", bindAddr: "0.0.0.0", listenPort: 8080, targetHost: "127.0.0.1", targetPort: 80 });
     if (d[0] !== "gost" || !d[2].includes(":8080/127.0.0.1:80")) throw new Error(`bad direct cmd: ${d.join(" ")}`);
-    const rf = core.buildReverseCommand({ protocol: "tcp", listenPort: 8080, forwardHost: "127.0.0.1", forwardPort: 80 }, "FOREIGN");
-    if (rf[0] !== "gost" || !rf[2].includes(":8080")) throw new Error(`bad reverse cmd: ${rf.join(" ")}`);
-    const ri = core.buildReverseCommand({ protocol: "tcp", listenPort: 8080, forwardHost: "127.0.0.1", forwardPort: 80 }, "IRAN", { peerHost: "203.0.113.10" });
-    if (!ri.includes("-F")) throw new Error(`iran reverse must dial peer with -F: ${ri.join(" ")}`);
+    // REVERSE maps onto ssh -R: empty host falls back to the Foreign node.
+    const baseReverse = { protocol: "tcp", listenPort: 8080, forwardHost: "127.0.0.1", forwardPort: 80, host: "", port: 22, username: "root", auth: "key", remoteBindAddr: "0.0.0.0", extraArgs: [], useAutossh: true, autosshMonitorPort: 0, autosshPoll: 60 } as const;
+    const mapped = core.reverseToSshConfig({ ...baseReverse }, "203.0.113.10");
+    if (mapped.mode !== "remote" || mapped.host !== "203.0.113.10") throw new Error(`bad reverse host fallback: ${mapped.host}`);
+    const explicit = core.reverseToSshConfig({ ...baseReverse, host: "vpn.example.com" }, "203.0.113.10");
+    if (explicit.host !== "vpn.example.com") throw new Error("explicit reverse host must win over fallback");
+    const argv = core.buildSshCommand(mapped, {});
+    const rIdx = argv.indexOf("-R");
+    if (rIdx < 0 || argv[rIdx + 1] !== "0.0.0.0:8080:127.0.0.1:80") {
+      throw new Error(`bad reverse -R argv: ${argv.join(" ")}`);
+    }
+    if (argv[argv.length - 1] !== "root@203.0.113.10") throw new Error(`bad reverse destination: ${argv.join(" ")}`);
     const xj = JSON.parse(core.buildXrayConfig({ listenPort: 10808, protocol: "vless", address: "vpn.example.com", port: 443, uuid: "u", network: "tcp", security: "none" }));
     if (xj.inbounds[0].port !== 10808 || xj.outbounds[0].protocol !== "vless") throw new Error("bad xray json");
+  });
+
+  await test("Tunnel methods: REVERSE rejects UDP (ssh -R is TCP-only)", async () => {
+    const { TunnelConfigSchema } = await import("../packages/types/src/index.ts");
+    const parsed = TunnelConfigSchema.safeParse({
+      method: "REVERSE",
+      reverse: { protocol: "udp", listenPort: 8080, forwardHost: "127.0.0.1", forwardPort: 80 },
+    });
+    if (parsed.success) throw new Error("udp REVERSE must be rejected at the schema");
   });
 
   // Print results

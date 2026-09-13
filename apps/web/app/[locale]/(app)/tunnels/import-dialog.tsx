@@ -70,6 +70,14 @@ export function ImportDialog({ nodes }: { nodes: ImportNode[] }) {
 
   const iranNodes = nodes.filter((n) => n.type === "IRAN");
   const foreignNodes = nodes.filter((n) => n.type === "FOREIGN");
+  // Single-node methods may run twice on the same node: offer every node in
+  // the second picker so the same server can be chosen on both sides.
+  const importMethod = parsed
+    ? (deriveMethod(parsed.config) ?? parsed.method ?? null)
+    : null;
+  const importSingleNode =
+    importMethod === "DIRECT" || importMethod === "XRAY" || importMethod === "XUI";
+  const serverChoices = importSingleNode ? nodes : foreignNodes;
 
   function reset() {
     setJsonText("");
@@ -222,6 +230,9 @@ export function ImportDialog({ nodes }: { nodes: ImportNode[] }) {
               <p className="text-xs text-muted-foreground">
                 {t("detectedMethod")}: <span className="font-mono font-medium">{parsed.method}</span>
               </p>
+              {importSingleNode && (
+                <p className="text-xs text-muted-foreground">{t("singleNodeHint")}</p>
+              )}
               <div className="space-y-2">
                 <Label>{t("name")}</Label>
                 <Input
@@ -251,7 +262,7 @@ export function ImportDialog({ nodes }: { nodes: ImportNode[] }) {
                       <SelectValue placeholder="—" />
                     </SelectTrigger>
                     <SelectContent>
-                      {foreignNodes.map((n) => (
+                      {serverChoices.map((n) => (
                         <SelectItem key={n.id} value={n.id}>{n.name}</SelectItem>
                       ))}
                     </SelectContent>

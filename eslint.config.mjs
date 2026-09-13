@@ -22,6 +22,8 @@ export default defineConfig([
     ...tseslint.configs.recommended[0],
   },
   globalIgnores([
+    "**/.remember/**",
+    "**/.opencode/**",
     "**/.next/**",
     "**/out/**",
     "**/build/**",

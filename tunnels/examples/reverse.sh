@@ -1,16 +1,29 @@
-# REVERSE tunnel examples — NAT-friendly relay across Iran + Foreign.
+# REVERSE tunnel examples — one-click ssh -R reverse forward.
 #
-# Mirrors buildReverseCommand()/buildReversePair() in
-# packages/tunnel-core/src/config/reverse.ts. The Iran node dials OUT to the
-# Foreign node, so Iran needs NO inbound firewall rule; the Foreign node
-# exposes the public port.
+# Mirrors reverseToSshConfig() in packages/tunnel-core/src/config/reverse.ts
+# plus buildSshCommand()/buildAutosshCommand() in config/ssh.ts.
+# Runs ON the Iran node and dials OUT to the Foreign sshd, so Iran needs no
+# inbound firewall rule. TCP only (OpenSSH -R cannot forward UDP).
 
-# --- Foreign node (public entrypoint, port 8080) ---
-#   gost -L tcp://:8080/127.0.0.1:8080
+# Expose Iran-local service 127.0.0.1:80 on Foreign *:8080
+#   ssh -N \
+#     -o ServerAliveInterval=30 \
+#     -o ServerAliveCountMax=3 \
+#     -o ExitOnForwardFailure=yes \
+#     -o StrictHostKeyChecking=accept-new \
+#     -R 0.0.0.0:8080:127.0.0.1:80 \
+#     -p 22 root@FOREIGN_HOST
 
-# --- Iran node (dials out to Foreign 203.0.113.10, bridges the local service) ---
-#   gost -L tcp://:80/127.0.0.1:80 -F tcp://203.0.113.10:8080
+# Same, wrapped in autossh so the client respawns the moment the link drops
+# (the panel sets AUTOSSH_GATETIME=0 / AUTOSSH_POLL and falls back to plain
+# ssh when autossh is not installed on the node)
+#   autossh -M 0 -N \
+#     -o ServerAliveInterval=30 \
+#     -o ServerAliveCountMax=3 \
+#     -o ExitOnForwardFailure=yes \
+#     -o StrictHostKeyChecking=accept-new \
+#     -R 0.0.0.0:8080:127.0.0.1:80 \
+#     -p 22 root@FOREIGN_HOST
 
-# UDP variant (same shape, udp:// scheme on both ends)
-#   Foreign: gost -L udp://:8080/127.0.0.1:8080
-#   Iran:    gost -L udp://:80/127.0.0.1:80 -F udp://203.0.113.10:8080
+# With a password, the panel wraps the command in sshpass -e (SSHPASS env var)
+#   sshpass -e ssh -N -R 0.0.0.0:8080:127.0.0.1:80 user@FOREIGN_HOST

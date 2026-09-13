@@ -326,19 +326,32 @@ export const DirectConfigSchema = z.object({
 export type DirectConfig = z.infer<typeof DirectConfigSchema>;
 
 // ---------------------------------------------------------------------------
-// REVERSE tunnel: NAT-friendly reverse relay across TWO nodes.
-// The Iran node dials OUT to the Foreign node (so no inbound firewall rule is
-// needed in Iran); the Foreign node exposes listenPort to the world and the
-// traffic is carried back to forwardHost:forwardPort in Iran.
-// Implemented with the already-installed gost binary on both ends.
+// REVERSE tunnel: one-click NAT-friendly reverse forward (ssh -R under the
+// hood, wrapped in autossh when available — same machinery as SSH tunnels).
+// Runs ON the Iran node and dials out to the Foreign sshd, so Iran needs no
+// inbound firewall rule; the Foreign side exposes listenPort to the world
+// and traffic is carried back to forwardHost:forwardPort in Iran.
+// TCP only: OpenSSH -R cannot forward UDP.
 // ---------------------------------------------------------------------------
 
 export const ReverseConfigSchema = z.object({
-  protocol: z.enum(["tcp", "udp"]).default("tcp"),
+  protocol: z.literal("tcp").default("tcp"),
   listenPort: z.number().int().min(1).max(65535),
   forwardHost: z.string().default("127.0.0.1"),
   forwardPort: z.number().int().min(1).max(65535),
-  token: z.string().optional(),
+  // SSH hop to the Foreign side. Empty host falls back to the Foreign
+  // node's address at deploy time (see reverseToSshConfig).
+  host: z.string().default(""),
+  port: z.number().int().min(1).max(65535).default(22),
+  username: z.string().min(1).default("root"),
+  auth: z.enum(["key", "password"]).default("key"),
+  key: z.string().optional(),
+  password: z.string().optional(),
+  remoteBindAddr: z.string().default("0.0.0.0"),
+  extraArgs: z.array(z.string()).max(0).default([]),
+  useAutossh: z.boolean().default(true),
+  autosshMonitorPort: z.number().int().min(0).max(65535).default(0),
+  autosshPoll: z.number().int().min(1).max(3600).default(60),
 });
 export type ReverseConfig = z.infer<typeof ReverseConfigSchema>;
 

@@ -108,10 +108,8 @@ export const ENGINE_BINARIES: Record<string, EngineBinary> = {
     hint: 'Run: xistance install --bin gost  (or scripts/install.sh).',
   },
   REVERSE: {
-    tool: "gost",
-    client: "gost",
-    server: "gost",
-    hint: 'Run: xistance install --bin gost  (or scripts/install.sh).',
+    tool: "ssh",
+    hint: 'Needs the system OpenSSH client on the Iran node (install.sh installs openssh-client; autossh is used when present).',
   },
   XRAY: {
     tool: "xray",
