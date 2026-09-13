@@ -32,6 +32,47 @@ export function SettingsView({ isAdmin }: { isAdmin: boolean }) {
   const [exporting, setExporting] = React.useState(false);
   const [restoring, setRestoring] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement>(null);
+  const [checkingUpdate, setCheckingUpdate] = React.useState(false);
+  const [update, setUpdate] = React.useState<{
+    current: string;
+    latest: string | null;
+    available: boolean;
+    url: string;
+  } | null>(null);
+
+  async function checkUpdate(silent: boolean) {
+    if (checkingUpdate) return;
+    setCheckingUpdate(true);
+    try {
+      const res = await apiFetch("/api/update/check");
+      if (res.ok) {
+        setUpdate(res.data as { current: string; latest: string | null; available: boolean; url: string });
+      } else if (!silent) {
+        toast.error((res.data as { error?: string })?.error ?? t("updateCheckFailed"));
+      }
+    } catch {
+      if (!silent) toast.error(tCommon("networkError"));
+    } finally {
+      setCheckingUpdate(false);
+    }
+  }
+
+  // Check once on open (server caches GitHub for an hour, so this is cheap).
+  // State updates happen in the async continuation (not synchronously in the
+  // effect body) with an alive guard against unmount races.
+  React.useEffect(() => {
+    let alive = true;
+    apiFetch("/api/update/check")
+      .then((res) => {
+        if (alive && res.ok) {
+          setUpdate(res.data as { current: string; latest: string | null; available: boolean; url: string });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   async function changePassword() {
     setChanging(true);
@@ -217,12 +258,29 @@ export function SettingsView({ isAdmin }: { isAdmin: boolean }) {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">{t("selfUpdate")}</p>
-              <div className="mt-3 flex items-center gap-3">
-                <Button variant="outline" onClick={() => toast.success(t("upToDate"))}>
-                  <RefreshCw className="h-4 w-4" />
-                  {t("updateNow")}
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <Button variant="outline" onClick={() => checkUpdate(false)} disabled={checkingUpdate}>
+                  <RefreshCw className={checkingUpdate ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+                  {checkingUpdate ? t("checkingUpdate") : t("updateNow")}
                 </Button>
-                <span className="text-sm text-muted-foreground">{t("upToDate")}</span>
+                {checkingUpdate ? (
+                  <span className="text-sm text-muted-foreground">{t("checkingUpdate")}…</span>
+                ) : update?.available && update.latest ? (
+                  <a
+                    href={update.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                  >
+                    {t("updateAvailable")}: v{update.current} → v{update.latest.replace(/^v/, "")}
+                  </a>
+                ) : update && !update.latest ? (
+                  <span className="text-sm text-muted-foreground">{t("updateCheckFailed")}</span>
+                ) : (
+                  <span className="text-sm text-muted-foreground">
+                    {t("upToDate")}{update ? ` (v${update.current})` : ""}
+                  </span>
+                )}
               </div>
             </div>
           </CardContent>

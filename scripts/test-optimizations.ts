@@ -867,6 +867,18 @@ async function main() {
     if (xj.inbounds[0].port !== 10808 || xj.outbounds[0].protocol !== "vless") throw new Error("bad xray json");
   });
 
+  await test("Update: version compare detects newer/equal/older", async () => {
+    const { isNewerVersion, parseVersion } = await import("../apps/web/src/lib/update.ts");
+    if (!isNewerVersion("v1.2.0", "1.1.2")) throw new Error("1.2.0 > 1.1.2 expected");
+    if (!isNewerVersion("2.0.0", "1.9.9")) throw new Error("major bump expected");
+    if (isNewerVersion("1.1.2", "1.1.2")) throw new Error("equal must not report update");
+    if (isNewerVersion("1.1.2", "1.2.0")) throw new Error("older must not report update");
+    if (isNewerVersion("bogus", "1.1.2")) throw new Error("unparseable latest must fail closed");
+    if (isNewerVersion("v1.3.0", "bogus")) throw new Error("unparseable current must fail closed");
+    const p = parseVersion("v25.10.15");
+    if (!p || p[0] !== 25 || p[1] !== 10 || p[2] !== 15) throw new Error("date-version parse failed");
+  });
+
   await test("Tunnel methods: REVERSE rejects UDP (ssh -R is TCP-only)", async () => {
     const { TunnelConfigSchema } = await import("../packages/types/src/index.ts");
     const parsed = TunnelConfigSchema.safeParse({
