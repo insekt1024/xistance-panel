@@ -1,0 +1,37 @@
+{
+  "_comment": "XRAY tunnel example — mirrors buildXrayConfig() in packages/tunnel-core/src/config/xray.ts. Local apps point at the dokodemo-door inbound (port 10808); xray forwards into the VLESS outbound. Copy address/uuid/sni from your X-UI / 3X-UI inbound. Run: xray run -c xray.json",
+  "log": { "loglevel": "warning" },
+  "inbounds": [
+    {
+      "tag": "xistance-in",
+      "port": 10808,
+      "protocol": "dokodemo-door",
+      "settings": { "network": "tcp,udp", "followRedirect": false },
+      "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "xistance-out",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [
+          {
+            "address": "vpn.example.com",
+            "port": 443,
+            "users": [{ "id": "PASTE-UUID-FROM-3X-UI", "encryption": "none" }]
+          }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": { "serverName": "vpn.example.com", "allowInsecure": false }
+      }
+    },
+    { "tag": "direct", "protocol": "freedom" }
+  ],
+  "routing": {
+    "rules": [{ "type": "field", "inboundTag": ["xistance-in"], "outboundTag": "xistance-out" }]
+  }
+}

@@ -2,18 +2,26 @@ import path from "node:path";
 import {
   TunnelStatus,
   type BackhaulConfig,
+  type DirectConfig,
   type FrpConfig,
   type GostConfig,
   type PortForwardRule,
+  type ReverseConfig,
   type SshConfig,
   type TrafficSnapshot,
   type TunnelConfig,
   type TunnelMethod,
+  type XrayConfig,
+  type XuiConfig,
   type TunnelStatus as Status,
 } from "@xistance/types";
 import { buildBackhaulConfig } from "./config/backhaul.js";
 import { buildFrpPair } from "./config/frp.js";
 import { buildGostCommand } from "./config/gost.js";
+import { buildDirectCommand } from "./config/direct.js";
+import { buildReverseCommand } from "./config/reverse.js";
+import { buildXrayConfig } from "./config/xray.js";
+import { normalizePanelUrl } from "./config/xui.js";
 import { buildAutosshCommand, buildSshCommand } from "./config/ssh.js";
 import { ProcessManager, type ProcessHandle, type ProcessSpec } from "./process.js";
 import { LocalRunner, RemoteRunner, isLoopback, type Runner } from "./runner.js";
@@ -405,6 +413,9 @@ export class TunnelEngine {
   private async computeStatus(id: string): Promise<Status> {
     const rt = this.runtimes.get(id);
     if (!rt) return TunnelStatus.STOPPED;
+    // XUI tunnels are metadata-only (no local process): a tracked runtime
+    // means the last 3X-UI sync succeeded, so report running.
+    if (rt.processes.length === 0) return TunnelStatus.RUNNING;
     const states = await Promise.all(rt.processes.map(async (p) => {
       const cacheKey = p.spec.unitName || p.spec.id || String(p.constructor.name);
       const cached = this.processRunningCache.get(cacheKey);
@@ -572,6 +583,23 @@ export class TunnelEngine {
           if (ctx?.runner.kind === "remote") add(node, "gost");
         }
         break;
+      case "DIRECT":
+      case "REVERSE":
+        // DIRECT runs on one node (prefer server/Foreign), REVERSE on both.
+        // Both reuse the gost binary — no new dependency on low-RAM hosts.
+        if (cfg.method === "DIRECT") {
+          add(spec.serverNode ?? spec.clientNode, "gost");
+        } else {
+          add(spec.serverNode, "gost");
+          add(spec.clientNode, "gost");
+        }
+        break;
+      case "XRAY":
+        add(spec.clientNode ?? spec.serverNode, "xray");
+        break;
+      case "XUI":
+        // Metadata-only: syncs over HTTPS with X-UI/3X-UI, no binary needed.
+        break;
       default:
         break;
     }
@@ -616,6 +644,14 @@ export class TunnelEngine {
         return this.planSsh(spec, cfg.ssh);
       case "PORT_FORWARD":
         return this.planPortForward(spec, cfg.portForwards);
+      case "DIRECT":
+        return this.planDirect(spec, cfg.direct);
+      case "REVERSE":
+        return this.planReverse(spec, cfg.reverse);
+      case "XRAY":
+        return this.planXray(spec, cfg.xray);
+      case "XUI":
+        return this.planXui(spec, cfg.xui);
       default: {
         // Compile-time exhaustiveness: adding a TunnelMethod without a
         // planner breaks the build here instead of returning undefined.
@@ -699,6 +735,78 @@ export class TunnelEngine {
       });
     }
     return plan;
+  }
+
+  private planDirect(spec: TunnelDeploySpec, c: DirectConfig): PlanEntry[] {
+    // Prefer the Foreign node (closest to the target service); fall back to Iran.
+    const node = spec.serverNode ?? spec.clientNode;
+    const ctx = this.ctxFor(node);
+    if (!ctx) return [];
+    const [, ...rest] = buildDirectCommand(c);
+    return [
+      {
+        ctx,
+        files: [],
+        spec: processSpec(spec, "direct", [this.binPath(ctx, "gost"), ...rest], ctx),
+      },
+    ];
+  }
+
+  private planReverse(spec: TunnelDeploySpec, c: ReverseConfig): PlanEntry[] {
+    const plan: PlanEntry[] = [];
+    const foreign = this.ctxFor(spec.serverNode);
+    if (foreign) {
+      const [, ...rest] = buildReverseCommand(c, "FOREIGN");
+      plan.push({
+        ctx: foreign,
+        files: [],
+        spec: processSpec(spec, "foreign", [this.binPath(foreign, "gost"), ...rest], foreign),
+      });
+    }
+    const iran = this.ctxFor(spec.clientNode);
+    if (iran) {
+      const [, ...rest] = buildReverseCommand(c, "IRAN", {
+        peerHost: spec.serverNode?.host,
+      });
+      plan.push({
+        ctx: iran,
+        files: [],
+        spec: processSpec(spec, "iran", [this.binPath(iran, "gost"), ...rest], iran),
+      });
+    }
+    return plan;
+  }
+
+  private planXray(spec: TunnelDeploySpec, c: XrayConfig): PlanEntry[] {
+    const node = spec.clientNode ?? spec.serverNode;
+    const ctx = this.ctxFor(node);
+    if (!ctx) return [];
+    const cfgPath = path.join(ctx.cfgDir, "xray.json");
+    return [
+      {
+        ctx,
+        files: [{ path: cfgPath, content: buildXrayConfig(c) }],
+        spec: processSpec(spec, "xray", [this.binPath(ctx, "xray"), "run", "-c", cfgPath], ctx),
+      },
+    ];
+  }
+
+  private async planXui(spec: TunnelDeploySpec, c: XuiConfig): Promise<PlanEntry[]> {
+    // Metadata-only: persist a sync pointer next to the tunnel so status and
+    // the /api/xui endpoints can report the last-verified inbound without
+    // keeping any process alive (matters on 512MB VPSes).
+    const node = spec.clientNode ?? spec.serverNode;
+    const ctx = this.ctxFor(node);
+    if (ctx) {
+      const cfgPath = path.join(ctx.cfgDir, "xui.json");
+      const content = JSON.stringify(
+        { panelUrl: normalizePanelUrl(c.panelUrl), inboundId: c.inboundId ?? null, remark: c.remark ?? null, syncedAt: new Date().toISOString() },
+        null,
+        2,
+      );
+      await ctx.runner.writeFile(cfgPath, content);
+    }
+    return [];
   }
 
   private async planSsh(spec: TunnelDeploySpec, c: SshConfig): Promise<PlanEntry[]> {

@@ -101,4 +101,26 @@ export const ENGINE_BINARIES: Record<string, EngineBinary> = {
     server: "gost",
     hint: 'Run: xistance install --bin gost  (or scripts/install.sh).',
   },
+  DIRECT: {
+    tool: "gost",
+    client: "gost",
+    server: "gost",
+    hint: 'Run: xistance install --bin gost  (or scripts/install.sh).',
+  },
+  REVERSE: {
+    tool: "gost",
+    client: "gost",
+    server: "gost",
+    hint: 'Run: xistance install --bin gost  (or scripts/install.sh).',
+  },
+  XRAY: {
+    tool: "xray",
+    client: "xray",
+    server: "xray",
+    hint: 'Run: scripts/install.sh (or set XRAY_VERSION) to fetch the xray binary.',
+  },
+  XUI: {
+    tool: "xui",
+    hint: 'No binary needed — XUI tunnels sync over HTTPS with your X-UI / 3X-UI panel.',
+  },
 };

@@ -814,6 +814,51 @@ async function main() {
     }
   });
 
+  await test("Ports: findFreePort skips used ports", async () => {
+    const { findFreePort, usedPortsOf } = await import("../apps/web/src/lib/ports.ts");
+    const used = usedPortsOf([8080, null], [10000, 10001]);
+    const free = findFreePort(used, 10000, 10002);
+    if (free !== 10002) throw new Error(`expected 10002, got ${free}`);
+  });
+
+  await test("Ports: findFreePort returns null when range exhausted", async () => {
+    const { findFreePort } = await import("../apps/web/src/lib/ports.ts");
+    const free = findFreePort(new Set([20000, 20001]), 20000, 20001);
+    if (free !== null) throw new Error(`expected null, got ${free}`);
+  });
+
+  await test("Ports: findFreePort defaults to auto range", async () => {
+    const { findFreePort, AUTO_PORT_START } = await import("../apps/web/src/lib/ports.ts");
+    const free = findFreePort(new Set());
+    if (free !== AUTO_PORT_START) throw new Error(`expected ${AUTO_PORT_START}, got ${free}`);
+  });
+
+  await test("Tunnel methods: new schemas validate DIRECT/REVERSE/XRAY/XUI", async () => {
+    const { TunnelConfigSchema } = await import("../packages/types/src/index.ts");
+    const cases = [
+      { method: "DIRECT", direct: { protocol: "tcp", bindAddr: "0.0.0.0", listenPort: 8080, targetHost: "127.0.0.1", targetPort: 80 } },
+      { method: "REVERSE", reverse: { protocol: "tcp", listenPort: 8080, forwardHost: "127.0.0.1", forwardPort: 80 } },
+      { method: "XRAY", xray: { listenPort: 10808, protocol: "vless", address: "vpn.example.com", port: 443, uuid: "550e8400-e29b-41d4-a716-446655440000", network: "tcp", security: "none" } },
+      { method: "XUI", xui: { panelUrl: "http://203.0.113.10:2053", username: "admin", password: "secret", syncInterval: 300 } },
+    ];
+    for (const c of cases) {
+      const parsed = TunnelConfigSchema.safeParse(c);
+      if (!parsed.success) throw new Error(`${c.method} rejected: ${parsed.error.message}`);
+    }
+  });
+
+  await test("Builders: direct/reverse/xray commands shape correctly", async () => {
+    const core = await import("../packages/tunnel-core/src/index.ts");
+    const d = core.buildDirectCommand({ protocol: "tcp", bindAddr: "0.0.0.0", listenPort: 8080, targetHost: "127.0.0.1", targetPort: 80 });
+    if (d[0] !== "gost" || !d[2].includes(":8080/127.0.0.1:80")) throw new Error(`bad direct cmd: ${d.join(" ")}`);
+    const rf = core.buildReverseCommand({ protocol: "tcp", listenPort: 8080, forwardHost: "127.0.0.1", forwardPort: 80 }, "FOREIGN");
+    if (rf[0] !== "gost" || !rf[2].includes(":8080")) throw new Error(`bad reverse cmd: ${rf.join(" ")}`);
+    const ri = core.buildReverseCommand({ protocol: "tcp", listenPort: 8080, forwardHost: "127.0.0.1", forwardPort: 80 }, "IRAN", { peerHost: "203.0.113.10" });
+    if (!ri.includes("-F")) throw new Error(`iran reverse must dial peer with -F: ${ri.join(" ")}`);
+    const xj = JSON.parse(core.buildXrayConfig({ listenPort: 10808, protocol: "vless", address: "vpn.example.com", port: 443, uuid: "u", network: "tcp", security: "none" }));
+    if (xj.inbounds[0].port !== 10808 || xj.outbounds[0].protocol !== "vless") throw new Error("bad xray json");
+  });
+
   // Print results
   console.log("\n" + "=".repeat(50));
   const passed = results.filter((r) => r.passed).length;

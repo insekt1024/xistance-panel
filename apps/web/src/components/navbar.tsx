@@ -1,9 +1,9 @@
 "use client";
 
 import * as React from "react";
+import Image from "next/image";
 import { useTranslations } from "next-intl";
 import {
-  Activity,
   ArrowRightLeft,
   Bell,
   Gauge,
@@ -59,9 +59,13 @@ export function Navbar({ userName, userEmail }: NavbarProps) {
     <header className="sticky top-0 z-40 w-full border-b bg-background/80 shadow-[0_1px_8px_-4px_oklch(0_0_0/0.06)] backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <div className="animate-fade-in flex h-14 items-center gap-2 px-4">
         <Link href="/" className="flex items-center gap-2 font-semibold">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Activity className="h-4 w-4" />
-          </span>
+          <Image
+            src="/xistance-logo.svg"
+            alt="Xistance Panel logo"
+            className="h-7 w-7 rounded-md"
+            width={28}
+            height={28}
+          />
           <span className="hidden sm:inline">Xistance</span>
         </Link>
 

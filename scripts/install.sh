@@ -25,8 +25,8 @@
 #
 # Environment overrides (all optional, CLI flags win):
 #   XT_ADMIN_EMAIL, XT_ADMIN_PASSWORD, XT_PORT, XT_DATA_DIR, XT_BIN_DIR,
-#   XT_INSTALL_DIR, XT_MIRROR (github-mirror base for binary downloads),
-#   BACKHAUL_VERSION, FRP_VERSION, GOST_VERSION, XT_LANG (en|fa)
+#   XT_MIRROR (github-mirror base for binary downloads),
+#   BACKHAUL_VERSION, FRP_VERSION, GOST_VERSION, XRAY_VERSION, XT_LANG (en|fa)
 #
 set -uo pipefail
 
@@ -69,6 +69,7 @@ BRANCH="master"
 BACKHAUL_VERSION="${BACKHAUL_VERSION:-}"
 FRP_VERSION="${FRP_VERSION:-}"
 GOST_VERSION="${GOST_VERSION:-}"
+XRAY_VERSION="${XRAY_VERSION:-}"
 MIRROR="${XT_MIRROR:-https://github.com}"
 
 STEPS=(preflight deps node swap binaries env build deploy db systemd firewall verify)
@@ -497,7 +498,7 @@ fetch_and_extract() { # url asset-name dst-dir bin-names...
 
 install_binaries() {
   mkdir -p "$BIN_DIR"
-  local bh_ver fp_ver gost_ver fails=0
+  local bh_ver fp_ver gost_ver xray_ver x_asset fails=0
 
   bh_ver="${BACKHAUL_VERSION:-$(latest_release Musixal/Backhaul)}"
   [[ "$bh_ver" == "unknown" ]] && bh_ver="v0.7.2"
@@ -533,6 +534,28 @@ install_binaries() {
     ok "gost installed." "gost نصب شد."
   else
     warn "gost download failed; check GOST_VERSION=<tag>." "دانلود gost ناموفق بود."; fails=1
+  fi
+
+  # xray-core (XTLS/Xray-core) powers XRAY tunnels and reads 3X-UI inbound
+  # credentials. Asset names differ per arch: Xray-linux-64.zip (amd64),
+  # Xray-linux-arm64-v8a.zip (arm64); the binary inside is always `xray`.
+  # No pinned fallback: a guessed tag would 404, so offline hosts get a clear
+  # pointer to XRAY_VERSION instead of a misleading failure.
+  xray_ver="${XRAY_VERSION:-$(latest_release XTLS/Xray-core)}"
+  if [[ "$xray_ver" == "unknown" ]]; then
+    warn "xray version unknown (offline?); set XRAY_VERSION=<tag> to install it." \
+         "نسخه xray مشخص نشد؛ با XRAY_VERSION نصب کنید."; fails=1
+  else
+    x_asset="Xray-linux-64.zip"
+    [[ "$GO_ARCH" == "arm64" ]] && x_asset="Xray-linux-arm64-v8a.zip"
+    info "Installing xray $xray_ver…" "در حال نصب xray…"
+    if fetch_and_extract \
+        "$MIRROR/XTLS/Xray-core/releases/download/$xray_ver/$x_asset" \
+        "$x_asset" "$BIN_DIR" xray; then
+      ok "xray installed." "xray نصب شد."
+    else
+      warn "xray download failed; check XRAY_VERSION=<tag>." "دانلود xray ناموفق بود."; fails=1
+    fi
   fi
 
   ls -1 "$BIN_DIR" | sed 's/^/    /'
@@ -585,10 +608,19 @@ build_panel() {
   [[ -f "$REPO_ROOT/package.json" ]] || die "Not a repo checkout. Use bootstrap.sh or clone first." \
                                             "این پوشه مخزن نیست."
   info "Installing dependencies…" "در حال نصب وابستگی‌ها…"
-  ( cd "$REPO_ROOT" && npm ci --no-audit --no-fund 2>&1 | tail -3 ) \
+  ( cd "$REPO_ROOT" && npm ci --no-audit --no-fund --prefer-offline 2>&1 | tail -3 ) \
     || die "npm ci failed (see output above)." "نصب وابستگی‌ها ناموفق بود."
   info "Building panel (this may take a few minutes)…" "در حال ساخت پنل…"
   export TURBO_DISABLE=true
+  export NEXT_TELEMETRY_DISABLED=1
+  # Low-memory VPS (< 1.5G RAM): cap the Node heap so the Next.js build does
+  # not OOM next to the 2G swapfile provisioned by the swap step.
+  local mem_kb
+  mem_kb="$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+  if (( mem_kb > 0 && mem_kb < 1572864 )); then
+    export NODE_OPTIONS="--max-old-space-size=512 ${NODE_OPTIONS:-}"
+    note "Low-memory build mode ($((mem_kb/1024))M RAM): heap capped at 512M."
+  fi
   ( cd "$REPO_ROOT" && npm run build 2>&1 | tail -5 ) \
     || die "Panel build failed (see output above)." "ساخت پنل ناموفق بود."
   if [[ -d "$REPO_ROOT/apps/web/.next/standalone" ]]; then

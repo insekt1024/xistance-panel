@@ -10,6 +10,10 @@ export const TunnelMethod = {
   GOST: "GOST", // Paqet / packet relay backed by gost
   SSH: "SSH",
   PORT_FORWARD: "PORT_FORWARD",
+  DIRECT: "DIRECT", // single-node direct forward (listen -> target, no peer dial)
+  REVERSE: "REVERSE", // NAT-friendly reverse: Iran dials out, Foreign exposes port
+  XRAY: "XRAY", // Xray-core outbound (VLESS/VMess/Trojan/Shadowsocks, WS/TCP/gRPC, TLS/Reality)
+  XUI: "XUI", // managed via X-UI / 3X-UI panel API (no local binary)
 } as const;
 export type TunnelMethod = (typeof TunnelMethod)[keyof typeof TunnelMethod];
 
@@ -19,6 +23,10 @@ export const TunnelMethodSchema = z.enum([
   TunnelMethod.GOST,
   TunnelMethod.SSH,
   TunnelMethod.PORT_FORWARD,
+  TunnelMethod.DIRECT,
+  TunnelMethod.REVERSE,
+  TunnelMethod.XRAY,
+  TunnelMethod.XUI,
 ]);
 
 export const NodeType = {
@@ -303,6 +311,87 @@ export const SshConfigSchema = z.object({
 export type SshConfig = z.infer<typeof SshConfigSchema>;
 
 // ---------------------------------------------------------------------------
+// DIRECT tunnel: simplest possible forward on ONE node.
+// Listens on listenPort and forwards to targetHost:targetPort (gost -L).
+// Use when both ends are directly reachable (no NAT/censorship hop needed).
+// ---------------------------------------------------------------------------
+
+export const DirectConfigSchema = z.object({
+  protocol: z.enum(["tcp", "udp"]).default("tcp"),
+  bindAddr: z.string().default("0.0.0.0"),
+  listenPort: z.number().int().min(1).max(65535),
+  targetHost: z.string().min(1),
+  targetPort: z.number().int().min(1).max(65535),
+});
+export type DirectConfig = z.infer<typeof DirectConfigSchema>;
+
+// ---------------------------------------------------------------------------
+// REVERSE tunnel: NAT-friendly reverse relay across TWO nodes.
+// The Iran node dials OUT to the Foreign node (so no inbound firewall rule is
+// needed in Iran); the Foreign node exposes listenPort to the world and the
+// traffic is carried back to forwardHost:forwardPort in Iran.
+// Implemented with the already-installed gost binary on both ends.
+// ---------------------------------------------------------------------------
+
+export const ReverseConfigSchema = z.object({
+  protocol: z.enum(["tcp", "udp"]).default("tcp"),
+  listenPort: z.number().int().min(1).max(65535),
+  forwardHost: z.string().default("127.0.0.1"),
+  forwardPort: z.number().int().min(1).max(65535),
+  token: z.string().optional(),
+});
+export type ReverseConfig = z.infer<typeof ReverseConfigSchema>;
+
+// ---------------------------------------------------------------------------
+// XRAY tunnel: runs xray-core locally with a minimal dokodemo-door inbound
+// (listenPort) forwarding into a single outbound (VLESS/VMess/Trojan/
+// Shadowsocks over TCP/WS/gRPC with optional TLS/Reality). Compatible with
+// upstreams managed by X-UI / 3X-UI panels — paste the inbound credentials
+// from 3X-UI into the wizard and the panel generates the xray JSON.
+// ---------------------------------------------------------------------------
+
+export const XrayProtocol = {
+  VLESS: "vless",
+  VMESS: "vmess",
+  TROJAN: "trojan",
+  SHADOWSOCKS: "shadowsocks",
+} as const;
+export type XrayProtocol = (typeof XrayProtocol)[keyof typeof XrayProtocol];
+
+export const XrayConfigSchema = z.object({
+  listenPort: z.number().int().min(1).max(65535),
+  protocol: z.enum(["vless", "vmess", "trojan", "shadowsocks"]).default("vless"),
+  address: z.string().min(1),
+  port: z.number().int().min(1).max(65535),
+  uuid: z.string().min(1),
+  network: z.enum(["tcp", "ws", "grpc"]).default("tcp"),
+  security: z.enum(["none", "tls", "reality"]).default("none"),
+  sni: z.string().optional(),
+  path: z.string().optional(),
+  flow: z.string().optional(),
+});
+export type XrayConfig = z.infer<typeof XrayConfigSchema>;
+
+// ---------------------------------------------------------------------------
+// XUI tunnel: metadata-only integration with an X-UI / 3X-UI panel.
+// No binary runs on our nodes; the panel stores the 3X-UI credentials and
+// inbound id, verifies reachability via its HTTP API (see /api/xui/*), and
+// reports status from the last successful sync. This keeps low-memory VPSes
+// free of extra processes.
+// ---------------------------------------------------------------------------
+
+export const XuiConfigSchema = z.object({
+  panelUrl: z.string().url(),
+  username: z.string().min(1),
+  password: z.string().min(1),
+  inboundId: z.number().int().min(1).optional(),
+  remark: z.string().max(120).optional(),
+  syncInterval: z.number().int().min(30).max(3600).default(300),
+  listenPort: z.number().int().min(1).max(65535).optional(),
+});
+export type XuiConfig = z.infer<typeof XuiConfigSchema>;
+
+// ---------------------------------------------------------------------------
 // Bidirectional port forwarding rules
 // ---------------------------------------------------------------------------
 
@@ -359,6 +448,22 @@ export const TunnelConfigSchema = z.discriminatedUnion("method", [
   z.object({
     method: z.literal(TunnelMethod.PORT_FORWARD),
     portForwards: z.array(PortForwardRuleSchema).min(1),
+  }),
+  z.object({
+    method: z.literal(TunnelMethod.DIRECT),
+    direct: DirectConfigSchema,
+  }),
+  z.object({
+    method: z.literal(TunnelMethod.REVERSE),
+    reverse: ReverseConfigSchema,
+  }),
+  z.object({
+    method: z.literal(TunnelMethod.XRAY),
+    xray: XrayConfigSchema,
+  }),
+  z.object({
+    method: z.literal(TunnelMethod.XUI),
+    xui: XuiConfigSchema,
   }),
 ]);
 export type TunnelConfig = z.infer<typeof TunnelConfigSchema>;

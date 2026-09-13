@@ -57,7 +57,11 @@ function resolveTargetNode(
   const byType = nodes.filter(
     (n) => n.type === (rule.direction === "IRAN_TO_FOREIGN" ? "IRAN" : "FOREIGN"),
   );
-  return byType.length === 1 ? byType[0] : null;
+  // Auto-created rules always pin nodeId, so this fallback only serves legacy
+  // manual rules. Previously multiple same-type nodes meant a permanent
+  // "needs_node" dead-end; pick the first candidate instead so the rule runs
+  // somewhere predictable rather than nowhere.
+  return byType[0] ?? null;
 }
 
 export async function reconcilePortForwards(): Promise<void> {
@@ -133,8 +137,9 @@ export async function reconcilePortForwards(): Promise<void> {
     }
   }
 
-  // Persist statuses.
-  await Promise.all(
+  // Persist statuses (best-effort per rule: one stale row must not fail
+  // the whole reconcile and leave every other rule unreported).
+  await Promise.allSettled(
     [...statuses].map(([ruleId, status]) =>
       prisma.portForward.update({ where: { id: ruleId }, data: { status } }),
     ),
