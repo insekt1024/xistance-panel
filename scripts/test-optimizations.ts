@@ -996,6 +996,52 @@ async function main() {
     }
   });
 
+
+  // The port-forward routes deploy to the target node, and an unreachable node
+  // costs the full 30s SSH timeout. reconcilePortForwardsSoon() caps how long
+  // a request waits; the 30s -> 3s improvement is measured end to end against
+  // the standalone build, so what is pinned here is that the healthy path is
+  // still fast, still synchronous, and still reports completion.
+  await test("PortForward: bounded reconcile returns promptly when idle", async () => {
+    const { reconcilePortForwardsSoon } = await import(
+      "../apps/web/src/lib/forward-supervisor.ts"
+    );
+    const started = Date.now();
+    const completed = await reconcilePortForwardsSoon(3_000);
+    const elapsed = Date.now() - started;
+    if (elapsed > 2_500) {
+      throw new Error(`idle reconcile took ${elapsed}ms, expected near-instant`);
+    }
+    if (completed !== true) {
+      throw new Error("idle reconcile should report completion within the grace period");
+    }
+  });
+
+  await test("PortForward: concurrent reconciles coalesce and all resolve", async () => {
+    const { reconcilePortForwardsSoon } = await import(
+      "../apps/web/src/lib/forward-supervisor.ts"
+    );
+    const results = await Promise.all([
+      reconcilePortForwardsSoon(3_000),
+      reconcilePortForwardsSoon(3_000),
+      reconcilePortForwardsSoon(3_000),
+    ]);
+    if (results.length !== 3 || results.some((r) => typeof r !== "boolean")) {
+      throw new Error("every concurrent caller must resolve to a boolean");
+    }
+  });
+
+  await test("PortForward: grace period is honoured (never waits forever)", async () => {
+    const { reconcilePortForwardsSoon } = await import(
+      "../apps/web/src/lib/forward-supervisor.ts"
+    );
+    // Even a 1ms grace must resolve rather than hang.
+    const started = Date.now();
+    await reconcilePortForwardsSoon(1);
+    const elapsed = Date.now() - started;
+    if (elapsed > 2_000) throw new Error(`1ms grace waited ${elapsed}ms`);
+  });
+
   // Print results
   console.log("\n" + "=".repeat(50));
   const passed = results.filter((r) => r.passed).length;

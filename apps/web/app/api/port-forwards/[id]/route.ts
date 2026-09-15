@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
-import { reconcilePortForwards } from "@/lib/forward-supervisor";
+import { reconcilePortForwardsSoon } from "@/lib/forward-supervisor";
 
 const updateSchema = z.object({
   name: z.string().min(1).max(80).optional(),
@@ -68,7 +68,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
     where: { id },
     data: { ...body.data, status: "pending" },
   });
-  await reconcilePortForwards();
+  await reconcilePortForwardsSoon();
   await auditLog(auth.user.id, "portforward.update", id, rule.name, getClientIp(request));
   return json({ rule });
 }
@@ -83,7 +83,7 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
     return apiError("Forbidden", 403);
   }
   await prisma.portForward.delete({ where: { id } });
-  await reconcilePortForwards();
+  await reconcilePortForwardsSoon();
   await auditLog(auth.user.id, "portforward.delete", id, existing.name, getClientIp(request));
   return json({ ok: true });
 }

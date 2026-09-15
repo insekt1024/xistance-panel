@@ -1,3 +1,4 @@
+import { getLocale } from "next-intl/server";
 import { Link } from "@/i18n/routing";
 
 const STRINGS = {
@@ -13,12 +14,20 @@ const STRINGS = {
   },
 } as const;
 
-export default async function NotFound({
-  params,
-}: {
-  params: Promise<{ locale: string }>;
-}) {
-  const { locale } = await params;
+/**
+ * Next does NOT pass `params` to a not-found boundary (only `error.tsx` gets
+ * props), so reading the locale from props threw on every 404 and turned it
+ * into a 500 — favicons, mistyped URLs and bots all produced stack traces.
+ * Take the locale from the next-intl request context instead, and fall back
+ * to English if this renders outside one.
+ */
+export default async function NotFound() {
+  let locale = "en";
+  try {
+    locale = await getLocale();
+  } catch {
+    // Rendered outside a next-intl request scope (e.g. the global 404).
+  }
   const t = locale === "fa" ? STRINGS.fa : STRINGS.en;
   return (
     <div className="flex min-h-[50vh] items-center justify-center">

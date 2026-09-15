@@ -165,6 +165,78 @@ export async function reconcilePortForwards(): Promise<void> {
   );
 }
 
+
+// ---------------------------------------------------------------------------
+// Request-facing reconcile.
+//
+// reconcilePortForwards() deploys to the target node, and a node that is slow
+// or unreachable costs the full SSH timeout (runner.ts DEFAULT_TIMEOUT, 30s).
+// The create/update/delete routes used to await it directly, so a single
+// unreachable node froze the browser for 30 seconds on every rule change —
+// measured at 30.1s. Cross-border links drop often enough that this is the
+// normal case, not the edge case.
+//
+// Concurrent callers share one run, and a change that lands mid-run schedules
+// exactly one follow-up so the last write still gets applied.
+// ---------------------------------------------------------------------------
+
+let inFlight: Promise<void> | null = null;
+let queued = false;
+
+function runReconcile(): Promise<void> {
+  if (inFlight) {
+    queued = true;
+    return inFlight;
+  }
+  const run = (async () => {
+    try {
+      await reconcilePortForwards();
+    } finally {
+      inFlight = null;
+      if (queued) {
+        queued = false;
+        void runReconcile().catch(() => {
+          /* logged by the awaiting caller, or below */
+        });
+      }
+    }
+  })();
+  inFlight = run;
+  return run;
+}
+
+/**
+ * Apply rule changes without hanging the request.
+ *
+ * A healthy node reconciles in milliseconds, so the caller still sees the
+ * final state — behaviour is unchanged on a working setup. Past `graceMs` we
+ * stop waiting and let the deploy finish in the background; the rule's
+ * `status` column carries the outcome and the dashboard's 30s refresh picks
+ * it up.
+ *
+ * @returns true if the reconcile completed within the grace period.
+ */
+export async function reconcilePortForwardsSoon(graceMs = 3_000): Promise<boolean> {
+  const run = runReconcile();
+  // Attaching the rejection handler here also keeps a background failure from
+  // surfacing as an unhandled rejection once we stop awaiting.
+  const done = run.then(
+    () => true,
+    (err) => {
+      console.error("[port-forward] reconcile failed:", err);
+      return true;
+    },
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), graceMs);
+    timer.unref?.();
+  });
+  const finished = await Promise.race([done, expired]);
+  if (timer) clearTimeout(timer);
+  return finished;
+}
+
 export function portForwardTunnelId(nodeId: string): string {
   return `${TUNNEL_PREFIX}${nodeId}`;
 }

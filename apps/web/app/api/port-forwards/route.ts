@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
-import { reconcilePortForwards } from "@/lib/forward-supervisor";
+import { reconcilePortForwardsSoon } from "@/lib/forward-supervisor";
 import { findFreePort, usedPortsOf } from "@/lib/ports";
 
 const ruleSchema = z.object({
@@ -142,7 +142,7 @@ export async function POST(request: Request) {
       status: "pending",
     },
   });
-  await reconcilePortForwards();
+  await reconcilePortForwardsSoon();
   await auditLog(auth.user.id, "portforward.create", rule.id, rule.name, getClientIp(request));
   return json({ rule }, 201);
 }
