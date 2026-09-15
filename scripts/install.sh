@@ -624,8 +624,26 @@ build_panel() {
   ( cd "$REPO_ROOT" && npm run build 2>&1 | tail -5 ) \
     || die "Panel build failed (see output above)." "ساخت پنل ناموفق بود."
   if [[ -d "$REPO_ROOT/apps/web/.next/standalone" ]]; then
-    cp -r "$REPO_ROOT/apps/web/.next/static" \
-          "$REPO_ROOT/apps/web/.next/standalone/apps/web/.next/static" 2>/dev/null || true
+    # The standalone server serves /_next/static from its OWN tree, so these
+    # assets must be staged beside it. Skipping or botching this leaves a
+    # panel that still returns 200 for every page while every stylesheet and
+    # script 404s: unstyled, non-interactive, and silent in the logs. It used
+    # to be `|| true`, which hid exactly that. Fail loudly instead.
+    local static_src="$REPO_ROOT/apps/web/.next/static"
+    local static_dst="$REPO_ROOT/apps/web/.next/standalone/apps/web/.next/static"
+    [[ -d "$static_src" ]] \
+      || die "Build produced no static assets ($static_src)." \
+             "بیلد فایل‌های استاتیک تولید نکرد."
+    # cp -r into an existing directory would nest it as static/static and
+    # break every asset path, so clear the destination first.
+    rm -rf "$static_dst"
+    mkdir -p "$(dirname "$static_dst")"
+    cp -r "$static_src" "$static_dst" \
+      || die "Could not stage static assets; the panel would load unstyled." \
+             "انتقال فایل‌های استاتیک ناموفق بود؛ پنل بدون استایل بالا می‌آمد."
+    [[ -d "$static_dst/chunks" ]] \
+      || die "Static assets staged but chunks/ is missing." \
+             "فایل‌های استاتیک کامل منتقل نشدند."
   else
     die "Build produced no standalone output." "خروجی standalone ساخته نشد."
   fi
