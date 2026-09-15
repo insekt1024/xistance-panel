@@ -63,6 +63,21 @@ Small/cheap server? No problem: on hosts with less than ~1.5 GB RAM the
 installer adds swap automatically and builds in low-memory mode, and X-UI
 linked tunnels run zero extra processes.
 
+### Behind a reverse proxy or a custom domain
+
+The panel accepts browser requests whose `Origin` matches the address the
+browser used, so opening it directly at `http://<server-ip>:8080` needs no
+configuration. Two knobs cover the less usual setups — add either to
+`/etc/xistance/xistance.env` and `systemctl restart xistance`:
+
+| Variable | When you need it |
+| --- | --- |
+| `XT_TRUST_PROXY=true` | Nginx / Caddy / Cloudflare in front. Lets the panel read `X-Forwarded-Host` and `X-Forwarded-For`. Only set this when a proxy really is in front — the headers are forgeable otherwise. |
+| `XT_ALLOWED_ORIGINS=https://panel.example` | The public address differs from the `Host` the panel receives. Comma-separated; full origins or bare `host:port`. |
+
+If actions fail with *"Cross-origin request rejected"*, one of these two is
+what you are missing.
+
 ## Daily use (3 steps)
 
 1. **Nodes** — add your Iran server and your foreign server (IP + SSH login).

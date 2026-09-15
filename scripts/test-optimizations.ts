@@ -888,6 +888,114 @@ async function main() {
     if (parsed.success) throw new Error("udp REVERSE must be rejected at the schema");
   });
 
+
+  // -------------------------------------------------------------------------
+  // Origin guard. The panel is served by the Next standalone server bound to
+  // HOSTNAME=0.0.0.0, so `request.url` carries the internal bind address, not
+  // the address the browser used. Comparing Origin against it rejected every
+  // browser request on a VPS ("Cross-origin request rejected" on every action)
+  // while letting non-browser clients — which send no Origin — straight past.
+  // The comparison must use the Host the client actually addressed.
+  // -------------------------------------------------------------------------
+  const originReq = (
+    headers: Record<string, string>,
+    url = "http://localhost:3000/api/nodes",
+  ) => new Request(url, { method: "POST", headers });
+
+  await test("Origin: VPS host header wins over internal request.url", async () => {
+    const { originAllowed } = await import("../apps/web/src/lib/auth.ts");
+    // The exact regression: internal URL is localhost:3000, the browser is on
+    // the VPS address. This returned false for every action before the fix.
+    const ok = originAllowed(
+      originReq({ host: "203.0.113.9:8080", origin: "http://203.0.113.9:8080" }),
+    );
+    if (!ok) throw new Error("legitimate VPS-by-IP request was rejected");
+  });
+
+  await test("Origin: accepts domain and https origins", async () => {
+    const { originAllowed } = await import("../apps/web/src/lib/auth.ts");
+    for (const [host, origin] of [
+      ["panel.example", "http://panel.example"],
+      ["panel.example", "https://panel.example"],
+      ["panel.example:8443", "https://panel.example:8443"],
+      ["127.0.0.1:3000", "http://127.0.0.1:3000"],
+    ]) {
+      if (!originAllowed(originReq({ host, origin }))) {
+        throw new Error(`rejected legitimate origin ${origin} for host ${host}`);
+      }
+    }
+  });
+
+  await test("Origin: still blocks genuine cross-site requests", async () => {
+    const { originAllowed } = await import("../apps/web/src/lib/auth.ts");
+    const blocked = [
+      "http://evil.example",
+      "https://evil.example",
+      "http://203.0.113.9.evil.example",
+      "http://203.0.113.9:9999",
+    ];
+    for (const origin of blocked) {
+      if (originAllowed(originReq({ host: "203.0.113.9:8080", origin }))) {
+        throw new Error(`cross-site origin ${origin} was allowed`);
+      }
+    }
+  });
+
+  await test("Origin: malformed Origin rejected, absent Origin allowed", async () => {
+    const { originAllowed } = await import("../apps/web/src/lib/auth.ts");
+    if (originAllowed(originReq({ host: "203.0.113.9:8080", origin: "not-a-url" }))) {
+      throw new Error("malformed Origin was allowed");
+    }
+    if (!originAllowed(originReq({ host: "203.0.113.9:8080" }))) {
+      throw new Error("absent Origin should pass (non-browser clients)");
+    }
+  });
+
+  await test("Origin: X-Forwarded-Host ignored unless XT_TRUST_PROXY", async () => {
+    const { originAllowed } = await import("../apps/web/src/lib/auth.ts");
+    const prev = process.env.XT_TRUST_PROXY;
+    try {
+      delete process.env.XT_TRUST_PROXY;
+      // Attacker-supplied XFH must not authorise its own Origin.
+      const spoofed = originReq({
+        host: "203.0.113.9:8080",
+        "x-forwarded-host": "evil.example",
+        origin: "http://evil.example",
+      });
+      if (originAllowed(spoofed)) throw new Error("spoofed X-Forwarded-Host was trusted");
+
+      process.env.XT_TRUST_PROXY = "true";
+      const proxied = originReq({
+        host: "10.0.0.5:3000",
+        "x-forwarded-host": "panel.example",
+        origin: "https://panel.example",
+      });
+      if (!originAllowed(proxied)) {
+        throw new Error("XT_TRUST_PROXY=true should honour X-Forwarded-Host");
+      }
+    } finally {
+      if (prev === undefined) delete process.env.XT_TRUST_PROXY;
+      else process.env.XT_TRUST_PROXY = prev;
+    }
+  });
+
+  await test("Origin: XT_ALLOWED_ORIGINS escape hatch", async () => {
+    const { originAllowed } = await import("../apps/web/src/lib/auth.ts");
+    const prev = process.env.XT_ALLOWED_ORIGINS;
+    try {
+      process.env.XT_ALLOWED_ORIGINS = "https://panel.example, other.example:8443";
+      const byOrigin = originReq({ host: "10.0.0.5:3000", origin: "https://panel.example" });
+      if (!originAllowed(byOrigin)) throw new Error("full origin entry not honoured");
+      const byHost = originReq({ host: "10.0.0.5:3000", origin: "https://other.example:8443" });
+      if (!originAllowed(byHost)) throw new Error("bare host entry not honoured");
+      const notListed = originReq({ host: "10.0.0.5:3000", origin: "https://evil.example" });
+      if (originAllowed(notListed)) throw new Error("unlisted origin allowed");
+    } finally {
+      if (prev === undefined) delete process.env.XT_ALLOWED_ORIGINS;
+      else process.env.XT_ALLOWED_ORIGINS = prev;
+    }
+  });
+
   // Print results
   console.log("\n" + "=".repeat(50));
   const passed = results.filter((r) => r.passed).length;

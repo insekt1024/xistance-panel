@@ -194,15 +194,58 @@ export function assertCsrf(request: Request): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/**
+ * Host the client actually addressed.
+ *
+ * NOT `request.url`: the Next standalone server rebuilds that from its own
+ * bind address (install.sh sets HOSTNAME=0.0.0.0), so it carries the internal
+ * host, never the one the browser typed. Comparing an Origin against it
+ * rejects every browser request — including plain loopback — while letting
+ * non-browser clients (which send no Origin) straight through.
+ */
+function requestHost(request: Request): string | null {
+  // X-Forwarded-Host is attacker-controlled unless a sanitising proxy sits in
+  // front, so it is gated on the same opt-in getClientIp() uses for
+  // X-Forwarded-For.
+  if (process.env.XT_TRUST_PROXY === "true") {
+    const fwd = request.headers.get("x-forwarded-host");
+    if (fwd) {
+      const first = fwd.split(",")[0].trim();
+      if (first) return first.toLowerCase();
+    }
+  }
+  const host = request.headers.get("host")?.trim();
+  return host ? host.toLowerCase() : null;
+}
+
+/**
+ * Extra origins accepted regardless of Host — for deployments where the
+ * public origin genuinely differs from the Host the app receives (TLS
+ * terminated on another name, separate admin domain). Comma-separated, either
+ * full origins (https://panel.example) or bare hosts (panel.example:8443).
+ */
+function allowedOrigins(): string[] {
+  return (process.env.XT_ALLOWED_ORIGINS ?? "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 /** Origin check: disallow cross-site state-changing requests. */
 export function originAllowed(request: Request): boolean {
   const origin = request.headers.get("origin");
   if (!origin) return true; // same-origin non-browser clients are fine
-  const url = new URL(request.url);
+  let o: URL;
   try {
-    const o = new URL(origin);
-    return o.host === url.host;
+    o = new URL(origin);
   } catch {
-    return false;
+    return false; // malformed Origin
   }
+  const allow = allowedOrigins();
+  if (allow.includes(o.origin.toLowerCase()) || allow.includes(o.host.toLowerCase())) {
+    return true;
+  }
+  const host = requestHost(request);
+  if (!host) return false;
+  return o.host.toLowerCase() === host;
 }
