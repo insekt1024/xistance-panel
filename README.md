@@ -46,6 +46,18 @@ tunnel for you.
 | **X-UI / 3X-UI** | Your config already lives in an X-UI / 3X-UI panel — link it and let Xistance watch it. No extra software runs. |
 | **Port Forwarding** | "Open port X here, send it to service Y there." Fully **automatic** by default: just point at your service and the panel picks a free port. Switch to Advanced to choose the port yourself. |
 
+> **Reverse tunnels: one setting on the foreign server.** A reverse tunnel asks
+> the foreign server's SSH daemon to open the port for the whole internet. By
+> default OpenSSH refuses and binds it to `127.0.0.1` only — the tunnel shows
+> **running** but nobody outside can connect. On the *foreign* server:
+>
+> ```bash
+> echo 'GatewayPorts clientspecified' | sudo tee /etc/ssh/sshd_config.d/xistance.conf
+> sudo systemctl restart ssh
+> ```
+>
+> Only needed for **Reverse** and for **SSH** tunnels in `-R` mode.
+
 ## Install on a server (Ubuntu 22.04 / 24.04)
 
 One line. The installer asks you 2–3 questions (port, admin email) and does

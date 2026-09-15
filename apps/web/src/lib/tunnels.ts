@@ -131,3 +131,32 @@ export function redactNode(node: DbNode) {
     hasApiToken: Boolean(apiTokenEncrypted),
   };
 }
+
+/**
+ * Primary exposure port for a tunnel, used for display and the port-conflict
+ * check. Lives here rather than in the route: it is a pure function of the
+ * config with no request context, and the switch must stay exhaustive as
+ * methods are added (TypeScript enforces that via the discriminated union).
+ */
+export function extractPort(config: TunnelConfig): number | null {
+  switch (config.method) {
+    case "BACKHAUL":
+      return config.backhaul.listenPort;
+    case "FRP":
+      return config.frp.bindPort;
+    case "GOST":
+      return config.gost.listenPort;
+    case "SSH":
+      return config.ssh.localPort;
+    case "PORT_FORWARD":
+      return config.portForwards[0]?.sourcePort ?? null;
+    case "DIRECT":
+      return config.direct.listenPort;
+    case "REVERSE":
+      return config.reverse.listenPort;
+    case "XRAY":
+      return config.xray.listenPort;
+    case "XUI":
+      return config.xui.listenPort ?? null;
+  }
+}

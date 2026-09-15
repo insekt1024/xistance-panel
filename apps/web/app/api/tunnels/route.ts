@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { prisma } from "@xistance/db";
-import { TunnelConfigSchema, type TunnelConfig } from "@xistance/types";
+import { TunnelConfigSchema } from "@xistance/types";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 import { getEngine } from "@/lib/engine";
-import { buildSpec, storeTunnelConfig } from "@/lib/tunnels";
+import { buildSpec, extractPort, storeTunnelConfig } from "@/lib/tunnels";
 import { rateLimit } from "@/lib/rate-limit";
 import { CACHE_METRICS, invalidateCache } from "@/lib/query-cache";
 
@@ -15,29 +15,6 @@ const tunnelCreateSchema = z.object({
   config: TunnelConfigSchema,
   autostart: z.boolean().default(false),
 });
-
-export function extractPort(config: TunnelConfig): number | null {
-  switch (config.method) {
-    case "BACKHAUL":
-      return config.backhaul.listenPort;
-    case "FRP":
-      return config.frp.bindPort;
-    case "GOST":
-      return config.gost.listenPort;
-    case "SSH":
-      return config.ssh.localPort;
-    case "PORT_FORWARD":
-      return config.portForwards[0]?.sourcePort ?? null;
-    case "DIRECT":
-      return config.direct.listenPort;
-    case "REVERSE":
-      return config.reverse.listenPort;
-    case "XRAY":
-      return config.xray.listenPort;
-    case "XUI":
-      return config.xui.listenPort ?? null;
-  }
-}
 
 const LIST_LIMIT = 50;
 
@@ -147,7 +124,7 @@ export async function POST(request: Request) {
       serverNodeId: data.serverNodeId,
       ownerId: auth.user.id,
       config: storeTunnelConfig(data.config),
-      port: extractPort(data.config),
+      port,
       autostart: data.autostart,
     },
   });

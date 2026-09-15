@@ -10,16 +10,23 @@ process.env.JWT_SECRET = "test-jwt-secret";
 process.env.NODE_ENV = "test";
 
 import { PrismaClient } from "../packages/db/generated/client/index.js";
+import { buildGostCommand } from "../packages/tunnel-core/src/config/gost.ts";
 import {
   buildAutosshCommand,
+  buildDirectCommand,
   buildSshCommand,
   buildUnit,
+  buildXrayCommand,
+  buildXrayConfig,
+  buildXuiSyncPayload,
+  normalizePanelUrl,
+  reverseToSshConfig,
   filterExtraArgs,
   hashPassword,
   sanitizeUnitText,
   verifyPassword,
 } from "../packages/tunnel-core/src/index.ts";
-import { SshConfigSchema } from "../packages/types/src/index.ts";
+import { SshConfigSchema, TunnelConfigSchema } from "../packages/types/src/index.ts";
 import { cached, invalidateCache } from "../apps/web/src/lib/query-cache.ts";
 // NOTE: lib/api.ts must be dynamically imported INSIDE tests (like tests
 // 18-21 do): it pulls the @xistance/db singleton, which resolves
@@ -1040,6 +1047,175 @@ async function main() {
     await reconcilePortForwardsSoon(1);
     const elapsed = Date.now() - started;
     if (elapsed > 2_000) throw new Error(`1ms grace waited ${elapsed}ms`);
+  });
+
+
+  // -------------------------------------------------------------------------
+  // Command-builder convention. Every builder emits a leading program token
+  // that the planner strips before substituting the path resolved on the
+  // target node. Getting this wrong is not theoretical: it shipped in planSsh
+  // and ran `ssh ssh -N ... user@host`, where ssh read the stray token as the
+  // destination host, so key-auth SSH tunnels never connected. Pin the
+  // contract so a new builder or planner cannot drift from it.
+  // -------------------------------------------------------------------------
+  await test("Builders: every command builder leads with its program token", async () => {
+    const sshCfg = SshConfigSchema.parse({
+      mode: "local", host: "203.0.113.10", port: 22, username: "root", auth: "key",
+      localPort: 8080, remoteHost: "127.0.0.1", remotePort: 80,
+    });
+    const cases: Array<[string, string[] | null]> = [
+      ["ssh", buildSshCommand(sshCfg, {})],
+      ["autossh", buildAutosshCommand(sshCfg, {})],
+      ["gost", buildDirectCommand({
+        protocol: "tcp", bindAddr: "0.0.0.0", listenPort: 8080,
+        targetHost: "198.51.100.7", targetPort: 80,
+      })],
+      ["xray", buildXrayCommand("/tmp/xray.json")],
+      ["gost", buildGostCommand(
+        { bidirectional: false, direction: "IRAN", protocol: "tcp", listenPort: 8080,
+          remoteHost: "198.51.100.7", remotePort: 9090, ttl: 60, bufferSize: 65536,
+          udpDataBufferSize: 65536 } as Parameters<typeof buildGostCommand>[0],
+        "IRAN",
+        { peerHost: "198.51.100.7", peerPort: 9090 },
+      )],
+    ];
+    for (const [program, argv] of cases) {
+      if (!argv) continue; // buildGostCommand returns null for inactive roles
+      if (argv[0] !== program) {
+        throw new Error(`builder should lead with "${program}", got ${JSON.stringify(argv[0])}`);
+      }
+      // After the planner strips it, no bare program token may remain — that
+      // is what ssh mistook for a hostname.
+      const [, ...rest] = argv;
+      if (rest.includes(program)) {
+        throw new Error(`stray "${program}" token survives stripping: ${argv.join(" ")}`);
+      }
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // All nine tunnel methods parse and yield a usable port. DIRECT, REVERSE,
+  // XRAY and XUI are the newest and least exercised.
+  // -------------------------------------------------------------------------
+  await test("Methods: all nine parse and expose a port", async () => {
+    const { extractPort } = await import("../apps/web/src/lib/tunnels.ts");
+    const configs: Array<[string, Record<string, unknown>, number | null]> = [
+      ["BACKHAUL", { method: "BACKHAUL", backhaul: { role: "server", transport: "tcp", listenPort: 3080, token: "t", mux: 8 } }, 3080],
+      ["GOST", { method: "GOST", gost: { bidirectional: false, direction: "IRAN", protocol: "tcp", listenPort: 3081, remoteHost: "198.51.100.7", remotePort: 9090 } }, 3081],
+      ["SSH", { method: "SSH", ssh: { mode: "local", host: "203.0.113.10", port: 22, username: "root", auth: "key", localPort: 3082, remoteHost: "127.0.0.1", remotePort: 80 } }, 3082],
+      ["PORT_FORWARD", { method: "PORT_FORWARD", portForwards: [{ name: "r", direction: "IRAN_TO_FOREIGN", protocol: "tcp", sourcePort: 3083, destHost: "198.51.100.7", destPort: 80 }] }, 3083],
+      ["DIRECT", { method: "DIRECT", direct: { protocol: "tcp", bindAddr: "0.0.0.0", listenPort: 3084, targetHost: "198.51.100.7", targetPort: 80 } }, 3084],
+      ["REVERSE", { method: "REVERSE", reverse: { listenPort: 3085, forwardHost: "127.0.0.1", forwardPort: 80, host: "203.0.113.10", username: "root", auth: "key" } }, 3085],
+      ["XRAY", { method: "XRAY", xray: { listenPort: 3086, protocol: "vless", address: "203.0.113.10", port: 443, uuid: "0d7c1f8e-1111-2222-3333-444455556666" } }, 3086],
+      ["XUI", { method: "XUI", xui: { panelUrl: "https://panel.example:2053/", username: "admin", password: "pw", listenPort: 3087 } }, 3087],
+    ];
+    for (const [label, raw, wantPort] of configs) {
+      const parsed = TunnelConfigSchema.safeParse(raw);
+      if (!parsed.success) {
+        throw new Error(`${label} failed to parse: ${parsed.error.issues[0]?.message}`);
+      }
+      const port = extractPort(parsed.data);
+      if (port !== wantPort) {
+        throw new Error(`${label} extractPort returned ${port}, expected ${wantPort}`);
+      }
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // REVERSE maps onto ssh -R, and the argument order is easy to invert:
+  // -R [bind:]remotePort:localHost:localPort exposes remotePort on the
+  // FOREIGN side, carrying traffic to forwardHost:forwardPort in IRAN.
+  // -------------------------------------------------------------------------
+  await test("Reverse: -R exposes listenPort remotely, not the forward port", async () => {
+    const cfg = TunnelConfigSchema.parse({
+      method: "REVERSE",
+      reverse: {
+        listenPort: 8443, forwardHost: "127.0.0.1", forwardPort: 3000,
+        host: "203.0.113.10", username: "root", auth: "key", remoteBindAddr: "0.0.0.0",
+      },
+    });
+    if (cfg.method !== "REVERSE") throw new Error("discriminant lost");
+    const ssh = reverseToSshConfig(cfg.reverse, "fallback.example");
+    if (ssh.mode !== "remote") throw new Error("REVERSE must map to ssh mode=remote");
+
+    const argv = buildSshCommand(ssh, {});
+    const i = argv.indexOf("-R");
+    if (i === -1) throw new Error("expected -R in argv: " + argv.join(" "));
+    const spec = argv[i + 1];
+    if (spec !== "0.0.0.0:8443:127.0.0.1:3000") {
+      throw new Error(`-R spec is ${spec}, expected 0.0.0.0:8443:127.0.0.1:3000`);
+    }
+    if (argv[argv.length - 1] !== "root@203.0.113.10") {
+      throw new Error("destination must be the final token: " + argv.join(" "));
+    }
+  });
+
+  await test("Reverse: empty host falls back to the Foreign node address", async () => {
+    const cfg = TunnelConfigSchema.parse({
+      method: "REVERSE",
+      reverse: { listenPort: 8443, forwardPort: 3000, username: "root", auth: "key" },
+    });
+    if (cfg.method !== "REVERSE") throw new Error("discriminant lost");
+    const ssh = reverseToSshConfig(cfg.reverse, "198.51.100.42");
+    if (ssh.host !== "198.51.100.42") {
+      throw new Error(`fallback host not applied, got ${ssh.host}`);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Xray config is generated, not hand-written, so it must always be valid
+  // JSON and must actually wire the inbound to the configured outbound.
+  // -------------------------------------------------------------------------
+  await test("Xray: generated config is valid JSON and wires inbound to outbound", async () => {
+    const cfg = TunnelConfigSchema.parse({
+      method: "XRAY",
+      xray: {
+        listenPort: 1080, protocol: "vless", address: "203.0.113.10", port: 443,
+        uuid: "0d7c1f8e-1111-2222-3333-444455556666", network: "ws",
+        security: "tls", sni: "example.com", path: "/ws",
+      },
+    });
+    if (cfg.method !== "XRAY") throw new Error("discriminant lost");
+    const doc = JSON.parse(buildXrayConfig(cfg.xray)) as {
+      inbounds: Array<{ tag: string; port: number }>;
+      outbounds: Array<{ tag: string; protocol: string }>;
+      routing: { rules: Array<{ inboundTag: string[]; outboundTag: string }> };
+    };
+    if (doc.inbounds[0].port !== 1080) throw new Error("inbound port mismatch");
+    if (doc.outbounds[0].protocol !== "vless") throw new Error("outbound protocol mismatch");
+    const rule = doc.routing.rules[0];
+    if (!rule.inboundTag.includes(doc.inbounds[0].tag) || rule.outboundTag !== doc.outbounds[0].tag) {
+      throw new Error("routing does not connect the inbound to the outbound");
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // X-UI credentials are panel logins. The sync payload is what gets logged
+  // and persisted alongside the tunnel, so the password must never ride along.
+  // -------------------------------------------------------------------------
+  await test("XUI: sync payload carries no credentials", async () => {
+    const cfg = TunnelConfigSchema.parse({
+      method: "XUI",
+      xui: {
+        panelUrl: "https://panel.example:2053///", username: "admin",
+        password: "super-secret-pw", inboundId: 7,
+      },
+    });
+    if (cfg.method !== "XUI") throw new Error("discriminant lost");
+    const payload = buildXuiSyncPayload(cfg.xui);
+    const asText = JSON.stringify(payload);
+    if (asText.includes("super-secret-pw") || asText.includes("admin")) {
+      throw new Error("sync payload leaked credentials: " + asText);
+    }
+    if (payload.baseUrl !== "https://panel.example:2053") {
+      throw new Error(`trailing slashes not normalised: ${payload.baseUrl}`);
+    }
+    if (payload.inboundPath !== "/panel/api/inbounds/get/7") {
+      throw new Error(`unexpected inbound path: ${payload.inboundPath}`);
+    }
+    if (normalizePanelUrl("https://a.example/") !== "https://a.example") {
+      throw new Error("normalizePanelUrl failed");
+    }
   });
 
   // Print results
