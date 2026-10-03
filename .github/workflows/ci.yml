@@ -21,7 +21,10 @@ jobs:
   verify:
     name: Lint · Typecheck · Version · Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Raised from 20: this job now builds two systemd base images, installs the
+    # release onto four containers, and runs the real browser measurement
+    # (157s on its own). 20 minutes was already close before any of that.
+    timeout-minutes: 45
     # The arm64 payload is uploaded by the native arm64 job, because an x64
     # runner cannot produce one -- Prisma's query engine is generated on the
     # target architecture. Two suites verify a real arm64 ARCHIVE (its
@@ -164,6 +167,19 @@ jobs:
       # different job on a different runner -- so the install has to be here too.
       - name: Install Chromium for Playwright
         run: npx playwright install --with-deps chromium
+
+      # test-rollback-drill and test-target-runs-shipped-payload need real target
+      # OSes: Ubuntu 22.04.5 and 24.04.5, systemd as PID 1, with the shipped
+      # release installed and serving. Until now those were containers a
+      # developer had built by hand, so they passed locally and failed here with
+      # "target is reachable: docker exec xtinst true failed". Runners DO have
+      # Docker; they just had nothing that created these two.
+      #
+      # Creating them turns a skip into a real execution. It does not make any
+      # suite more permissive: a suite still SKIPS when Docker is absent and
+      # still FAILS when Docker is present but a target is missing.
+      - name: Create the real target OSes
+        run: bash scripts/create-target-os.sh
 
       - name: Full local test suite
         run: npx tsx scripts/run-all-tests.ts
