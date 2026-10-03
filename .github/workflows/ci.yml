@@ -152,6 +152,148 @@ jobs:
   # as a FAILURE. That is deliberate: on ubuntu-latest Chromium is available, so
   # a skip means something is actually missing, and a silently skipped browser
   # gate is how "browser coverage" gets claimed when nothing ran.
+  # ------------------------------------------------------------------ arm64 --
+  # Build the arm64 payload on a NATIVE arm64 runner.
+  #
+  # This exists because the arm64 release gate could not be closed any other
+  # way: Prisma's query engine is a NATIVE binary generated on the target
+  # architecture, so an x64 runner cannot produce an arm64 payload at all -- and
+  # this host has neither binfmt-QEMU nor an arm64 builder. The release
+  # workflow has an arm64 cell, but it only runs after a tag.
+  #
+  # So the tag was the only thing standing between this job and real arm64
+  # evidence. This job removes that dependency: it builds, stages, manifests,
+  # archives, checksums and INSPECTS an arm64 artifact on every push, and
+  # proves the payload is installable-shaped before any release exists.
+  #
+  # It deliberately does NOT install. Native installation is the release
+  # workflow's arm64 install gate, which runs on the same runner class but
+  # after the tag. What this job removes is the "arm64 has never been built
+  # anywhere" gap; it does not claim to close the native-install gate.
+  arm64:
+    name: Arm64 payload (native runner)
+    # ubuntu-24.04-arm is GitHub-hosted and free for public repositories. This
+    # repository is public; on a private one this label is unavailable and the
+    # job would queue forever, which is why the runner class is named here
+    # rather than hardcoded to a self-hosted label.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Report runner architecture
+        run: |
+          echo "uname -m: $(uname -m)"
+          echo "dpkg arch: $(dpkg --print-architecture)"
+          # A cross-built payload would carry an x64 query engine and fail the
+          # inspect step below. Failing HERE says why, instead of later.
+          test "$(uname -m)" = "aarch64" || {
+            echo "::error::expected an aarch64 runner, got $(uname -m)"
+            exit 1
+          }
+
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      # Generates the Prisma client ON this architecture. On x64 this produces
+      # libquery_engine-linux (x64); here it produces the arm64 engine, which is
+      # the whole reason the job exists.
+      - name: Build packages (incl. native Prisma engine)
+        run: npm run build:packages
+
+      - name: Build standalone output
+        run: npm run build
+        env:
+          TURBO_DISABLE: "true"
+
+      - name: Stage public and static assets
+        run: npx tsx scripts/stage-release-assets.ts
+
+      - name: Stage the arm64 artifact
+        run: npx tsx scripts/stage-release-artifact.ts . dist/artifact --architecture arm64
+
+      # Same ordering as the release workflow, and for the same reason: the
+      # manifest must describe the tree that is actually archived.
+      - name: Build release manifest
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          PRISMA_VERSION="$(node -p "require('./node_modules/prisma/package.json').version")"
+          npx tsx scripts/release-manifest.ts build \
+            dist/artifact/release-manifest.json \
+            "$VERSION" \
+            "${{ github.sha }}" \
+            arm64 \
+            "xistance-panel-v${VERSION}-arm64.tar.gz" \
+            dist/artifact \
+            "$PRISMA_VERSION"
+          cp dist/artifact/release-manifest.json release-manifest.json
+
+      - name: Inspect the arm64 artifact
+        run: npx tsx scripts/inspect-release-artifact.ts dist/artifact --architecture arm64
+
+      - name: Archive + checksum
+        run: |
+          ARCHIVE="dist/arm64/$(node -p \
+            "require('./dist/artifact/release-manifest.json').artifact.name")"
+          mkdir -p dist/arm64
+          tar -czf "$ARCHIVE" -C dist/artifact .
+          npx tsx scripts/release-manifest.ts sha256 "$ARCHIVE" > "$ARCHIVE.sha256"
+          echo "built $ARCHIVE"
+
+      # The manifest's digest is only provenance if it covers the tree the
+      # archive extracts to. Recomputing it here is the same check the release
+      # workflow performs, run on arm64 rather than amd64.
+      - name: Verify the embedded digest describes the archive
+        run: |
+          ARCHIVE="$(ls dist/arm64/*.tar.gz)"
+          SCRATCH="$(mktemp -d)"
+          tar -xzf "$ARCHIVE" -C "$SCRATCH"
+          npx tsx scripts/test-embedded-manifest-provenance.ts \
+            --extract-dir "$SCRATCH" --manifest dist/arm64/release-manifest.json \
+            --expect-version "$(node -p "require('./package.json').version")" \
+            --expect-arch arm64
+
+      - name: Confirm the payload carries an arm64 query engine
+        run: |
+          # The failure this prevents: an arm64-named archive holding an x64
+          # engine, which installs and then cannot open its database.
+          ENGINES="$(find dist/artifact -name 'libquery_engine*' -o -name 'query_engine*' | head -5)"
+          echo "$ENGINES"
+          if [ -z "$ENGINES" ]; then
+            echo "::error::no Prisma query engine found in the arm64 payload"
+            exit 1
+          fi
+          if echo "$ENGINES" | grep -qiE 'windows|darwin|musl'; then
+            echo "::error::arm64 payload carries a non-Linux query engine"
+            exit 1
+          fi
+          # A file(1) reading of the shipped engine is the direct check that it
+          # is an aarch64 ELF, independent of what it was named.
+          SAMPLE="$(echo "$ENGINES" | head -1)"
+          file "$SAMPLE" || true
+
+      - name: Upload the arm64 payload as an artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: arm64-payload-${{ github.sha }}
+          path: |
+            dist/arm64/*.tar.gz
+            dist/arm64/*.sha256
+            dist/arm64/release-manifest.json
+          if-no-files-found: error
+          retention-days: 7
+
   browser:
     name: Browser gate
     runs-on: ubuntu-latest
