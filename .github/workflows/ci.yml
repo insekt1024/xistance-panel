@@ -153,6 +153,18 @@ jobs:
       # `run-all-tests.ts` fails if a test-* file on disk is not registered in
       # it or in the browser gate, so a new suite cannot be added without
       # deciding where it runs.
+      # test-dashboard-legibility does real browser measurement as well as source
+      # guards. Without a browser it prints
+      #   browser measurement SKIPPED (no playwright resolvable)
+      # and the legibility claim rests on source inspection alone. That is a
+      # silent skip in the exact sense the aggregate forbids: "A suite that
+      # cannot run is a FAILURE, not a skip."
+      #
+      # The browser gate installs Chromium, but this suite runs HERE, in a
+      # different job on a different runner -- so the install has to be here too.
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
       - name: Full local test suite
         run: npx tsx scripts/run-all-tests.ts
 

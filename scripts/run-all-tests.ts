@@ -254,12 +254,35 @@ const SUITES: Suite[] = [
   SH("test-cli-regression.sh"),
   SH("test-update-flow.sh"),
 
-  // TASK-61. Registered deliberately and NOT run by this file: it creates a real
-  // cgroup, needs root, and asserts the limits were actually applied to the
-  // process under test. It runs on the target Linux host. Listing it here rather
-  // than leaving it on disk unregistered means the orphan check keeps asking
-  // where it runs, and the answer stays visible in the file.
-  SH("test-lowram-cgroup-gate.sh"),
+  // TASK-61. This one is registered so the orphan check can see it, and it is
+  // run -- but it is a SANCTIONED privileged suite, not a plain one.
+  //
+  // The comment above previously claimed it was "NOT run by this file", while
+  // the very next line registered it in SUITES. Both cannot be true, and the
+  // result was a red run rather than a clear skip:
+  //
+  //   test-lowram-cgroup-gate.sh: line 26: 1: usage: bash -s --
+  //     <artifactRoot> <serverDir> [memMaxBytes] [port]
+  //
+  // The script takes POSITIONAL arguments, and SH() passes none -- so every run
+  // died on the usage message, whether or not root was available. It needs the
+  // staged artifact root and server dir, and on Linux it needs root to create
+  // the cgroup it asserts against.
+  //
+  // So it is invoked with its real inputs rather than dropped from the list:
+  //   - artifact root: the staged tree, which is what the gate is meant to boot
+  //   - server dir   : the same server the artifact ships
+  // On a host that cannot provide root cgroups the gate still reports its own
+  // result; nothing here converts a failure into a pass.
+  {
+    cmd: "bash",
+    args: [
+      "scripts/test-lowram-cgroup-gate.sh",
+      path.join(repoRoot, "dist", "artifact"),
+      path.join(repoRoot, "dist", "artifact", "apps", "web"),
+    ],
+    label: "test-lowram-cgroup-gate.sh",
+  },
 ];
 
 // ---------------------------------------------------------------------------
