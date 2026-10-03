@@ -90,18 +90,33 @@ No `v1.2.0` tag, no commit, no push. The worktree is intentionally dirty
    `FrpProxySchema`. The panel's own generated config is accepted by
    `frpc verify` on the target OS, and five mutation-proven gates pin it.
 
-6. **CI cannot supply two things its suites need** (TASK-138). Six live-run
-   defects were found and fixed — see `task-138-first-live-ci-run-found-six-defects.md`
-   — leaving 8 suites red for two reasons that are missing CI *infrastructure*,
-   not product defects:
-   - `xtinst`/`xt24` are local development containers. Nothing in `ci.yml`
-     creates them, so `test-rollback-drill` and `test-target-runs-shipped-payload`
-     find Docker (available on runners) but no targets.
-   - No `dist/arm64` stage can exist on an x64 runner, because Prisma's query
-     engine is a native binary generated on the target architecture.
+6. **Live CI is at 73/76** (TASK-141, run `37160530198`). It went 68 → 72 → 73
+   across three fixes, all found by reading CI logs rather than trusting a green
+   local run:
+   - `test-release-assets`, `test-protected-routes` required a `TMPDIR` that
+     GitHub runners do not set. Now falls back to `os.tmpdir()`.
+   - `test-real-archive-verify` and `test-embedded-manifest-provenance` verify a
+     real **arm64 archive**, which an x64 runner cannot produce. The arm64 job now
+     uploads its payload and the verify job downloads it — so the arm64
+     capability unblocked these instead of blocking them.
+   - `test-dashboard-legibility` resolved playwright only under Windows paths,
+     printed `browser measurement SKIPPED` and **exited green**. That is a skip
+     reported as a pass — the exact thing the aggregate forbids. Fixed in six
+     suites; the legibility suite now takes **157.3s in CI instead of 0.4s**.
 
-   **No skip was added for either.** `run-all-tests.ts` states: "A suite that
-   cannot run is a FAILURE, not a skip. Silent skips are how coverage gets
+   **Three suites remain red, all for missing infrastructure rather than
+   product defects:**
+   - `test-rollback-drill` and `test-target-runs-shipped-payload` need
+     `xtinst`/`xt24`, which are local development containers. Nothing in
+     `ci.yml` creates them.
+   - `test-lowram-cgroup-gate` creates a real cgroup and needs root. It is now
+     invoked with its real positional arguments (it previously died on its own
+     usage line while its comment claimed it was not run at all). **Its
+     privileged Linux invocation is still unverified** — the command to run it
+     on the target was blocked and not retried.
+
+   **No skip was added for any of them.** `run-all-tests.ts` states: "A suite
+   that cannot run is a FAILURE, not a skip. Silent skips are how coverage gets
    claimed when nothing executed." Two fixes were proposed to the maintainer and
    the question was cancelled, so the choice was not made unilaterally. Until it
    is, CI is red by design rather than green by omission.
