@@ -76,6 +76,22 @@ No `v1.2.0` tag, no commit, no push. The worktree is intentionally dirty
    `FrpProxySchema`. The panel's own generated config is accepted by
    `frpc verify` on the target OS, and five mutation-proven gates pin it.
 
+6. **CI cannot supply two things its suites need** (TASK-138). Six live-run
+   defects were found and fixed — see `task-138-first-live-ci-run-found-six-defects.md`
+   — leaving 8 suites red for two reasons that are missing CI *infrastructure*,
+   not product defects:
+   - `xtinst`/`xt24` are local development containers. Nothing in `ci.yml`
+     creates them, so `test-rollback-drill` and `test-target-runs-shipped-payload`
+     find Docker (available on runners) but no targets.
+   - No `dist/arm64` stage can exist on an x64 runner, because Prisma's query
+     engine is a native binary generated on the target architecture.
+
+   **No skip was added for either.** `run-all-tests.ts` states: "A suite that
+   cannot run is a FAILURE, not a skip. Silent skips are how coverage gets
+   claimed when nothing executed." Two fixes were proposed to the maintainer and
+   the question was cancelled, so the choice was not made unilaterally. Until it
+   is, CI is red by design rather than green by omission.
+
 ## Two id namespaces: PRD tasks and agent-loop findings
 
 `reconcile-task-ledger.py --check` reports `task files: 73 / evidence-backed: 73`
