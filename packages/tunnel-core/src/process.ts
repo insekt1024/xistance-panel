@@ -25,6 +25,59 @@ export interface ProcessSpec {
   envFile?: string;
   /** auto-respawn on unexpected exit (child-process mode only) */
   autorestart?: boolean;
+  /**
+   * Bounded respawn policy for child-process mode. All fields are optional and
+   * clamped; nothing here can produce an unbounded or zero-length delay.
+   */
+  retry?: RetryPolicy;
+}
+
+/**
+ * Respawn policy. Every value is bounded at construction so a misconfigured
+ * policy can neither spin nor sleep for hours.
+ */
+export interface RetryPolicy {
+  /** first backoff delay in ms (default 2000) */
+  baseDelayMs?: number;
+  /** ceiling for the exponential backoff in ms (default 30000) */
+  maxDelayMs?: number;
+  /**
+   * give up after this many consecutive failures (default 10). `null` retries
+   * forever, which is only appropriate when a supervisor such as systemd is
+   * also watching.
+   */
+  maxAttempts?: number | null;
+  /** window after which the failure streak resets in ms (default 60000) */
+  resetAfterMs?: number;
+}
+
+const RETRY_DEFAULTS = {
+  baseDelayMs: 2_000,
+  maxDelayMs: 30_000,
+  maxAttempts: 10,
+  resetAfterMs: 60_000,
+} as const;
+
+/** Clamp a policy into safe bounds. Never throws, never returns 0 or Infinity. */
+export type ClampedRetryPolicy = Required<Omit<RetryPolicy, "maxAttempts">> & { maxAttempts: number | null };
+
+export function clampRetryPolicy(policy: RetryPolicy | undefined): ClampedRetryPolicy {
+  const raw = policy ?? {};
+  const clampDelay = (value: number | undefined, fallback: number, ceiling: number): number => {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return fallback;
+    return Math.min(Math.max(Math.floor(value), 100), ceiling);
+  };
+  const attempts = raw.maxAttempts === null
+    ? null
+    : typeof raw.maxAttempts === "number" && Number.isFinite(raw.maxAttempts)
+      ? Math.max(1, Math.min(Math.floor(raw.maxAttempts), 1_000))
+      : RETRY_DEFAULTS.maxAttempts;
+  return {
+    baseDelayMs: clampDelay(raw.baseDelayMs, RETRY_DEFAULTS.baseDelayMs, 60_000),
+    maxDelayMs: clampDelay(raw.maxDelayMs, RETRY_DEFAULTS.maxDelayMs, 600_000),
+    maxAttempts: attempts,
+    resetAfterMs: clampDelay(raw.resetAfterMs, RETRY_DEFAULTS.resetAfterMs, 3_600_000),
+  };
 }
 
 export interface ProcessHandle {
@@ -40,8 +93,26 @@ export interface ProcessHandle {
   onLine?: ((line: string) => void) | null;
   /** recent buffered lines (child-process mode) */
   recentLines?: () => string[];
+  /** bounded retry state for diagnostics (child-process mode) */
+  retryState?: () => { attempts: number; lastDelayMs: number; nextDelayMs: number | null; exhausted: boolean };
   dispose(): Promise<void>;
 }
+
+/** A scheduled callback, opaque so tests can supply a fake clock. */
+export type RetryTimer = unknown;
+
+/** Injection seam used by ChildProcessHandle to schedule retries. */
+export interface RetryScheduler {
+  setTimeout(fn: () => void, ms: number): RetryTimer;
+  clearTimeout(timer: RetryTimer): void;
+  now(): number;
+}
+
+const defaultScheduler: RetryScheduler = {
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (timer) => clearTimeout(timer as NodeJS.Timeout),
+  now: () => Date.now(),
+};
 
 function shellQuote(s: string): string {
   return `'${s.replaceAll("'", `'\\''`)}'`;
@@ -118,9 +189,12 @@ export class SystemdProcessHandle implements ProcessHandle {
     // 0600: the unit can carry secrets (SSHPASS) in Environment= lines,
     // and the default umask would leave them world-readable on the node.
     await this.runner.writeFile(unitPath, buildUnit(this.spec), 0o600);
-    await this.systemctl("daemon-reload");
-    await this.systemctl("enable");
-    await this.systemctl("start");
+    for (const sub of ["daemon-reload", "enable", "start"] as const) {
+      const r = await this.systemctl(sub);
+      if (r.exitCode !== 0) {
+        throw new Error("systemctl " + sub + " " + this.unit() + " failed: " + (r.stderr.trim() || ("exit " + r.exitCode)));
+      }
+    }
   }
 
   async stop(): Promise<void> {
@@ -183,24 +257,121 @@ export class ChildProcessHandle implements ProcessHandle {
   private logStream: import("node:fs").WriteStream | null = null;
   private tail: string[] = [];
   private lastExitAt = 0;
-  private respawnDelay = 0;
-  private respawnTimer: NodeJS.Timeout | null = null;
+  private retryDelay = 0;
+  private respawnTimer: RetryTimer | null = null;
+  /** consecutive failed starts; reset after a successful run */
+  private retryAttempts = 0;
+  private lastRetryDelay = 0;
+  /** set once the attempt ceiling is reached; cleared by an explicit start() */
+  private exhausted = false;
+  private readonly policy: ClampedRetryPolicy;
+  /**
+   * Serialises start(). Two concurrent starts both used to pass the
+   * `if (this.child) return` guard while the child was momentarily null (just
+   * after an exit), and both went on to spawn — leaving a process nothing
+   * tracked and nothing could kill.
+   */
+  private startInFlight: Promise<void> | null = null;
   onLine: ((line: string) => void) | null = null;
 
-  constructor(private readonly spec: ProcessSpec) {}
+  /**
+   * Injection seam for the retry scheduler.
+   *
+   * Without it, proving "no tight loop" and "delay never exceeds the ceiling"
+   * means either waiting 30 real seconds per case or reading the code and
+   * trusting it. A deterministic scheduler makes both observable.
+   */
+  constructor(
+    private readonly spec: ProcessSpec,
+    private readonly scheduler: RetryScheduler = defaultScheduler,
+  ) {
+    // Clamped once, here: a field initialiser would run before `spec` is
+    // assigned and throw on every construction.
+    this.policy = clampRetryPolicy(spec.retry);
+  }
+
+  /** Observable retry state for diagnostics; never contains secrets. */
+  retryState(): { attempts: number; lastDelayMs: number; nextDelayMs: number | null; exhausted: boolean } {
+    return {
+      attempts: this.retryAttempts,
+      lastDelayMs: this.lastRetryDelay,
+      nextDelayMs: this.exhausted ? null : this.retryDelay,
+      exhausted: this.exhausted,
+    };
+  }
 
   recentLines(): string[] {
     return this.tail;
   }
 
   async start(): Promise<void> {
-    if (this.child) return;
-    if (this.respawnTimer) {
-      clearTimeout(this.respawnTimer);
-      this.respawnTimer = null;
+    await this.startSerialized(false);
+  }
+
+  /**
+   * The single entry point for spawning, shared by explicit starts and respawns.
+   *
+   * Serialised: a second caller waits for the in-flight start instead of
+   * racing it. Both used to observe `child === null` right after an exit and
+   * both spawned, orphaning a process nothing tracked.
+   */
+  private async startSerialized(fromRespawn: boolean): Promise<void> {
+    if (this.startInFlight) {
+      await this.startInFlight;
+      // A respawn is not a fresh intent: joining it is correct, and returning
+      // here is what we want. An explicit start(), however, is a deliberate
+      // "start now, treat this as a new attempt" and MUST fall through so the
+      // backoff streak resets -- otherwise an operator pressing start after a
+      // crash loop joined the in-flight respawn and the streak never cleared.
+      if (fromRespawn) return;
     }
+    // An explicit start() is a deliberate "start now, treat this as a new
+    // attempt", and it MUST clear the backoff even when a child is already
+    // running.
+    //
+    // The streak lives in startOnce, which this guard used to skip entirely
+    // whenever `this.child` was non-null. A crash-looping command has a child
+    // almost always, so an operator pressing start during a crash loop joined
+    // the in-flight respawn, startOnce never ran, and the streak never reset --
+    // the next failure continued from the ceiling. The comment above claimed
+    // this was handled; it was the guard, not the fall-through, that prevented
+    // it.
+    if (this.child) {
+      if (!fromRespawn) this.resetStreak();
+      return;
+    }
+    const run = this.startOnce(fromRespawn);
+    this.startInFlight = run;
+    try {
+      await run;
+    } finally {
+      this.startInFlight = null;
+    }
+  }
+
+  /**
+   * Clear the backoff streak: this is a fresh intent, so the next failure
+   * schedules from the base delay rather than continuing to climb.
+   *
+   * Named rather than inlined at each call site because there are now two paths
+   * that must mean the same thing -- an explicit start with a child already
+   * running (which returns early without spawning) and an explicit start that
+   * goes on to spawn.
+   */
+  private resetStreak(): void {
+    this.exhausted = false;
+    this.retryDelay = 0;
+    this.retryAttempts = 0;
+  }
+
+  private async startOnce(fromRespawn = false): Promise<void> {
+    this.cancelPendingRetry();
     this.manualStop = false;
-    this.respawnDelay = 0;
+    // A respawn must NOT clear the backoff: doing so made every retry start
+    // from the base delay again, so a crash-looping command was respawned
+    // forever at 2s with no escalation and no exhaustion. Only an explicit
+    // start() is a fresh intent and resets the streak.
+    if (!fromRespawn) this.resetStreak();
     await fsp.mkdir(this.spec.workdir ?? this.spec.dataDir, { recursive: true });
     const logPath = path.join(this.spec.dataDir, "logs", `${this.spec.id}.log`);
     await fsp.mkdir(path.dirname(logPath), { recursive: true });
@@ -233,14 +404,7 @@ export class ChildProcessHandle implements ProcessHandle {
       // (2s -> 4s -> 8s ... capped at 30s) so a crash-looping command doesn't
       // hammer the system.
       if (!this.manualStop && this.spec.autorestart !== false) {
-        const now = Date.now();
-        if (this.lastExitAt && now - this.lastExitAt < 60_000) {
-          this.respawnDelay = this.respawnDelay ? Math.min(this.respawnDelay * 2, 30_000) : 2_000;
-        } else {
-          this.respawnDelay = 2_000;
-        }
-        this.lastExitAt = now;
-        this.respawnTimer = setTimeout(() => void this.start(), this.respawnDelay);
+        this.scheduleRetry();
       }
       void code;
     });
@@ -249,12 +413,67 @@ export class ChildProcessHandle implements ProcessHandle {
     });
   }
 
-  async stop(): Promise<void> {
-    this.manualStop = true;
-    if (this.respawnTimer) {
-      clearTimeout(this.respawnTimer);
+  /** Cancel a pending retry. Safe to call when nothing is scheduled. */
+  private cancelPendingRetry(): void {
+    if (this.respawnTimer !== null) {
+      this.scheduler.clearTimeout(this.respawnTimer);
       this.respawnTimer = null;
     }
+  }
+
+  /**
+   * Schedule the next respawn under the bounded policy.
+   *
+   * Guarantees:
+   *  - at most one pending timer (a second call replaces the first);
+   *  - the delay is always within [base, max], never 0 and never Infinity;
+   *  - the attempt ceiling is honoured, after which the handle reports itself
+   *    exhausted instead of retrying forever;
+   *  - a successful run resets the streak, so a tunnel that has been up for
+   *    hours and then drops starts again from the base delay.
+   */
+  private scheduleRetry(): void {
+    const policy = this.policy;
+    const now = this.scheduler.now();
+
+    // A long-enough gap means the process was healthy, so the streak resets.
+    if (this.lastExitAt && now - this.lastExitAt > policy.resetAfterMs) {
+      this.retryAttempts = 0;
+    }
+    this.lastExitAt = now;
+
+    if (policy.maxAttempts !== null && this.retryAttempts >= policy.maxAttempts) {
+      this.exhausted = true;
+      this.retryAttempts = 0;
+      this.retryDelay = 0;
+      this.cancelPendingRetry();
+      return;
+    }
+
+    this.retryAttempts += 1;
+    const raw = this.retryDelay === 0
+      ? policy.baseDelayMs
+      : Math.min(this.retryDelay * 2, policy.maxDelayMs);
+    const delay = Math.min(Math.max(raw, policy.baseDelayMs), policy.maxDelayMs);
+    this.retryDelay = delay;
+    this.lastRetryDelay = delay;
+
+    // Replace rather than stack: two live timers would mean two respawns.
+    this.cancelPendingRetry();
+    this.respawnTimer = this.scheduler.setTimeout(() => {
+      // Clear before starting so a start() inside the callback cannot cancel a
+      // timer that has already fired, and so a concurrent stop() sees no
+      // pending retry.
+      this.respawnTimer = null;
+      void this.startSerialized(true);
+    }, delay);
+  }
+
+  async stop(): Promise<void> {
+    this.manualStop = true;
+    this.cancelPendingRetry();
+    this.retryAttempts = 0;
+    this.retryDelay = 0;
     const c = this.child;
     if (!c) return;
     const exited = new Promise<void>((resolve) => c.once("exit", () => resolve()));
@@ -285,10 +504,9 @@ export class ChildProcessHandle implements ProcessHandle {
 
   async dispose(): Promise<void> {
     this.manualStop = true;
-    if (this.respawnTimer) {
-      clearTimeout(this.respawnTimer);
-      this.respawnTimer = null;
-    }
+    this.cancelPendingRetry();
+    this.retryAttempts = 0;
+    this.retryDelay = 0;
     const c = this.child;
     if (c) {
       const exited = new Promise<void>((resolve) => c.once("exit", () => resolve()));

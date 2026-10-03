@@ -10,7 +10,11 @@ import type { ReverseConfig, SshConfig } from "@xistance/types";
 export function reverseToSshConfig(cfg: ReverseConfig, fallbackHost: string): SshConfig {
   return {
     mode: "remote",
-    host: cfg.host.trim() ? cfg.host : fallbackHost,
+    // `cfg.host.trim()` decides WHETHER to fall back, but the untrimmed value
+    // used to be returned -- so " 203.0.113.9 " passed the truthiness test
+    // and became the ssh destination with its spaces still attached. Use the
+    // trimmed value for both.
+    host: cfg.host.trim() ? cfg.host.trim() : fallbackHost,
     port: cfg.port,
     username: cfg.username,
     auth: cfg.auth,

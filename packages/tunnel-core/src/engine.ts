@@ -20,10 +20,23 @@ import { buildFrpPair } from "./config/frp.js";
 import { buildGostCommand } from "./config/gost.js";
 import { buildDirectCommand } from "./config/direct.js";
 import { reverseToSshConfig } from "./config/reverse.js";
+import { classifyXuiSync, syncXui, type XuiSyncResult } from "./xui-sync.js";
+import {
+  probeReverseReachability,
+  type ReverseReach,
+} from "./reachability.js";
 import { buildXrayConfig } from "./config/xray.js";
 import { normalizePanelUrl } from "./config/xui.js";
 import { buildAutosshCommand, buildSshCommand } from "./config/ssh.js";
 import { ProcessManager, type ProcessHandle, type ProcessSpec } from "./process.js";
+import { buildDiagnostic, diagnosticStore, type TunnelDiagnostic } from "./diagnostics.js";
+import { BoundedCache, type Clock } from "./bounded.js";
+import {
+  buildPreflightScript,
+  classifyPreflightLine,
+  preflightBin,
+  preflightError,
+} from "./preflight.js";
 import { LocalRunner, RemoteRunner, isLoopback, type Runner } from "./runner.js";
 import { EventBus } from "./eventbus.js";
 import fs from "node:fs";
@@ -67,6 +80,34 @@ export interface EngineOptions {
   forceNodeFallback?: boolean;
   /** how to launch the port-forward worker as a process */
   forwarderRunner?: { prefix: string[]; script: string };
+  /**
+   * Test seam: override how a process handle is produced.
+   *
+   * The engine's lifecycle guarantees (idempotent stop, cleanup after a failed
+   * deploy, bounded dispose) are only provable against a handle that can be
+   * scripted to fail, hang or report a chosen state. Without this the only way
+   * to exercise them is a real spawn, which cannot be made to fail on demand.
+   */
+  createProcessHandle?: (spec: ProcessSpec) => Promise<ProcessHandle> | ProcessHandle;
+  /**
+   * Test seam: overrides for the XUI panel verification.
+   *
+   * `planXui` performs a real HTTP check against the operator's 3X-UI panel.
+   * Without a seam, exercising the deploy path in a test means live DNS and
+   * live HTTP -- and a bounds regression in the retry policy turns the suite
+   * into a multi-minute hang rather than a failure. Same pattern as
+   * `createProcessHandle` and `clock`.
+   */
+  xuiSync?: (cfg: XuiConfig) => Promise<XuiSyncResult>;
+  /** Test seam: clock for the bounded caches.
+   *
+   * `status()` memoises for STATUS_CACHE_TTL and the per-process running answer
+   * for PROCESS_RUNNING_CACHE_TTL. Without an injectable clock, proving the
+   * expiry behaviour means sleeping for seconds of wall time in every run --
+   * and, worse, the alternative is to assert only the cached path, which is
+   * exactly the part that can report a dead tunnel as running.
+   */
+  clock?: Clock;
 }
 
 interface NodeCtx {
@@ -100,9 +141,43 @@ interface Runtime {
   processes: RunningProcess[];
   /** tunnel method — lets status() treat metadata-only (XUI) runtimes correctly */
   method: TunnelMethod;
+  /**
+   * REVERSE only: where to probe the remote side of the `ssh -R`, and what the
+   * operator asked for. Present because a live ssh process does not prove the
+   * remote port is reachable -- see reachability.ts.
+   */
+  reverseProbe?: { ctx: NodeCtx; listenPort: number; requestedAddress: string };
+  /**
+   * XUI only: the last verification result. XUI has no process, so there is
+   * nothing whose liveness proves the tunnel exists -- this field IS the proof,
+   * and its absence means "not verified", which must never read as running.
+   */
+  xuiVerification?: XuiSyncResult;
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Bound an async operation.
+ *
+ * A tunnel process handle talks to systemd (or a child process) and nothing
+ * guarantees it settles: a wedged SSH session or an unresponsive unit would
+ * otherwise hang the HTTP request that triggered the stop, and the operator
+ * would see a spinning button instead of an error.
+ */
+async function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 export class TunnelEngine {
   private readonly runtimes = new Map<string, Runtime>();
@@ -110,25 +185,98 @@ export class TunnelEngine {
   // `path: null` records a *negative* lookup (tool absent) so optional
   // tools are not re-probed on every deploy — each probe is an SSH
   // round-trip on a remote node.
-  private readonly systemBinCache = new Map<string, { at: number; path: string | null }>();
+  //
+  // Bounded (TASK-23): previously this was a plain Map that was only ever
+  // added to, so it grew with every distinct `<node>:<tool>` key probed for the
+  // process lifetime. The TTL alone did not bound it -- a long-lived panel
+  // probing many nodes and tools accumulated entries indefinitely.
+  private readonly systemBinCache: BoundedCache<string, string | null>;
   private static readonly SYSTEM_BIN_CACHE_TTL = 10 * 60_000;
+  private static readonly SYSTEM_BIN_CACHE_MAX = 500;
   readonly bus: EventBus;
 
   // Short-lived status memoisation: page polls and the sampler call status()
   // every few seconds; for remote nodes each check spawns an SSH session, so we
   // coalesce reads within a small window. Invalidated on lifecycle changes.
-  private readonly statusCache = new Map<string, { at: number; status: Status }>();
+  private readonly statusCache: BoundedCache<string, Status>;
   private static readonly STATUS_CACHE_TTL = 1_500;
+  private static readonly STATUS_CACHE_MAX = 1_000;
   // Per-process isRunning cache: avoids re-spawning SSH sessions for every poll.
   // Keyed by process handle unit name (one entry per process, not per tunnel:
   // a tunnel owns several processes, so tunnel id alone would collide).
   // Unit names embed the full tunnel UUID (see sanitizeUnit), so distinct
   // tunnels cannot poison each other's entries.
-  private readonly processRunningCache = new Map<string, { at: number; running: boolean }>();
+  private readonly processRunningCache: BoundedCache<string, boolean>;
+  /**
+   * REVERSE remote-listener observations. Deliberately short-lived: changing
+   * `GatewayPorts` on the Foreign host should be reflected without restarting
+   * the tunnel, so this must not hold a verdict for long.
+   */
+  private readonly reverseReachCache: BoundedCache<string, ReverseReach>;
+  /**
+   * XUI verification results, keyed by tunnel id. Held separately from
+   * `runtimes` because a failed verification must still be visible: a deploy
+   * that could not reach the panel produces no runtime entry to hang the
+   * status on.
+   */
+  private readonly xuiVerifications = new Map<string, XuiSyncResult>();
+  /**
+   * MUST be >= STATUS_CACHE_TTL.
+   *
+   * `status()` memoises its own answer for STATUS_CACHE_TTL, and each of those
+   * answers is derived from a processRunningCache entry. If the process cache
+   * outlives the status cache, then every time the status memo expires the
+   * recomputation re-reads a still-valid, already-stale `true` -- so a process
+   * that died keeps reporting `running` on EVERY poll, permanently. Measured
+   * with an injected clock: advancing 10s past the status TTL still returned
+   * "running", because the 3s process entry was refilled on each recompute.
+   *
+   * Only NEGATIVE answers are memoised (see computeStatus): a cached `true` is
+   * a hint that a process was alive, and processes die. That is what makes the
+   * invariant hold regardless of the relative TTLs -- there is no long-lived
+   * `true` for a recompute to re-read.
+   */
   private static readonly PROCESS_RUNNING_CACHE_TTL = 3_000;
+  private static readonly PROCESS_RUNNING_CACHE_MAX = 2_000;
+  /** Upper bound on stopping or disposing one tunnel process. */
+  private static readonly DISPOSE_TIMEOUT_MS = 15_000;
+  /**
+   * Upper bound on ONE isRunning() probe.
+   *
+   * `stop()` asks each process whether it is still up before deciding what to
+   * stop. For a remote node that probe is an SSH session, and a hung session
+   * answers nothing. The bound below used to apply only to the handle.stop()
+   * call inside disposeAll, so `stop()` itself could block forever on an
+   * unreachable host -- a real hang on a 1 vCPU VPS, and the panel's stop
+   * button would never come back. This bounds the probe itself.
+   *
+   * On timeout the process is treated as still running, which is the safe
+   * direction: a redundant stop is harmless, a skipped one orphans a process.
+   */
+  private static readonly IS_RUNNING_TIMEOUT_MS = 5_000;
 
   constructor(private readonly opts: EngineOptions) {
     this.bus = new EventBus();
+    this.systemBinCache = new BoundedCache({
+      max: TunnelEngine.SYSTEM_BIN_CACHE_MAX,
+      ttlMs: TunnelEngine.SYSTEM_BIN_CACHE_TTL,
+      clock: this.opts.clock,
+    });
+    this.statusCache = new BoundedCache({
+      max: TunnelEngine.STATUS_CACHE_MAX,
+      ttlMs: TunnelEngine.STATUS_CACHE_TTL,
+      clock: this.opts.clock,
+    });
+    this.processRunningCache = new BoundedCache({
+      max: TunnelEngine.PROCESS_RUNNING_CACHE_MAX,
+      ttlMs: TunnelEngine.PROCESS_RUNNING_CACHE_TTL,
+      clock: this.opts.clock,
+    });
+    this.reverseReachCache = new BoundedCache({
+      max: 500,
+      ttlMs: 30_000,
+      clock: this.opts.clock,
+    });
     this.loadPersistentIoStats();
   }
 
@@ -178,6 +326,16 @@ export class TunnelEngine {
     return m;
   }
 
+  /**
+   * Produce the process handle for a planned entry, honouring the test seam.
+   * Kept separate from mgrFor so the manager cache stays keyed by node.
+   */
+  private async createHandle(ctx: NodeCtx, spec: ProcessSpec): Promise<ProcessHandle> {
+    if (this.opts.createProcessHandle) return await this.opts.createProcessHandle(spec);
+    const mgr = await this.mgrFor(ctx);
+    return await mgr.create(spec);
+  }
+
   private binPath(ctx: NodeCtx, name: string): string {
     return path.join(ctx.binDir, name);
   }
@@ -191,20 +349,23 @@ export class TunnelEngine {
         `Required system tool "${name}" is missing on ${ctx.name}. ` +
           `Install it (Ubuntu/Debian: apt install ${name}) and retry.`,
       );
-    const hit = this.systemBinCache.get(key);
-    if (hit && Date.now() - hit.at < TunnelEngine.SYSTEM_BIN_CACHE_TTL) {
+    // `has`, not a truthiness test on the value: a cached NEGATIVE lookup is
+    // stored as null, and `if (hit)` would miss it and re-probe the node over
+    // SSH on every deploy -- exactly what this cache exists to prevent.
+    if (this.systemBinCache.has(key)) {
+      const hit = this.systemBinCache.get(key);
       // A cached negative from systemBinOptional (shared cache) must still
       // fail loudly here rather than leaking null into a command array.
-      if (hit.path === null) throw missing();
-      return hit.path;
+      if (hit === null || hit === undefined) throw missing();
+      return hit;
     }
     const res = await ctx.runner.run(["which", name]);
     const found = res.stdout.trim();
     if (res.exitCode !== 0 || !found) {
-      this.systemBinCache.set(key, { at: Date.now(), path: null });
+      this.systemBinCache.set(key, null);
       throw missing();
     }
-    this.systemBinCache.set(key, { at: Date.now(), path: found });
+    this.systemBinCache.set(key, found);
     return found;
   }
 
@@ -214,15 +375,15 @@ export class TunnelEngine {
    *  on every deploy. */
   private async systemBinOptional(ctx: NodeCtx, name: string): Promise<string | null> {
     const key = `${ctx.name}:${name}`;
-    const hit = this.systemBinCache.get(key);
-    if (hit && Date.now() - hit.at < TunnelEngine.SYSTEM_BIN_CACHE_TTL) return hit.path;
+    // Same reasoning as systemBinRequired: null is a real cached answer here.
+    if (this.systemBinCache.has(key)) return this.systemBinCache.get(key) ?? null;
     const res = await ctx.runner.run(["which", name]);
     const found = res.stdout.trim();
     if (res.exitCode !== 0 || !found) {
-      this.systemBinCache.set(key, { at: Date.now(), path: null });
+      this.systemBinCache.set(key, null);
       return null;
     }
-    this.systemBinCache.set(key, { at: Date.now(), path: found });
+    this.systemBinCache.set(key, found);
     return found;
   }
 
@@ -234,6 +395,7 @@ export class TunnelEngine {
     // orphan their systemd units while the map entry is overwritten.
     const prev = this.runtimes.get(spec.id);
     if (prev) {
+      this.xuiVerifications.delete(spec.id);
       await Promise.all(prev.processes.map((p) => p.handle.dispose()));
       this.runtimes.delete(spec.id);
     }
@@ -256,8 +418,7 @@ export class TunnelEngine {
           entry.files.map((f) => entry.ctx.runner.writeFile(f.path, f.content, f.mode)),
         );
       }
-      const mgr = await this.mgrFor(entry.ctx);
-      const handle = await mgr.create(entry.spec);
+      const handle = await this.createHandle(entry.ctx, entry.spec);
       procs.push({
         ctx: entry.ctx,
         handle,
@@ -265,10 +426,64 @@ export class TunnelEngine {
         startedAt: Date.now(),
       });
     }
-    // Parallelize process starts
-    await Promise.all(procs.map((p) => p.handle.start()));
-    this.runtimes.set(spec.id, { processes: procs, method: spec.method });
+    // Parallelize process starts. If any start fails, the ones that DID start
+    // are real processes on a real host and must be torn down: nothing in the
+    // map tracks them yet, so without this they run forever with no way to
+    // stop them from the panel.
+    const started: RunningProcess[] = [];
+    try {
+      for (const proc of procs) {
+        await proc.handle.start();
+        started.push(proc);
+      }
+    } catch (error) {
+      await this.disposeAll(started);
+      this.runtimes.delete(spec.id);
+      this.invalidateStatus(spec.id);
+      // Record WHY, sanitised. The message may come from a plan whose argv
+      // contained a decrypted secret, so only the classified, redacted form is
+      // retained -- never the raw error.
+      this.publishDiagnostic(spec.id, {
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+    // For REVERSE, remember where to check the remote listener. Liveness alone
+    // would report `running` even when the remote sshd bound the port to
+    // loopback because GatewayPorts is `no`, which is the single most
+    // misleading thing this panel could show for a reverse tunnel.
+    let reverseProbe: Runtime["reverseProbe"];
+    if (spec.method === "REVERSE" && spec.config.method === "REVERSE" && procs.length > 0) {
+      const sshCfg = reverseToSshConfig(spec.config.reverse, spec.serverNode?.host ?? "");
+      const ctx = this.ctxFor(spec.serverNode ?? spec.clientNode);
+      if (ctx && sshCfg.host) {
+        reverseProbe = {
+          ctx,
+          listenPort: sshCfg.remotePort,
+          requestedAddress: sshCfg.remoteBindAddr,
+        };
+      }
+    }
+    this.runtimes.set(spec.id, {
+      processes: procs,
+      method: spec.method,
+      reverseProbe,
+      xuiVerification: this.xuiVerifications.get(spec.id),
+    });
     this.invalidateStatus(spec.id);
+    // A successful deploy is itself a transition worth recording: it clears
+    // any prior error and resets the retry streak, so the UI stops offering a
+    // recovery action for a tunnel that is now healthy.
+    //
+    // EXCEPT for a metadata-only XUI tunnel. Its "deploy" is a panel sync that
+    // planXui already recorded, and it can record a failure: publishing an
+    // unconditional `running` here overwrote that classified reason, so the UI
+    // showed a healthy tunnel whose panel sync had in fact failed. The recorded
+    // outcome is the truth for this method, so keep it.
+    if (spec.config.method !== "XUI") {
+      this.publishDiagnostic(spec.id, { status: "running" });
+    }
   }
 
   // ---- lifecycle -----------------------------------------------------------
@@ -282,9 +497,70 @@ export class TunnelEngine {
 
   async stop(id: string): Promise<void> {
     const rt = this.runtimes.get(id);
-    if (!rt) return;
-    await Promise.all(rt.processes.map((p) => p.handle.stop()));
+    // A stop for an unknown tunnel is a no-op, which is what makes stop
+    // idempotent: the second call finds nothing tracked and does nothing.
+    if (!rt) {
+      this.invalidateStatus(id);
+      return;
+    }
+    // Idempotent stop: only processes that evidence says are still running are
+    // stopped. Re-issuing `systemctl stop` / a second SIGTERM for an already
+    // stopped unit is wasted work, and a stop button the operator can mash
+    // should not turn into a burst of remote commands.
+    const stillRunning: RunningProcess[] = [];
+    for (const proc of rt.processes) {
+      try {
+        // Bounded: a probe that never answers must not hold stop() open. The
+        // timeout is caught below and treated as "probably still running".
+        const running = await withTimeout(
+          proc.handle.isRunning(),
+          TunnelEngine.IS_RUNNING_TIMEOUT_MS,
+          `isRunning probe for ${proc.spec.id} exceeded ${TunnelEngine.IS_RUNNING_TIMEOUT_MS}ms`,
+        );
+        if (running) stillRunning.push(proc);
+      } catch {
+        // If the evidence is unavailable, assume it is running: skipping a
+        // real process would be worse than a redundant stop.
+        stillRunning.push(proc);
+      }
+    }
+    await this.disposeAll(stillRunning, "stop");
+    // An intentional stop is a clean terminal state, not a failure: it clears
+    // the error category so the UI does not keep showing a recovery action.
+    this.publishDiagnostic(id, { status: "stopped" });
     this.invalidateStatus(id);
+  }
+
+  /**
+   * Apply one teardown operation to every process, bounded and never throwing.
+   *
+   * A handle that hangs must not hang the request, and one that fails must not
+   * prevent the others from being cleaned up. Failures are reported, not
+   * swallowed, because a unit that could not be stopped is a real problem the
+   * operator needs to see.
+   */
+  private async disposeAll(
+    procs: RunningProcess[],
+    mode: "stop" | "dispose" = "dispose",
+    timeoutMs = TunnelEngine.DISPOSE_TIMEOUT_MS,
+  ): Promise<void> {
+    const errors: string[] = [];
+    await Promise.all(
+      procs.map(async (proc) => {
+        try {
+          await withTimeout(
+            mode === "stop" ? proc.handle.stop() : proc.handle.dispose(),
+            timeoutMs,
+            `tunnel process ${proc.spec.id} did not ${mode} within ${timeoutMs}ms`,
+          );
+        } catch (error) {
+          errors.push(error instanceof Error ? error.message : String(error));
+        }
+      }),
+    );
+    if (errors.length > 0) {
+      throw new Error(`cleanup failed for ${errors.length} tunnel process(es): ${errors.join("; ")}`);
+    }
   }
 
   async restart(id: string): Promise<void> {
@@ -304,8 +580,9 @@ export class TunnelEngine {
       const cacheKeys = rt.processes.map(
         (p) => p.spec.unitName || p.spec.id || String(p.constructor.name),
       );
-      await Promise.all(rt.processes.map((p) => p.handle.dispose()));
+      await this.disposeAll(rt.processes);
       this.runtimes.delete(id);
+      this.xuiVerifications.delete(id);
       for (const k of cacheKeys) this.processRunningCache.delete(k);
     }
     this.invalidateStatus(id);
@@ -323,6 +600,10 @@ export class TunnelEngine {
   /** Clear status and process-running caches for a tunnel. */
   private invalidateStatus(id: string): void {
     this.statusCache.delete(id);
+    // A restart or a re-deploy must re-probe the remote listener: the whole
+    // point of the cache is to avoid a shell round-trip per poll, not to pin a
+    // stale verdict across a lifecycle transition.
+    this.reverseReachCache.delete(id);
     // Invalidate per-process running cache for all processes in this runtime
     const rt = this.runtimes.get(id);
     if (rt) {
@@ -343,6 +624,16 @@ export class TunnelEngine {
 
   /** child-process handles that already have the engine log sink wired up */
   private readonly logSinks = new WeakSet<ProcessHandle>();
+
+  /**
+   * Bounded per-tunnel diagnostic history (TASK-22).
+   *
+   * Kept on the engine rather than in a module global so it shares the engine's
+   * lifetime and cannot leak across a restart. The cap is a count rather than a
+   * time window, because a quiet tunnel and a crash-looping one warrant
+   * different retention.
+   */
+  private readonly diagnostics = diagnosticStore(20);
   // Persistent I/O stats surviving engine restarts; loaded from .data/engine-stats.json
   private readonly persistentIoStats: Map<string, { at: number; bytesIn: number; bytesOut: number }> =
     new Map();
@@ -428,32 +719,116 @@ export class TunnelEngine {
     // means the last 3X-UI sync succeeded, so report running. Any other
     // method with zero processes is a mis-deploy, not a running tunnel.
     if (rt.processes.length === 0) {
-      return rt.method === "XUI" ? TunnelStatus.RUNNING : TunnelStatus.STOPPED;
+      if (rt.method !== "XUI") return TunnelStatus.STOPPED;
+      // XUI runs no process, so `running` has to come from a real panel check.
+      // With no recorded verification there is nothing to stand behind that
+      // claim -- report error rather than inventing health.
+      if (!rt.xuiVerification) return TunnelStatus.ERROR;
+      return classifyXuiSync(rt.xuiVerification);
     }
+    // A negative answer is authoritative and must be cached. A positive one is
+    // only a hint: a process can die between polls, so `true` is re-probed on
+    // every computeStatus rather than memoised. Without this, a process that
+    // died kept reporting `running` indefinitely -- the cached `true` was
+    // refreshed on each recompute, so it never expired. (Measured with an
+    // injected clock: 10s past the TTL still read "running".)
     const states = await Promise.all(rt.processes.map(async (p) => {
       const cacheKey = p.spec.unitName || p.spec.id || String(p.constructor.name);
+      // `false` is a real cached answer, so test presence rather than value.
       const cached = this.processRunningCache.get(cacheKey);
-      if (cached && Date.now() - cached.at < TunnelEngine.PROCESS_RUNNING_CACHE_TTL) {
-        return cached.running;
+      if (cached === false) return false;
+      // Bounded for the same reason as in stop(): this probe is an SSH session
+      // for a remote node, and an unanswered one would hang every status poll
+      // and every UI refresh. A timeout is treated as "not running", because
+      // the alternative is a panel that never loads.
+      let running = false;
+      try {
+        running = await withTimeout(
+          p.handle.isRunning(),
+          TunnelEngine.IS_RUNNING_TIMEOUT_MS,
+          `isRunning probe for ${p.spec.id} exceeded ${TunnelEngine.IS_RUNNING_TIMEOUT_MS}ms`,
+        );
+      } catch {
+        running = false;
       }
-      const running = await p.handle.isRunning();
-      this.processRunningCache.set(cacheKey, { at: Date.now(), running });
+      if (!running) this.processRunningCache.set(cacheKey, false);
+      else this.processRunningCache.delete(cacheKey);
       return running;
     }));
     const running = states.filter(Boolean).length;
     if (running === 0) return TunnelStatus.STOPPED;
     if (running < rt.processes.length) return TunnelStatus.DEGRADED;
+
+    // REVERSE: the process is alive and fully up, but that is not the same as
+    // the port being reachable. An `ssh -R` whose remote sshd has
+    // `GatewayPorts no` binds loopback and fails silently, so the honest status
+    // is `degraded` with an explanation rather than `running`.
+    if (rt.reverseProbe) {
+      const reach = await this.probeReverse(id, rt.reverseProbe);
+      if (!reach.reachable) {
+        this.publishDiagnostic(id, { status: "degraded", error: reach.reason });
+        return TunnelStatus.DEGRADED;
+      }
+    }
     return TunnelStatus.RUNNING;
+  }
+
+  /**
+   * Ask the Foreign node what address its listener actually ended up on.
+   *
+   * Best-effort by design: a probe failure (no `ss`, an unreachable node, a
+   * permission error) must NOT downgrade a working tunnel, because that would
+   * train operators to ignore `degraded`. Only a confident observation that the
+   * port is loopback-bound or not listening downgrades the status.
+   */
+  private async probeReverse(
+    id: string,
+    probe: { ctx: NodeCtx; listenPort: number; requestedAddress: string },
+  ): Promise<ReverseReach> {
+    const cached = this.reverseReachCache.get(id);
+    if (cached) return cached;
+    let bound: string | null = null;
+    let listening = false;
+    try {
+      // One shell round-trip. `ss -ltnH` prints "LISTEN 0 128 0.0.0.0:8080 0.0.0.0:*".
+      const res = await probe.ctx.runner.run([
+        "bash",
+        "-c",
+        `ss -ltnH 2>/dev/null | awk '{print $4}' | grep -E '[:.]${probe.listenPort}$' | head -n1`,
+      ]);
+      const line = (res.stdout ?? "").trim().split("\n")[0]?.trim() ?? "";
+      if (line) {
+        listening = true;
+        // Strip the :port suffix; keep [brackets] for IPv6.
+        const m = line.match(/^(.*):\d+$/);
+        bound = m ? m[1] : line;
+      }
+    } catch {
+      // Indeterminate. Report the requested address so the caller sees a
+      // reachable answer rather than inventing a fault.
+      return probeReverseReachability({
+        boundAddress: probe.requestedAddress,
+        requestedAddress: probe.requestedAddress,
+        listening: true,
+      });
+    }
+    const reach = probeReverseReachability({
+      boundAddress: bound,
+      requestedAddress: probe.requestedAddress,
+      listening,
+    });
+    // Only cache a definitive answer, and only for a short window: a
+    // GatewayPorts change should be picked up without a restart.
+    if (listening) this.reverseReachCache.set(id, reach);
+    return reach;
   }
 
   async status(id: string): Promise<Status> {
     const now = Date.now();
     const cached = this.statusCache.get(id);
-    if (cached && now - cached.at < TunnelEngine.STATUS_CACHE_TTL) {
-      return cached.status;
-    }
+    if (cached) return cached;
     const status = await this.computeStatus(id);
-    this.statusCache.set(id, { at: now, status });
+    this.statusCache.set(id, status);
     return status;
   }
 
@@ -523,6 +898,52 @@ export class TunnelEngine {
       out.push(...lines);
     }
     return out;
+  }
+
+  /**
+   * Record a lifecycle diagnostic for a tunnel (TASK-22).
+   *
+   * Only the sanitised payload is stored. The caller may pass the raw error --
+   * buildDiagnostic classifies and redacts it -- which is what keeps a command
+   * line containing a decrypted password out of the history, the API response
+   * and the SSE stream.
+   */
+  private publishDiagnostic(
+    id: string,
+    input: { status: string; error?: string | null; retryCount?: number; exhausted?: boolean },
+  ): TunnelDiagnostic {
+    const d = buildDiagnostic(input);
+    this.diagnostics.record(id, d);
+    return d;
+  }
+
+  /** The newest diagnostic for a tunnel, or null if it has never failed. */
+  getDiagnostic(id: string): TunnelDiagnostic | null {
+    return this.diagnostics.latest(id);
+  }
+
+  /** Bounded diagnostic history for a tunnel, oldest first. */
+  listDiagnostics(id: string): TunnelDiagnostic[] {
+    return this.diagnostics.list(id);
+  }
+
+  /**
+   * One-pass aggregate of every tracked tunnel's newest diagnostic.
+   *
+   * Bounded by the number of tunnels rather than by the history length, and
+   * carries no summary text, so it is safe to serve from a cached metrics
+   * response. A caller that would otherwise loop `getDiagnostic` per tunnel
+   * must use this instead: that loop is a per-request scan, which is exactly
+   * the unbounded collection this feature exists to avoid.
+   */
+  aggregateDiagnostics(): {
+    byState: Record<string, number>;
+    byErrorCategory: Record<string, number>;
+    retrying: number;
+    exhausted: number;
+    tracked: number;
+  } {
+    return this.diagnostics.aggregate();
   }
 
   /** Subscribe to live log lines for a tunnel. Returns an unsubscribe fn. */
@@ -624,21 +1045,15 @@ export class TunnelEngine {
       byCtx.set(ctx, list);
     }
     for (const [ctx, bins] of byCtx) {
-      const script = bins
-        .map((bin) => {
-          const abs = this.binPath(ctx, bin);
-          return `[ -e '${abs}' ] && echo "OK ${bin}" || echo "MISSING ${bin}"`;
-        })
-        .join("; ");
+      const script = buildPreflightScript(
+        bins.map((bin) => ({ bin, abs: this.binPath(ctx, bin) })),
+      );
       const res = await ctx.runner.run(["bash", "-c", script]);
       for (const line of res.stdout.split("\n")) {
-        if (!line.startsWith("MISSING ")) continue;
-        const bin = line.slice("MISSING ".length).trim();
-        const abs = this.binPath(ctx, bin);
-        throw new Error(
-          `Required binary "${bin}" is missing on ${ctx.name} (${abs}). ` +
-            `Run scripts/install.sh (or: xistance install --bin ${bin}) on the node to install it.`,
-        );
+        const outcome = classifyPreflightLine(line);
+        if (outcome === null || outcome === "ok") continue;
+        const bin = preflightBin(line) ?? "?";
+        throw preflightError(outcome, bin, this.binPath(ctx, bin), ctx.name);
       }
     }
   }
@@ -682,7 +1097,10 @@ export class TunnelEngine {
       const cfgPath = path.join(server.cfgDir, "config.toml");
       plan.push({
         ctx: server,
-        files: [{ path: cfgPath, content: buildBackhaulConfig(c, "server") }],
+        // 0600: the config embeds the shared `token`. The default 0644 made it
+        // world-readable, so any local user on a shared VPS could read the token
+        // and join the tunnel.
+        files: [{ path: cfgPath, content: buildBackhaulConfig(c, "server"), mode: 0o600 }],
         spec: processSpec(spec, "server", [this.binPath(server, "backhaul"), "-c", cfgPath], server),
       });
     }
@@ -691,7 +1109,7 @@ export class TunnelEngine {
       const cfgPath = path.join(client.cfgDir, "config.toml");
       plan.push({
         ctx: client,
-        files: [{ path: cfgPath, content: buildBackhaulConfig(c, "client") }],
+        files: [{ path: cfgPath, content: buildBackhaulConfig(c, "client"), mode: 0o600 }],
         spec: processSpec(spec, "client", [this.binPath(client, "backhaul"), "-c", cfgPath], client),
       });
     }
@@ -707,7 +1125,8 @@ export class TunnelEngine {
       const pair = buildFrpPair(cfg, spec.serverNode?.host ?? "");
       plan.push({
         ctx: server,
-        files: [{ path: cfgPath, content: pair.server }],
+        // 0600: frps.toml embeds the auth token.
+        files: [{ path: cfgPath, content: pair.server, mode: 0o600 }],
         spec: processSpec(spec, "server", [this.binPath(server, "frps"), "-c", cfgPath], server),
       });
     }
@@ -716,7 +1135,8 @@ export class TunnelEngine {
       const pair = buildFrpPair(cfg, spec.serverNode?.host ?? "");
       plan.push({
         ctx: client,
-        files: [{ path: cfgPath, content: pair.client }],
+        // 0600: frpc.toml embeds the auth token.
+        files: [{ path: cfgPath, content: pair.client, mode: 0o600 }],
         spec: processSpec(spec, "client", [this.binPath(client, "frpc"), "-c", cfgPath], client),
       });
     }
@@ -793,15 +1213,72 @@ export class TunnelEngine {
   }
 
   private async planXui(spec: TunnelDeploySpec, c: XuiConfig): Promise<PlanEntry[]> {
-    // Metadata-only: persist a sync pointer next to the tunnel so status and
-    // the /api/xui endpoints can report the last-verified inbound without
-    // keeping any process alive (matters on 512MB VPSes).
+    // Metadata-only: no process runs, so nothing here consumes memory on a
+    // 512MB VPS. But that is exactly why the verification below is load-
+    // bearing: with zero processes there is no liveness signal, and an
+    // unverified XUI tunnel used to be reported `running` purely because a
+    // deploy had been issued.
+    const result = await (this.opts.xuiSync ? this.opts.xuiSync(c) : syncXui(c));
+    // Recorded even on failure -- an error status with a reason is far more
+    // useful than a silent `running`.
+    this.xuiVerifications.set(spec.id, result);
+    this.invalidateStatus(spec.id);
+    if (!result.ok) {
+      this.publishDiagnostic(spec.id, {
+        status: classifyXuiSync(result) === "degraded" ? "degraded" : "error",
+        error: `${result.kind}: ${result.detail}`,
+      });
+    } else if (classifyXuiSync(result) === "running") {
+      // A verified, enabled inbound. This is the only XUI case that is running.
+      this.publishDiagnostic(spec.id, { status: "running" });
+    } else {
+      // TASK-136, second layer. The original code published `running` for BOTH
+      // ok cases -- a verified inbound, and a login that confirmed nothing.
+      //
+      // status() does NOT read this diagnostic for XUI (it computes the status
+      // from classifyXuiSync(rt.xuiVerification) in the zero-process branch), so
+      // changing this branch cannot move status(). What it DOES drive is the
+      // REASON: /api/tunnels does
+      //
+      //   const actualError = state is error|unknown|degraded
+      //     ? engine.getDiagnostic(id)?.summary ?? null : null;
+      //
+      // and the diagnostics panel renders the same summary. Publishing `running`
+      // here therefore left a correctly-`degraded` tunnel with an EMPTY reason --
+      // a warning badge with nothing telling the operator what to do.
+      //
+      // An earlier attempt at this fix was reverted because its mutation did not
+      // fail the status()-level gate. The reasoning about status() was right and
+      // the conclusion was wrong: the gate measured status(), which this branch
+      // does not drive. It is asserted at the layer it does drive.
+      this.publishDiagnostic(spec.id, {
+        status: "degraded",
+        error:
+          result.inbound.id === 0
+            ? "xui: the panel was reachable, but no inbound was configured to verify -- " +
+              "set an inbound id on this tunnel to confirm it is up"
+            : `xui: inbound ${result.inbound.id} is present on the panel but not enabled`,
+      });
+    }
+
+    // Persist a pointer (no credentials) so the UI can show what was last
+    // verified after a restart.
     const node = spec.clientNode ?? spec.serverNode;
     const ctx = this.ctxFor(node);
     if (ctx) {
       const cfgPath = path.join(ctx.cfgDir, "xui.json");
       const content = JSON.stringify(
-        { panelUrl: normalizePanelUrl(c.panelUrl), inboundId: c.inboundId ?? null, remark: c.remark ?? null, syncedAt: new Date().toISOString() },
+        {
+          panelUrl: normalizePanelUrl(c.panelUrl),
+          inboundId: c.inboundId ?? null,
+          remark: c.remark ?? null,
+          // The pointer records the OUTCOME, not just the config, so a restart
+          // can tell "never checked" from "checked and unhealthy".
+          lastResult: result.ok
+            ? { ok: true, inboundId: result.inbound.id, up: result.inbound.up, loginPath: result.loginPath }
+            : { ok: false, kind: result.kind, detail: result.detail },
+          syncedAt: new Date().toISOString(),
+        },
         null,
         2,
       );

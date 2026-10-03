@@ -2,6 +2,8 @@ import { execFile, spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
+import { assertSafeSshDestination } from "./config/ssh.js";
+
 // ---------------------------------------------------------------------------
 // Runner: a uniform interface over shell/fs operations, so the engine can drive
 // both the local panel host and remote nodes (over SSH) with identical code.
@@ -76,9 +78,48 @@ export class LocalRunner implements Runner {
     return { kill: () => child.kill("SIGTERM") };
   }
 
+  /**
+   * Write by rename, never in place.
+   *
+   * `fs.writeFile` opens with O_TRUNC, so a concurrent reader -- an xray or
+   * gost process re-reading its config, or a second deploy -- can observe the
+   * file between the truncate and the last write. For JSON that means a
+   * truncated document: a crash loop, or worse, a config that still parses but
+   * has lost its outbounds.
+   *
+   * Writing a sibling temp file and renaming it over the target makes the
+   * replacement atomic on POSIX and on Windows: a reader either sees the whole
+   * previous file or the whole new one, never a prefix of either.
+   */
   async writeFile(p: string, content: string, mode?: number): Promise<void> {
-    await fs.mkdir(path.dirname(p), { recursive: true });
-    await fs.writeFile(p, content, mode ? { mode } : undefined);
+    const dir = path.dirname(p);
+    await fs.mkdir(dir, { recursive: true });
+    // Same directory, so the rename stays on one filesystem and is therefore
+    // atomic. A temp file in os.tmpdir() could cross a mount point.
+    const tmp = path.join(dir, `.${path.basename(p)}.${process.pid}.${Date.now()}.tmp`);
+    try {
+      await fs.writeFile(tmp, content, mode ? { mode } : undefined);
+      // rename() replaces the target on POSIX. On Windows it fails if the
+      // target exists, so unlink first -- which reintroduces a window, hence
+      // the retry below that restores the previous file if the unlink wins.
+      await this.replaceFile(tmp, p);
+    } catch (e) {
+      await fs.rm(tmp, { force: true }).catch(() => undefined);
+      throw e;
+    }
+  }
+
+  /** Platform-correct atomic-ish replace. */
+  private async replaceFile(tmp: string, target: string): Promise<void> {
+    try {
+      await fs.rename(tmp, target);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== "EEXIST" && code !== "EPERM" && code !== "EACCES") throw e;
+      // Windows: rename will not clobber. Unlink and retry once.
+      await fs.rm(target, { force: true });
+      await fs.rename(tmp, target);
+    }
   }
 
   async readFile(p: string): Promise<string> {
@@ -153,6 +194,14 @@ export class RemoteRunner implements Runner {
   constructor(private readonly conn: SshConnection) {}
 
   private baseArgs(cmd: string): string[] {
+    // The destination token is `${username}@${host}`. ssh parses ANY argv token
+    // that begins with "-" as an OPTION before it ever looks for a destination,
+    // so a username of `-oProxyCommand=<cmd>` made ssh execute that command on
+    // the panel host. NodeConfigSchema now refuses such a username, but a
+    // stored node predating that fix — or any caller that constructs an
+    // SshConnection without going through the schema — must not reach ssh.
+    // Re-check here, at the point the token is built.
+    assertSafeSshDestination(this.conn.username, this.conn.host);
     // NOTE: BatchMode=yes must NOT be set for password auth — it disables
     // password/keyboard-interactive prompts, which breaks sshpass logins.
     // (Same rule as apps/web/app/api/nodes/[id]/test/route.ts.)
@@ -223,9 +272,22 @@ export class RemoteRunner implements Runner {
     // (the outer shell would swallow the script as $0/$1 instead of running it).
     const b64 = Buffer.from(content, "utf8").toString("base64");
     const target = shQuote(p);
-    const script = `echo ${b64} | base64 -d > ${target}` + (mode ? ` && chmod ${mode.toString(8)} ${target}` : "");
+    // Write to a sibling temp file and `mv` it into place. `> target` truncates
+    // the live config first, so a tunnel process reading it during the write
+    // sees a truncated JSON document. `mv` within one directory is a rename,
+    // so the swap is atomic and the previous config survives a mid-write
+    // failure. The temp name is quoted and lives in the same directory as the
+    // target so the rename cannot cross a filesystem.
+    const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
+    const modePart = mode ? ` && chmod ${mode.toString(8)} ${shQuote(tmp)}` : "";
+    const script =
+      `echo ${b64} | base64 -d > ${shQuote(tmp)}` +
+      modePart +
+      ` && mv -f ${shQuote(tmp)} ${target}`;
     const res = await this.runScript(script);
     if (res.exitCode !== 0) {
+      // Best-effort cleanup so a failed write does not litter the config dir.
+      await this.runScript(`rm -f ${shQuote(tmp)}`).catch(() => undefined);
       throw new Error(`Failed to write remote file ${p}: ${res.stderr}`);
     }
   }

@@ -13,7 +13,8 @@
     "users": "Users",
     "activity": "Activity",
     "webhooks": "Webhooks",
-    "settings": "Settings"
+    "settings": "Settings",
+    "accountMenu": "Account menu"
   },
   "common": {
     "save": "Save",
@@ -51,7 +52,9 @@
     "connected": "Connected",
     "disconnected": "Disconnected",
     "checkingConnection": "Checking connection…",
-    "lastChecked": "checked {time}"
+    "lastChecked": "checked {time}",
+    "emptyHint": "Nothing has been created yet.",
+    "logoutFailed": "Sign-out failed. You are still signed in."
   },
   "auth": {
     "signIn": "Sign in",
@@ -166,7 +169,9 @@
     "logLevelStderr": "stderr",
     "logWaiting": "Waiting for output…",
     "logNoMatch": "No matching lines",
-    "logLoadError": "Failed to load recent logs — the live stream may still connect."
+    "logLoadError": "Failed to load recent logs — the live stream may still connect.",
+    "loading": "Loading tunnels…",
+    "emptyHint": "Create a tunnel to expose a service through a node."
   },
   "methods": {
     "BACKHAUL": "Backhaul",
@@ -332,7 +337,9 @@
     "deleteConfirm": "Delete node \"{name}\"?",
     "deleted": "Node deleted",
     "saved": "Node saved",
-    "keepExistingKey": "Leave empty to keep existing key"
+    "keepExistingKey": "Leave empty to keep existing key",
+    "loading": "Loading nodes…",
+    "emptyHint": "Add a server to start tunneling."
   },
   "portForward": {
     "title": "Port Forwarding",
@@ -361,7 +368,9 @@
     "tcp": "TCP",
     "udp": "UDP",
     "fieldRequired": "{field} is required",
-    "invalidPort": "{field} must be between 1 and 65535"
+    "invalidPort": "{field} must be between 1 and 65535",
+    "loading": "Loading port forwarding rules…",
+    "emptyHint": "Add a rule to forward a local port to a node."
   },
   "tools": {
     "title": "Test Tools",
@@ -442,7 +451,12 @@
     "forbidden": "You don't have permission to view users.",
     "deleteConfirm": "Delete user \"{name}\"?",
     "deleted": "User deleted",
-    "saved": "User saved"
+    "saved": "User saved",
+    "loading": "Loading users…",
+    "emptyHint": "Add an operator account that can sign in to this panel.",
+    "activate": "Activate",
+    "deactivate": "Deactivate",
+    "deleteUser": "Delete {name}"
   },
   "userActivity": {
     "title": "User Activity",
@@ -459,7 +473,9 @@
     "ip": "IP",
     "system": "System",
     "empty": "No activity logs found",
-    "forbidden": "You don't have permission to view user activity."
+    "forbidden": "You don't have permission to view user activity.",
+    "loading": "Loading activity…",
+    "emptyHint": "Activity appears here as users act. Clear the filters to see more."
   },
   "role": {
     "SUPER_ADMIN": "Super admin",
@@ -489,7 +505,9 @@
     "target": "Target",
     "ip": "IP",
     "system": "System",
-    "empty": "No audit logs yet"
+    "empty": "No audit logs yet",
+    "loading": "Loading audit log…",
+    "emptyHint": "Audit entries appear here as changes are made."
   },
   "install": {
     "title": "Installation",
@@ -507,6 +525,7 @@
     "closeDialog": "Close any open dialog"
   },
   "search": {
+    "title": "Search tunnels, nodes and users",
     "placeholder": "Search tunnels, nodes, users…",
     "description": "Search across tunnels, nodes and users",
     "noResults": "No results found",
@@ -517,5 +536,82 @@
     "navigate": "navigate",
     "select": "select",
     "resultsCount": "{count, plural, one {# result} other {# results}}"
+  },
+  "diagnostics": {
+    "title": "Diagnostics",
+    "panelHealth": "Panel health",
+    "nodeConnectivity": "Node connectivity",
+    "processState": "Process state",
+    "protocolProbe": "Protocol probe",
+    "lastTransition": "Last transition",
+    "retryCount": "Retries",
+    "errorCategory": "Error category",
+    "nextAction": "Suggested action",
+    "noErrors": "No errors recorded",
+    "history": "Recent diagnostics",
+    "exhausted": "Automatic recovery stopped",
+    "action": {
+      "none": "No action needed",
+      "wait": "Wait for the next automatic retry",
+      "retry": "Retry now",
+      "restart": "Restart the tunnel",
+      "recheck": "Recheck the node, then restart",
+      "fix_config": "Fix the tunnel configuration"
+    },
+    "category": {
+      "unreachable": "Node unreachable",
+      "permission": "Permission denied",
+      "resource": "Out of memory or disk",
+      "missing_binary": "Tunnel binary missing",
+      "configuration": "Invalid configuration",
+      "authentication": "Authentication failed",
+      "timeout": "Connection timed out",
+      "unknown": "Unrecognised error",
+      "probe_failed": "Probe failed"
+    },
+    "loadingPanel": "Loading diagnostics…",
+    "loadFailed": "Could not load diagnostics",
+    "retryLoad": "Try again",
+    "refresh": "Refresh",
+    "noDiagnostics": "No diagnostics recorded yet",
+    "noDiagnosticsHint": "The tunnel has not been started since this panel was added. Start it to record state and errors.",
+    "summary": "Detail",
+    "actionSucceeded": "Action confirmed: {action}",
+    "actionFailed": "The action was rejected by the server"
+  },
+  "validation": {
+    "required": "This field is required",
+    "minLength": "At least {n} characters",
+    "maxLength": "At most {n} characters",
+    "invalidFormat": "Invalid format",
+    "valid": "Valid",
+    "invalidHost": "Invalid hostname or IP",
+    "sshKeyRequired": "SSH key is required"
+  },
+  "webhooks": {
+    "title": "Webhooks",
+    "subtitle": "Manage notification webhooks for Telegram and Discord",
+    "forbidden": "You don't have permission to manage webhooks.",
+    "add": "Add webhook",
+    "edit": "Edit webhook",
+    "delete": "Delete webhook",
+    "deleteConfirm": "Delete webhook \"{name}\"? This cannot be undone.",
+    "created": "Webhook created",
+    "updated": "Webhook updated",
+    "deleted": "Webhook deleted",
+    "empty": "No webhooks configured. Add one to receive notifications.",
+    "name": "Name",
+    "namePlaceholder": "e.g. Admin Telegram",
+    "type": "Type",
+    "url": "Webhook URL",
+    "events": "Events",
+    "eventsHint": "Select specific events or leave empty to receive all notifications.",
+    "enabled": "Enabled",
+    "actions": "Actions",
+    "status": "Status",
+    "allEvents": "All",
+    "telegram": "Telegram",
+    "discord": "Discord",
+    "toggleEnabled": "Enable notifications for {name}"
   }
 }

@@ -8,6 +8,10 @@
 generator client {
   provider = "prisma-client-js"
   output   = "../generated/client"
+  // The release artifact runs on Linux hosts, while development happens on
+  // Windows/macOS. Generate for every supported runtime so a client built on a
+  // developer machine is still runnable on the target VPS.
+  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {

@@ -9,8 +9,27 @@ import type { GostConfig } from "@xistance/types";
 // Congestion of the config schema is documented in packages/types.
 // ---------------------------------------------------------------------------
 
+/**
+ * Splice the relay target into one `host:port` fragment of the listener token.
+ *
+ * There are deliberately no `?? ""` fallbacks here any more. With them, a config
+ * that reached the builder without a target produced `tcp://:9000/:` -- and gost
+ * does not reject that. It starts, listens, accepts every connection and refuses
+ * all of them with `dial tcp :0: connect: connection refused`, so the tunnel
+ * reported itself running while carrying nothing.
+ *
+ * GostConfigSchema now requires the pair (the API and the wizard both validate
+ * through it), and this throws rather than emitting a half-address if a caller
+ * ever bypasses that -- the same defence-in-depth shape DIRECT and SSH use.
+ */
 function listenerTarget(cfg: GostConfig): string {
-  return `${cfg.forwardHost ?? ""}:${cfg.forwardPort ?? ""}`;
+  if (!cfg.forwardHost || !cfg.forwardPort) {
+    throw new Error(
+      `GOST needs a complete relay target: got forwardHost=${JSON.stringify(cfg.forwardHost)}, ` +
+        `forwardPort=${JSON.stringify(cfg.forwardPort)}`,
+    );
+  }
+  return `${cfg.forwardHost}:${cfg.forwardPort}`;
 }
 
 /**
@@ -40,7 +59,7 @@ export function buildGostCommand(
     }
     // Mirrored side: listen on remotePort, forward to the peer's listener.
     const listenPort = cfg.remotePort ?? cfg.listenPort;
-    const peerHost = opts.peerHost ?? cfg.forwardHost ?? "127.0.0.1";
+    const peerHost = opts.peerHost ?? cfg.forwardHost;
     const peerPort = opts.peerPort ?? cfg.listenPort;
     return ["gost", "-L", `${proto}://:${listenPort}/${peerHost}:${peerPort}`];
   }
@@ -53,8 +72,8 @@ export function buildGostCommand(
 export function buildGostForwardArgs(cfg: GostConfig): {
   localHost: string;
   localPort: number;
-  forwardHost: string | undefined;
-  forwardPort: number | undefined;
+  forwardHost: string;
+  forwardPort: number;
   protocol: "tcp" | "udp";
 } {
   return {

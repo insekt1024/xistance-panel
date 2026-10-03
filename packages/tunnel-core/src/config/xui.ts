@@ -9,12 +9,35 @@ import type { XuiConfig } from "@xistance/types";
 
 export const XUI_LOGIN_PATHS = ["/login", "/panel/login", "/xui/login"] as const;
 export const XUI_INBOUNDS_PATH = "/panel/api/inbounds/list";
+/**
+ * Build the inbound path from a numeric id.
+ *
+ * A non-numeric id is a caller bug, and interpolating it verbatim produced
+ * `/panel/api/inbounds/get/NaN` -- a request the panel cannot answer, with an
+ * error that does not explain why. Refuse instead.
+ */
 export function xuiInboundPath(id: number): string {
+  if (!Number.isInteger(id) || id < 1) {
+    throw new Error(`Invalid XUI inbound id: ${JSON.stringify(id)}. Expected a positive integer.`);
+  }
   return `/panel/api/inbounds/get/${id}`;
 }
 
+/**
+ * Strip trailing slashes and, defensively, any embedded credentials.
+ *
+ * The schema already refuses credentials in a panel URL, but this function is
+ * also reachable from paths that do not go through the schema, and a URL with
+ * credentials would put a secret into a request line, a log line and the UI.
+ * Dropping them here means the worst case is an unauthenticated request rather
+ * than a leaked password.
+ */
 export function normalizePanelUrl(url: string): string {
-  return url.replace(/\/+$/, "");
+  const trimmed = url.replace(/\/+$/, "");
+  // Only rewrite when it really is a parseable URL with a userinfo part;
+  // otherwise hand back the trimmed string untouched.
+  const m = /^([a-z][a-z0-9+.-]*:\/\/)[^/@]*@(.+)$/i.exec(trimmed);
+  return m ? `${m[1]}${m[2]}` : trimmed;
 }
 
 export function buildXuiSyncPayload(cfg: XuiConfig): {

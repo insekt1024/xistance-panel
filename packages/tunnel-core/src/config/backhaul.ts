@@ -9,7 +9,23 @@ import type { BackhaulConfig } from "@xistance/types";
 // local service. `install.sh` pins a tested binary and validates the checksum.
 // ---------------------------------------------------------------------------
 
+/**
+ * Quote a value for a TOML basic string.
+ *
+ * Backslash and double-quote were escaped, but a raw newline passed through
+ * untouched. A token containing one therefore terminated the line and the
+ * following text was parsed as TOML -- a config-injection primitive via a
+ * field the user supplies. Control characters are rejected outright rather than
+ * escaped, because none of them are legitimate in a token, host or port value
+ * and silently rewriting one would be worse than refusing it.
+ */
 function tomlQuote(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(s)) {
+    throw new Error(
+      "Backhaul config value contains a control character, which cannot be represented in TOML",
+    );
+  }
   return `"${s.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 
