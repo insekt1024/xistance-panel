@@ -536,7 +536,15 @@ async function main() {
     for (const ip of ["127.0.0.1", "10.0.0.5", "192.168.1.1", "172.16.0.1", "172.31.255.255", "169.254.169.254", "0.0.0.0", "::1", "fe80::1", "fc00::1"]) {
       if (!isPrivateIp(ip)) throw new Error(ip + " must be private");
     }
-    for (const ip of ["8.8.8.8", "1.1.1.1", "172.32.0.1", "172.15.0.1", "203.0.113.5", "not-an-ip"]) {
+    // 203.0.113.5 belongs to TEST-NET-3 (RFC 5737). It is documentation space,
+    // not routable, so an SSRF guard MUST refuse to dial it -- a request to it
+    // can never be legitimate. This list previously asserted it was "public",
+    // which contradicted the guard's purpose: the only way to satisfy that
+    // assertion was to make a documentation range dialable.
+    for (const ip of ["203.0.113.5", "198.51.100.7", "192.0.2.9"]) {
+      if (!isPrivateIp(ip)) throw new Error(ip + " (RFC 5737 documentation range) must be blocked");
+    }
+    for (const ip of ["8.8.8.8", "1.1.1.1", "172.32.0.1", "172.15.0.1", "not-an-ip"]) {
       if (isPrivateIp(ip)) throw new Error(ip + " must NOT be private");
     }
   });
@@ -986,6 +994,30 @@ async function main() {
     }
   });
 
+  await test("Auth: forwarded proto is trusted only with XT_TRUST_PROXY", async () => {
+    const { requestIsHttps } = await import("../apps/web/src/lib/auth.ts");
+    const previous = process.env.XT_TRUST_PROXY;
+    try {
+      delete process.env.XT_TRUST_PROXY;
+      const untrusted = new Request("http://internal:3000/api/auth/login", {
+        headers: { "x-forwarded-proto": "https" },
+      });
+      if (requestIsHttps(untrusted)) {
+        throw new Error("untrusted forwarded proto was trusted");
+      }
+      process.env.XT_TRUST_PROXY = "true";
+      const trusted = new Request("http://internal:3000/api/auth/login", {
+        headers: { "x-forwarded-proto": "https, http" },
+      });
+      if (!requestIsHttps(trusted)) {
+        throw new Error("trusted forwarded proto was ignored");
+      }
+    } finally {
+      if (previous === undefined) delete process.env.XT_TRUST_PROXY;
+      else process.env.XT_TRUST_PROXY = previous;
+    }
+  });
+
   await test("Origin: XT_ALLOWED_ORIGINS escape hatch", async () => {
     const { originAllowed } = await import("../apps/web/src/lib/auth.ts");
     const prev = process.env.XT_ALLOWED_ORIGINS;
@@ -1071,10 +1103,13 @@ async function main() {
         targetHost: "198.51.100.7", targetPort: 80,
       })],
       ["xray", buildXrayCommand("/tmp/xray.json")],
+      // No `as Parameters<...>` cast any more: TASK-131 made forwardHost/forwardPort
+      // required, so the type now says what the builder actually needs and a
+      // half-address config cannot be smuggled past it here.
       ["gost", buildGostCommand(
         { bidirectional: false, direction: "IRAN", protocol: "tcp", listenPort: 8080,
-          remoteHost: "198.51.100.7", remotePort: 9090, ttl: 60, bufferSize: 65536,
-          udpDataBufferSize: 65536 } as Parameters<typeof buildGostCommand>[0],
+          forwardHost: "198.51.100.7", forwardPort: 9090, ttl: 60, bufferSize: 65536,
+          udpDataBufferSize: 65536 },
         "IRAN",
         { peerHost: "198.51.100.7", peerPort: 9090 },
       )],
@@ -1101,7 +1136,7 @@ async function main() {
     const { extractPort } = await import("../apps/web/src/lib/tunnels.ts");
     const configs: Array<[string, Record<string, unknown>, number | null]> = [
       ["BACKHAUL", { method: "BACKHAUL", backhaul: { role: "server", transport: "tcp", listenPort: 3080, token: "t", mux: 8 } }, 3080],
-      ["GOST", { method: "GOST", gost: { bidirectional: false, direction: "IRAN", protocol: "tcp", listenPort: 3081, remoteHost: "198.51.100.7", remotePort: 9090 } }, 3081],
+      ["GOST", { method: "GOST", gost: { bidirectional: false, direction: "IRAN", protocol: "tcp", listenPort: 3081, forwardHost: "198.51.100.7", forwardPort: 9090 } }, 3081],
       ["SSH", { method: "SSH", ssh: { mode: "local", host: "203.0.113.10", port: 22, username: "root", auth: "key", localPort: 3082, remoteHost: "127.0.0.1", remotePort: 80 } }, 3082],
       ["PORT_FORWARD", { method: "PORT_FORWARD", portForwards: [{ name: "r", direction: "IRAN_TO_FOREIGN", protocol: "tcp", sourcePort: 3083, destHost: "198.51.100.7", destPort: 80 }] }, 3083],
       ["DIRECT", { method: "DIRECT", direct: { protocol: "tcp", bindAddr: "0.0.0.0", listenPort: 3084, targetHost: "198.51.100.7", targetPort: 80 } }, 3084],
@@ -1215,6 +1250,72 @@ async function main() {
     }
     if (normalizePanelUrl("https://a.example/") !== "https://a.example") {
       throw new Error("normalizePanelUrl failed");
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Systemd start must fail closed. systemctl captures exitCode, but start
+  // ignored it, so a failed daemon-reload, enable or start resolved and the
+  // caller marked the tunnel running with nothing behind it.
+  // -------------------------------------------------------------------------
+  await test("Systemd: start rejects when systemctl start fails", async () => {
+    const mod = await import("../packages/tunnel-core/src/index.ts");
+    const seen: string[] = [];
+    const runner = {
+      kind: "local" as const,
+      run: async (argv: string[]) => {
+        seen.push(argv.join(" "));
+        if (argv[0] === "systemctl" && argv[1] === "start") return { exitCode: 1, stdout: "", stderr: "Failed to start" };
+        return { exitCode: 0, stdout: "", stderr: "" };
+      },
+      stream: () => ({ kill: () => undefined }),
+      writeFile: async () => undefined,
+      readFile: async () => "",
+      makeDir: async () => undefined,
+      exists: async () => false,
+    };
+    const handle = new mod.SystemdProcessHandle(
+      { id: "xt-test-s1", name: "s1", command: ["/bin/true"], dataDir: "s1-data", unitName: "xt-test-s1" },
+      runner,
+    );
+    let threw = false;
+    try {
+      await handle.start();
+    } catch {
+      threw = true;
+    }
+    if (!threw) throw new Error("start resolved despite systemctl failure");
+    for (const sub of ["daemon-reload", "enable", "start"]) {
+      if (!seen.some((s) => s.indexOf(" " + sub) !== -1)) throw new Error("systemctl subcommand was not attempted: " + sub);
+    }
+  });
+
+  await test("Systemd: start rejects when daemon-reload or enable fails", async () => {
+    const mod = await import("../packages/tunnel-core/src/index.ts");
+    for (const sub of ["daemon-reload", "enable"]) {
+      const runner = {
+        kind: "local" as const,
+        run: async (argv: string[]) => {
+          if (argv[0] === "systemctl" && argv[1] === sub) return { exitCode: 1, stdout: "", stderr: "Failed" + " " + sub };
+          return { exitCode: 0, stdout: "", stderr: "" };
+        },
+        stream: () => ({ kill: () => undefined }),
+        writeFile: async () => undefined,
+        readFile: async () => "",
+        makeDir: async () => undefined,
+        exists: async () => false,
+      };
+      const handle = new mod.SystemdProcessHandle(
+        { id: "xt-test-s1", name: "s1", command: ["/bin/true"], dataDir: "s1-data", unitName: "xt-test-s1" },
+        runner,
+      );
+      let threw = false;
+      try {
+        await handle.start();
+      } catch {
+        threw = true;
+      }
+      if (!threw) throw new Error("start resolved despite failure in " + sub);
     }
   });
 

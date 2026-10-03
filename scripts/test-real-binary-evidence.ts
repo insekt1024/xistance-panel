@@ -1,0 +1,453 @@
+/**
+ * Real-binary evidence ledger (TASK-35 / TASK-65).
+ *
+ * `scripts/test-method-matrix.ts` runs every method with an INJECTED process
+ * handle and therefore reports `realBinary: false` for all nine by
+ * construction. That is honest about the harness, but it is blind to real
+ * binary runs performed outside the harness -- which TASK-65 did on the target
+ * OS for GOST, FRP and XRAY.
+ *
+ * Without this bridge the matrix keeps claiming "no method has real-binary
+ * evidence" after real traffic has crossed real tunnels, which is its own kind
+ * of falsehood: a reader would conclude no tunnel was ever proven.
+ *
+ * This suite validates `.agent/evidence/real-binary-evidence.json` on three
+ * axes:
+ *
+ *   1. STRUCTURE  -- required fields present and well formed.
+ *   2. HONESTY    -- a method may only be listed if it is one of the nine, and
+ *                   anything NOT listed must appear in
+ *                   `methodsWithoutRealBinaryEvidence`. The two lists must be
+ *                   an exact partition of the nine methods, so no method can be
+ *                   silently dropped from both.
+ *   3. NO OVERCLAIM -- `trafficCrossed` and `reconnect` require specific,
+ *                   checkable statements, and each entry must point at a real
+ *                   evidence file that exists and mentions the method.
+ *
+ * It does NOT assert that all nine have real-binary evidence -- that is the
+ * honest remaining gap, recorded rather than papered over.
+ */
+
+import fs from "node:fs";
+import path from "node:path";
+import { TunnelMethod } from "../packages/types/src/index.ts";
+
+const REPO = path.resolve(import.meta.dirname, "..");
+const LEDGER = path.join(REPO, ".agent", "evidence", "real-binary-evidence.json");
+
+/** Source with `//` line comments and block comments removed. */
+function codeOnly(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}
+
+let pass = 0;
+const failures: string[] = [];
+const ok = (n: string): void => {
+  pass += 1;
+  console.log(`  ok   ${n}`);
+};
+const bad = (n: string, d: string): void => {
+  failures.push(n);
+  console.log(`  FAIL ${n}\n       ${d}`);
+};
+
+const chk = (n: string, cond: boolean, d = ""): void => {
+  if (cond) ok(n);
+  else bad(n, d);
+};
+
+const ALL = Object.values(TunnelMethod) as string[];
+// --- An installer that fails SILENTLY is worse than one that fails loudly ----
+
+// Found by running it (TASK-123). `install.sh` exited 1 with completely EMPTY
+// stderr, because `exec 3>&- 2>/dev/null` permanently replaced the shell's own
+// stderr and the `die` on the next line went into a black hole.
+//
+// The shape of the bug is the point: `die()` was correct, and so was the code
+// around it. What broke was whether the error REACHED anyone. So assert the
+// property, not the specific message.
+{
+  const installer = fs.readFileSync(
+    path.join(REPO, "scripts", "install.sh"),
+    "utf8",
+  );
+
+  // `exec N>&-` with a redirect to /dev/null on the SAME exec changes the shell's
+  // own descriptors permanently. `2>&-` or `2>/dev/null` on an exec is the red
+  // flag; a subshell-scoped `(exec 3>&-)` is the safe form.
+  const dangerous = [...installer.matchAll(/^[ \t]*exec\b[^\n]*?(2>&-|2>\s*\/dev\/null)/gm)];
+  chk(
+    "install.sh never exec's the shell's own stderr away",
+    dangerous.length === 0,
+    dangerous.length > 0
+      ? `line(s) ${dangerous
+          .map((m) => installer.slice(0, m.index).split("\n").length)
+          .join(", ")} exec with 2>/dev/null, which permanently silences ` +
+          `every later message including die() -- the installer then exits 1 ` +
+          `with empty stderr (TASK-123)`
+      : "",
+  );
+
+  // And the fatal-error helper must actually exist and write to stderr.
+  chk(
+    "install.sh has a die() that reports on stderr",
+    /die\(\)\s*\{[^}]*>&2/.test(installer),
+    "without a die() that reaches stderr a fatal condition reports nothing",
+  );
+
+  // The bilingual promise is only worth something if it survives an abort.
+  // --- The XRAY test config must be the product's own, and the test must not
+  // invent a deployment the product does not have ------------------------
+  //
+  // `buildXrayConfig()` emits a dokodemo-door inbound with no `address`, so the
+  // destination is whatever the local app asked for. `tunnels/examples/xray-vless.json`
+  // states the design outright: "Local apps point at the dokodemo-door inbound
+  // (port 10808)". NOTHING redirects that traffic.
+  //
+  // TASK-125 added an iptables REDIRECT to make dokodemo reachable, and then spent
+  // turns chasing a "defect" that existed only because of that REDIRECT:
+  // `followRedirect: false` uses the post-redirect destination, so the tunnel
+  // dialled itself. With no REDIRECT -- the shipped design -- `followRedirect` is
+  // irrelevant and `false` is correct. The product was never wrong.
+  //
+  // So assert what is true and useful: the config under test is generated by the
+  // builder, and nothing in the repo installs a REDIRECT the inbound then depends
+  // on. If someone later adds such a rule, THIS is where the coupling shows up.
+  {
+    const gen = fs.readFileSync(
+      path.join(REPO, "scripts", "gen-xray-test-config.ts"),
+      "utf8",
+    );
+    chk(
+      "the XRAY test config is generated by the product's own builder",
+      /buildXrayConfig/.test(gen) && /XrayConfigSchema\.parse/.test(gen),
+      "a hand-written replica proves the replica, not the shipped config " +
+        "(TASK-124 burned five attempts on one)",
+    );
+    const builder = fs.readFileSync(
+      path.join(REPO, "packages", "tunnel-core", "src", "config", "xray.ts"),
+      "utf8",
+    );
+    chk(
+      "the XRAY inbound is dokodemo-door with no fixed address",
+      /protocol: "dokodemo-door"/.test(codeOnly(builder)) &&
+        !/address:\s*cfg\./.test(codeOnly(builder).slice(codeOnly(builder).indexOf("inbounds:"))),
+      "an `address` on dokodemo-door would make the local app's destination " +
+        "irrelevant, which is a different design from the shipped example",
+    );
+    chk(
+      "the XRAY inbound sets followRedirect:true, as dokodemo-door requires",
+      /followRedirect:\s*true/.test(codeOnly(builder)),
+      "dokodemo-door has no address, so a REDIRECT/TPROXY supplies the destination " +
+        "and xray recovers the ORIGINAL one only via SO_ORIGINAL_DST. With false " +
+        "it dials its own listen port and the tunnel is a loop (TASK-125/130).",
+    );
+    // Scan CODE, not prose: the fix is documented in comments right above this very
+    // setting, so a naive text match fails the gate for the act of explaining itself.
+    chk(
+      "the product still installs no REDIRECT (an operator prerequisite, not ours)",
+      !/REDIRECT|--to-port/.test(codeOnly(builder)),
+      "the inbound depends on a redirect FOLLOWING it -- followRedirect:true " +
+        "recovers the original destination from one. If the product ever starts " +
+        "writing that rule itself, its scope must exclude xray's own traffic or the " +
+        "far end's dial is captured back into the tunnel (TASK-125 Finding B).",
+    );
+  }
+
+
+  chk(
+    "install.sh reports fatal errors in BOTH languages",
+    /die\(\)[\s\S]{0,400}?\$1[\s\S]{0,200}?\$2/.test(installer),
+    "die() prints one argument; the second is the Persian line the PRD promises",
+  );
+}
+
+
+
+interface RunEntry {
+  method: string;
+  binary: string;
+  binaryVersion: string;
+  target: string;
+  configSource: string;
+  trafficCrossed: boolean;
+  checks: string[];
+  reconnect: boolean;
+  reconnectNote: string;
+  evidence: string;
+}
+
+if (!fs.existsSync(LEDGER)) {
+  console.log(`  FAIL the real-binary evidence ledger exists\n       ${LEDGER} is missing`);
+  console.log(`\n--- 0 passed, 1 failed ---`);
+  process.exit(1);
+}
+
+interface NotProvedRecord {
+  method: string;
+  reason: string;
+}
+
+let doc: {
+  runs: RunEntry[];
+  methodsWithoutRealBinaryEvidence: NotProvedRecord[];
+};
+try {
+  doc = JSON.parse(fs.readFileSync(LEDGER, "utf8")) as typeof doc;
+  ok("the real-binary evidence ledger parses as JSON");
+} catch (e) {
+  console.log(`  FAIL the real-binary evidence ledger parses as JSON\n       ${(e as Error).message}`);
+  console.log(`\n--- 0 passed, 1 failed ---`);
+  process.exit(1);
+}
+
+// ---- 1. structure ---------------------------------------------------------
+const REQUIRED = [
+  "method",
+  "binary",
+  "binaryVersion",
+  "target",
+  "configSource",
+  "trafficCrossed",
+  "checks",
+  "reconnect",
+  "evidence",
+] as const;
+
+if (Array.isArray(doc.runs) && doc.runs.length > 0)
+  ok(`the ledger records at least one real-binary run (${doc.runs?.length ?? 0})`);
+else bad("the ledger records at least one real-binary run", "runs is empty");
+
+for (const run of doc.runs ?? []) {
+  for (const field of REQUIRED) {
+    const v = (run as unknown as Record<string, unknown>)[field];
+    const empty = v === undefined || v === null || (Array.isArray(v) && v.length === 0);
+    if (!empty) ok(`${run.method} records ${field}`);
+    else bad(`${run.method} records ${field}`, "missing or empty");
+  }
+}
+
+// ---- 2. honesty: an exact partition of the nine methods --------------------
+const listed = new Set((doc.runs ?? []).map((r) => r.method));
+// `methodsWithoutRealBinaryEvidence` entries are objects carrying a `reason`.
+// A bare string would record THAT a method is unproved but not WHY, and a
+// reason-less gap is the thing most likely to be quietly "closed" later by
+// someone who does not know why it was open. Both shapes are read here so an
+// older ledger still loads, but only the object shape passes the reason check.
+type NotProvedEntry = { method?: string; reason?: string } | string;
+const rawNotProved = (doc.methodsWithoutRealBinaryEvidence ?? []) as NotProvedEntry[];
+const notListed = new Set(
+  rawNotProved.map((e) => (typeof e === "string" ? e : (e.method ?? ""))).filter(Boolean),
+);
+
+for (const e of rawNotProved) {
+  const method = typeof e === "string" ? e : (e.method ?? "?");
+  const reason = typeof e === "string" ? "" : (e.reason ?? "");
+  if (reason.trim().length >= 20) {
+    ok(`${method} records why it lacks real-binary evidence`);
+  } else {
+    bad(
+      `${method} records why it lacks real-binary evidence`,
+      `reason is empty or too short: ${JSON.stringify(reason)} -- an unexplained gap reads as an oversight and invites a false "fix"`,
+    );
+  }
+}
+
+const dupes = (doc.runs ?? []).map((r) => r.method).filter((m, i, a) => a.indexOf(m) !== i);
+if (dupes.length === 0) ok("no method is listed twice in the ledger");
+else bad("no method is listed twice in the ledger", dupes.join(", "));
+
+for (const m of listed) {
+  if ((ALL as string[]).includes(m)) ok(`${m} is one of the nine release methods`);
+  else bad(`${m} is one of the nine release methods`, `not in ${ALL.join(", ")}`);
+}
+
+const overlap = [...listed].filter((m) => notListed.has(m));
+if (overlap.length === 0)
+  ok("no method appears in both the real-binary list and the not-proved list");
+else bad("no method appears in both lists", overlap.join(", "));
+
+const covered = new Set([...listed, ...notListed]);
+const missing = ALL.filter((m) => !covered.has(m));
+if (missing.length === 0)
+  ok("every one of the nine methods is accounted for in exactly one list");
+else
+  bad(
+    "every one of the nine methods is accounted for in exactly one list",
+    `${missing.join(", ")} appear in NEITHER list -- a method must be either proved or recorded as unproved, never silently absent`,
+  );
+
+// The count is the strongest single statement: three proved, six not.
+const expectedProved = listed.size;
+const expectedUnproved = ALL.length - expectedProved;
+if (notListed.size === expectedUnproved)
+  ok(`the not-proved list holds the remaining ${expectedUnproved} methods`);
+else
+  bad(
+    `the not-proved list holds the remaining ${expectedUnproved} methods`,
+    `it holds ${notListed.size}`,
+  );
+
+// ---- 3. no overclaim -------------------------------------------------------
+  // Every method whose traffic is claimed must have a test that can START the
+  // binary and move bytes -- and that test must be RUN BY A GATE, or it is just
+  // another script nobody executes.
+  //
+  // `scripts/test-real-traffic-target-os.sh` is the one that can: it drives real
+  // binaries on the target OS using configs the product's own builders produced
+  // (TASK-127). Its coverage is read from the file rather than hardcoded here --
+  // a hardcoded list drifts the moment a method is added, which is how this gate
+  // went stale while claiming 7 methods were covered.
+  //
+  // `test-xray.ts` asserts config SHAPE only: it never starts xray. So a claim
+  // backed by TASK-65's hand-written probe -- which cannot be re-run -- is a
+  // finding, not a pass.
+  {
+    const suite = path.join(REPO, "scripts", "test-real-traffic-target-os.sh");
+    const gate = path.join(REPO, "scripts", "run-all-tests.ts");
+    const runner = path.join(REPO, "scripts", "test-real-traffic-target-os.ts");
+    const suiteSrc = fs.existsSync(suite) ? fs.readFileSync(suite, "utf8") : "";
+    const gateSrc = fs.existsSync(gate) ? fs.readFileSync(gate, "utf8") : "";
+
+    chk(
+      "the traffic suite exists and is registered in the aggregate",
+      suiteSrc.length > 0 && /test-real-traffic-target-os/.test(gateSrc),
+      "a traffic suite nothing runs is not evidence; register it in run-all-tests.ts",
+    );
+    chk(
+      "the traffic suite is driven by an adapter that generates fixtures",
+      fs.existsSync(runner) && /gen-traffic-fixtures/.test(fs.readFileSync(runner, "utf8")),
+      "without the adapter the shell suite needs a hand-prepared fixture dir, " +
+        "which is how TASK-65's probe became unrecoverable",
+    );
+
+    // Methods the suite actually probes, read from its own assertions.
+    const covered = new Set<string>();
+    for (const m of suiteSrc.matchAll(/(?:ok|reconnect_case)\s+"?([A-Z_]{3,12})"?\b/g)) {
+      covered.add(m[1]);
+    }
+    // The generators name their method in `emit("METHOD", ...)` calls.
+    const fixtures = fs.existsSync(path.join(REPO, "scripts", "gen-traffic-fixtures.ts"))
+      ? fs.readFileSync(path.join(REPO, "scripts", "gen-traffic-fixtures.ts"), "utf8")
+      : "";
+    for (const m of fixtures.matchAll(/emit\(\s*"([A-Z_]{3,12})"/g)) covered.add(m[1]);
+
+    // PORT_FORWARD execs no binary: the forwarder is in-process Node, so it has no
+    // fixture file. It is credited to the suite that drives `startForwarder()`
+    // against a real origin instead.
+    const pf = path.join(REPO, "scripts", "test-port-forward-datapath.ts");
+    if (fs.existsSync(pf)) {
+      const pfSrc = fs.readFileSync(pf, "utf8");
+      if (/startForwarder/.test(pfSrc)) covered.add("PORT_FORWARD");
+      chk(
+        "the PORT_FORWARD data path is driven by startForwarder(), not a replica",
+        /startForwarder/.test(pfSrc) && /PortForwardRuleSchema\.parse/.test(pfSrc),
+        "a hand-built forwarder in the test would prove the replica, not the " +
+          "product's in-process forwarder (the lesson of TASK-124)",
+      );
+    }
+
+    const claimed = (doc.runs ?? []).filter((r) => r.trafficCrossed).map((r) => r.method);
+    const uncovered = claimed.filter((mth) => !covered.has(mth));
+    chk(
+      "methods whose traffic is claimed are covered by the runnable suite",
+      uncovered.length === 0,
+      uncovered.length > 0
+        ? `${uncovered.length} traffic claim(s) rest on no runnable data-path test: ` +
+            `${uncovered.join(", ")} -- test-xray.ts asserts config shape only, so a ` +
+            `data-path regression there would not be caught by anything in CI`
+        : "",
+    );
+    chk(
+      "the runnable suite's coverage is not empty (a suite that skips proves nothing)",
+      covered.size > 0,
+      "no method was recognised in the suite; a parse change would make this vacuous",
+    );
+  }
+
+for (const run of doc.runs ?? []) {
+  const checks = (run.checks ?? []).join(" ");
+
+  // A "traffic crossed" claim must cite actual carried bytes. Accepting
+  // "trafficCrossed: true" with a check that only proves the process started
+  // would be the exact failure mode this suite exists to prevent.
+  if (run.trafficCrossed) {
+    const carriesBytes = /\d{3}\s*->|HTTP\s*200|HELLO-XR|carried/i.test(checks);
+    if (carriesBytes) ok(`${run.method} cites evidence that bytes actually crossed the tunnel`);
+    else
+      bad(
+        `${run.method} cites evidence that bytes actually crossed the tunnel`,
+        `trafficCrossed is true but no check names carried data: ${checks.slice(0, 120)}`,
+      );
+  } else {
+    ok(`${run.method} makes no traffic claim (trafficCrossed: false)`);
+  }
+
+  if (run.reconnect) {
+    const statesRecovery =
+      /restart|recover|resumed|MainPID/i.test(run.reconnectNote ?? "");
+    if (statesRecovery) ok(`${run.method} reconnect claim names a restart/recovery outcome`);
+    else
+      bad(
+        `${run.method} reconnect claim names a restart/recovery outcome`,
+        `reconnect is true but reconnectNote is empty: ${JSON.stringify(run.reconnectNote)}`,
+      );
+  } else {
+    ok(`${run.method} makes no reconnect claim (reconnect: false)`);
+  }
+
+
+  // Evidence file must exist and actually substantiate the method, so a stale
+  // or copy-pasted pointer cannot vouch for a method it never covered.
+  //
+  // A bare substring check is too weak: tunnel-matrix.md names all nine
+  // methods in its per-method suite list, so pointing XRAY at it passed even
+  // though that file records no tunnel traffic at all. Mutation-tested. So the
+  // file must ALSO contain evidence of an actual run -- the traffic byte string
+  // the run itself cites, or a reconnect outcome.
+  const evPath = path.resolve(REPO, run.evidence);
+  if (fs.existsSync(evPath)) {
+    const text = fs.readFileSync(evPath, "utf8");
+    if (!text.includes(run.method))
+      bad(
+        `${run.method} evidence file exists and mentions the method`,
+        `${run.evidence} never mentions ${run.method}`,
+      );
+    else if (run.trafficCrossed) {
+      // The evidence must contain what the run says it contains. A run that
+      // cites carried bytes must be backed by a file showing those bytes.
+      const carriedSomething =
+        /HELLO-XR|HTTP\/1\.1 200|carried|dial tcp|proxy listen port|start proxy success/.test(
+          text,
+        );
+      if (carriedSomething)
+        ok(`${run.method} evidence file substantiates the run (${run.evidence})`);
+      else
+        bad(
+          `${run.method} evidence file substantiates the run`,
+          `${run.evidence} mentions ${run.method} but records no carried traffic, reconnect, or process evidence`,
+        );
+    } else {
+      ok(`${run.method} evidence file exists and mentions the method (${run.evidence})`);
+    }
+  } else {
+    bad(`${run.method} evidence file exists`, `${run.evidence} is missing`);
+  }
+
+  // The target must name an OS. Evidence labelled "VPS" when it is a
+  // container would be a misstatement, so require the literal word used by
+  // every container run in this effort.
+  if (/Ubuntu\s+\d+\.\d+/i.test(run.target)) ok(`${run.method} names a concrete Ubuntu target`);
+  else bad(`${run.method} names a concrete Ubuntu target`, `target is ${JSON.stringify(run.target)}`);
+
+  if (/systemd/i.test(run.target)) ok(`${run.method} target records systemd as the init`);
+  else bad(`${run.method} target records systemd as the init`, run.target);
+}
+
+console.log(
+  `\n--- ${pass} passed, ${failures.length} failed ---\n` +
+    `  real-binary evidence: ${listed.size}/${ALL.length} methods ` +
+    `(${[...listed].sort().join(", ") || "none"}); ` +
+    `${notListed.size} recorded as not proved with a real binary.`,
+);
+process.exit(failures.length === 0 ? 0 : 1);
