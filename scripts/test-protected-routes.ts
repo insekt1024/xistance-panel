@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import http from "node:http";
 import path from "node:path";
 import { collectAssetReferences, mimeOk } from "./lib/asset-refs";
@@ -52,7 +53,11 @@ function detectMusl(): boolean {
 const EXIT_SKIP = 77;
 
 function tempRoot(): string {
-  const base = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP;
+  // os.tmpdir() is the POSIX answer and is ALWAYS defined. TMPDIR/TEMP/TMP are
+  // conventions, not guarantees: GitHub's runners set none of them, so a suite
+  // that requires one fails there while passing on any developer machine that
+  // exports it. This assertion was how three suites went red in CI.
+  const base = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? os.tmpdir();
   assert.ok(base, "a temporary directory is required");
   return fs.mkdtempSync(path.join(base, "xistance-smoke-"));
 }

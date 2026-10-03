@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 
 function request(server: http.Server, urlPath: string): Promise<{ status: number; body: Buffer }> {
@@ -26,7 +27,10 @@ function request(server: http.Server, urlPath: string): Promise<{ status: number
 
 async function main(): Promise<void> {
   const { stageReleaseAssets } = await import("./stage-release-assets.ts");
-  const fixtureRoot = fs.mkdtempSync(path.join(process.env.TMPDIR ?? requireTempDir(), "xistance-release-assets-"));
+  const fixtureRoot = fs.mkdtempSync(path.join(
+      process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? os.tmpdir(),
+      "xistance-release-assets-",
+    ));
   const fixtureApp = path.join(fixtureRoot, "apps", "web");
   const fixtureNext = path.join(fixtureApp, ".next");
   const fixtureStandaloneApp = path.join(fixtureNext, "standalone", "apps", "web");
