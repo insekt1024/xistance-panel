@@ -338,9 +338,12 @@ async function main(): Promise<void> {
     // 7. No shell anywhere on this path, and no credential exposure.
     // =====================================================================
     {
+      // Repo-relative, not an absolute path. The hardcoded Windows path this
+      // replaced made the assertion pass on exactly one machine and fail
+      // everywhere else -- it never ran in CI until the first live run.
       const runner = await import("node:fs").then((fs) =>
         fs.readFileSync(
-          "E:/codes/Projects/Xistance-Tunnel/xistance-panel/packages/tunnel-core/src/runner.ts",
+          new URL("../packages/tunnel-core/src/runner.ts", import.meta.url),
           "utf8",
         ),
       );

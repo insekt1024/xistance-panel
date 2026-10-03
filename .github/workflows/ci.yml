@@ -62,19 +62,28 @@ jobs:
         env:
           TURBO_DISABLE: "true"
 
+      - name: Stage the release artifact
+        run: npx tsx scripts/stage-release-artifact.ts . dist/artifact --architecture amd64
+
+      # Built AFTER staging, and over dist/artifact -- not over the standalone
+      # tree. The manifest's artifact.sha256 must describe the tree the ARCHIVE
+      # extracts to, because that is what test-embedded-manifest-provenance
+      # recomputes and compares. CI passed apps/web/.next/standalone here while
+      # the release workflow passed dist/artifact, so the digest CI recorded
+      # could never describe the archive CI shipped.
       - name: Build release manifest
+        env:
+          VERSION: $(node -p "require('./package.json').version")
+          PRISMA_VERSION: $(node -p "require('./node_modules/prisma/package.json').version")
         run: >-
           npx tsx scripts/release-manifest.ts build
           release-manifest.json
-          "$(node -p "require('./package.json').version")"
+          "$VERSION"
           "${{ github.sha }}"
           amd64
-          xistance-panel-${{ github.sha }}-amd64.tar.gz
-          apps/web/.next/standalone
-          "$(node -p "require('./prisma/package.json').version" 2>/dev/null || echo 'unknown')"
-
-      - name: Stage the release artifact
-        run: npx tsx scripts/stage-release-artifact.ts . dist/artifact --architecture amd64
+          "xistance-panel-v${VERSION}-amd64.tar.gz"
+          dist/artifact
+          "$PRISMA_VERSION"
 
       # Archive the staged tree BEFORE the suites run.
       #
@@ -86,12 +95,20 @@ jobs:
       # had left an archive behind. The archive, its checksum and the manifest
       # beside it are produced here in the order the suites read them.
       - name: Archive the staged artifact
+        env:
+          # The archive is named for the VERSION, not the commit SHA: the suites
+          # that verify it (real-archive-verify, manifest freshness, embedded
+          # provenance) resolve the name from release-manifest.json, and the
+          # release workflow archives as v<version> too. Naming it v<sha> here
+          # made every one of them fail while the shipped artifact used the other
+          # convention.
+          VERSION: $(node -p "require('./package.json').version")
         run: |
           mkdir -p dist/amd64
-          tar -czf "dist/amd64/xistance-panel-v${{ github.sha }}-amd64.tar.gz" -C dist/artifact .
+          tar -czf "dist/amd64/xistance-panel-v${VERSION}-amd64.tar.gz" -C dist/artifact .
           npx tsx scripts/release-manifest.ts sha256 \
-            "dist/amd64/xistance-panel-v${{ github.sha }}-amd64.tar.gz" \
-            > "dist/amd64/xistance-panel-v${{ github.sha }}-amd64.tar.gz.sha256"
+            "dist/amd64/xistance-panel-v${VERSION}-amd64.tar.gz" \
+            > "dist/amd64/xistance-panel-v${VERSION}-amd64.tar.gz.sha256"
           cp dist/artifact/release-manifest.json dist/amd64/release-manifest.json
 
       # The full local suite list. Before this step existed, this job ran
