@@ -726,6 +726,23 @@ if [[ "$ready" != "true" ]]; then
         "$(stat -c %G "$_xt_c" 2>/dev/null || echo -)" >&2
     done
     echo "  service user: ${SERVICE_USER}" >&2
+    # `current` is a SYMLINK. stat follows links, but the walk above reported it
+    # as mode=777 -- the mode of a symlink itself -- so the walk was describing
+    # the link, not the release directory it points at. Resolve it and probe the
+    # real directory, which is what systemd actually chdir()s into.
+    echo "  current -> $(readlink -f "$XT_CURRENT_LINK" 2>/dev/null || echo UNRESOLVED)" >&2
+    _xt_real="$(readlink -f "$XT_CURRENT_LINK" 2>/dev/null || true)"
+    if [[ -n "$_xt_real" && -d "$_xt_real" ]]; then
+      printf '    resolved target mode=%-6s owner=%s:%s\n' \
+        "$(stat -c %a "$_xt_real")" "$(stat -c %U "$_xt_real")" "$(stat -c %G "$_xt_real")" >&2
+      if su -s /bin/sh -c "cd '$_xt_real'" "$SERVICE_USER" >/dev/null 2>&1; then
+        echo "    ok      resolved release dir" >&2
+      else
+        echo "    DENIED  resolved release dir   <- this is the cause" >&2
+      fi
+    else
+      echo "    the symlink does not resolve to a directory" >&2
+    fi
     echo "  can it traverse each component?" >&2
     for _xt_c in / "$(dirname "$_xt_probe_dir")" "$_xt_probe_dir" "$_xt_wd"; do
       if su -s /bin/sh -c "cd '$_xt_c'" "$SERVICE_USER" >/dev/null 2>&1; then
