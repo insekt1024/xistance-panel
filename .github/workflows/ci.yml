@@ -276,6 +276,12 @@ jobs:
           mkdir -p dist/arm64
           tar -czf "$ARCHIVE" -C dist/artifact .
           npx tsx scripts/release-manifest.ts sha256 "$ARCHIVE" > "$ARCHIVE.sha256"
+          # The provenance step below reads the manifest from BESIDE the archive.
+          # Without this copy it read the ROOT copy -- which, on this job, is the
+          # provisional seed written before staging, carrying the pre-staging
+          # digest. So it compared a stale digest against the real tree and
+          # failed. The staged copy is the one that describes the archive.
+          cp dist/artifact/release-manifest.json dist/arm64/release-manifest.json
           echo "built $ARCHIVE"
 
       # The manifest's digest is only provenance if it covers the tree the
