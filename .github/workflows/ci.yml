@@ -76,6 +76,24 @@ jobs:
       - name: Stage the release artifact
         run: npx tsx scripts/stage-release-artifact.ts . dist/artifact --architecture amd64
 
+      # Archive the staged tree BEFORE the suites run.
+      #
+      # 14 suites read dist/amd64/*.tar.gz (and dist/arm64/*) -- manifest
+      # freshness, embedded-manifest provenance, real-archive verify, rollback
+      # drill, shipped-payload, release audit. Without this step CI staged the
+      # tree and then ran suites that check the ARCHIVE, so every one of them
+      # failed on a fresh checkout while passing locally, where a previous run
+      # had left an archive behind. The archive, its checksum and the manifest
+      # beside it are produced here in the order the suites read them.
+      - name: Archive the staged artifact
+        run: |
+          mkdir -p dist/amd64
+          tar -czf "dist/amd64/xistance-panel-v${{ github.sha }}-amd64.tar.gz" -C dist/artifact .
+          npx tsx scripts/release-manifest.ts sha256 \
+            "dist/amd64/xistance-panel-v${{ github.sha }}-amd64.tar.gz" \
+            > "dist/amd64/xistance-panel-v${{ github.sha }}-amd64.tar.gz.sha256"
+          cp dist/artifact/release-manifest.json dist/amd64/release-manifest.json
+
       # The full local suite list. Before this step existed, this job ran
       # test-optimizations.ts and nothing else: 62 of 63 suites on disk were
       # never executed by CI, including every security suite. A critical SSH
