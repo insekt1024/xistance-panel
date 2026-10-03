@@ -190,14 +190,29 @@ let devServerUrl = "";
  * resolve it the way test-a11y-browser.ts does, across the npx cache roots.
  */
 function resolvePlaywright(): unknown | null {
+  // Each path must be reachable on the host that runs the suite. The first two
+  // are Windows shapes -- on a Linux runner they never exist, so the resolver
+  // returned null and the suite printed
+  //   browser measurement SKIPPED (no playwright resolvable)
+  // while exiting green. Chromium was installed on that runner and still went
+  // unused, because nothing looked where Linux puts playwright.
+  const home = os.homedir();
   const candidates = [
-    path.join(os.homedir(), "AppData/Local/npm-cache/_npx"),
-    path.join(os.homedir(), "node_modules"),
+    // This repository's own dependency tree -- the normal case on any platform.
     path.join(process.cwd(), "node_modules"),
+    // Linux: the npx cache and the browser binaries.
+    path.join(home, ".npm/_npx"),
+    path.join(home, ".cache/ms-playwright"),
+    // Windows shapes, kept because this suite also runs here.
+    path.join(home, "AppData/Local/npm-cache/_npx"),
+    path.join(home, "AppData/Local/ms-playwright"),
+    path.join(home, "node_modules"),
   ];
   for (const base of candidates) {
     if (!fs.existsSync(base)) continue;
-    const roots = base.endsWith("_npx")
+    // Both npx caches (.npm/_npx on Linux, AppData/Local/npm-cache/_npx on
+    // Windows) hold one directory per package rather than the package itself.
+    const roots = base.endsWith("_npx") && fs.statSync(base).isDirectory()
       ? fs.readdirSync(base).map((d) => path.join(base, d, "node_modules"))
       : [base];
     for (const root of roots) {
@@ -219,8 +234,16 @@ function resolvePlaywright(): unknown | null {
  * download -- and if none is present, say UNVERIFIED rather than quietly pass.
  */
 function findChromium(): string | null {
-  const cache = path.join(os.homedir(), "AppData/Local/ms-playwright");
-  if (!fs.existsSync(cache)) return null;
+  // Playwright puts browsers in a different place per platform. On Linux that
+  // is ~/.cache/ms-playwright, which the old Windows-only path never found --
+  // so even with playwright-core resolved, no browser binary existed to launch.
+  const home = os.homedir();
+  const cache = [
+    path.join(home, ".cache/ms-playwright"),
+    path.join(home, "AppData/Local/ms-playwright"),
+    path.join(home, "Library/Caches/ms-playwright"),
+  ].find((c) => fs.existsSync(c));
+  if (!cache) return null;
   const dirs = fs.readdirSync(cache).filter((d) => d.startsWith("chromium")).sort().reverse();
   const rel =
     process.platform === "win32"

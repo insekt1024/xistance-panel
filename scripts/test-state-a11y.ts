@@ -81,8 +81,16 @@ function findPlaywright(): PW | null {
 }
 
 function findChromium(): string | null {
-  const cache = path.join(os.homedir(), "AppData/Local/ms-playwright");
-  if (!fs.existsSync(cache)) return null;
+  // Playwright's browser cache is per-platform. The Windows-only path never
+  // matches on a Linux runner, so the suite reported "no browser" and fell back
+  // to source guards alone while still exiting green.
+  const home = os.homedir();
+  const cache = [
+    path.join(home, ".cache/ms-playwright"),
+    path.join(home, "AppData/Local/ms-playwright"),
+    path.join(home, "Library/Caches/ms-playwright"),
+  ].find((c) => fs.existsSync(c));
+  if (!cache) return null;
   const dirs = fs.readdirSync(cache).filter((d) => d.startsWith("chromium")).sort().reverse();
   const rel = process.platform === "win32"
     ? ["chrome-win64/chrome.exe"]
