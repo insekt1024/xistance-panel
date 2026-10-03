@@ -79,13 +79,18 @@ jobs:
           VERSION="$(node -p "require('./package.json').version")"
           PRISMA_VERSION="$(node -p "require('./node_modules/prisma/package.json').version")"
           npx tsx scripts/release-manifest.ts build \
-            release-manifest.json \
+            dist/artifact/release-manifest.json \
             "$VERSION" \
             "${{ github.sha }}" \
             amd64 \
             "xistance-panel-v${VERSION}-amd64.tar.gz" \
             dist/artifact \
             "$PRISMA_VERSION"
+          # The root copy is what the local verifiers are pointed at, and the
+          # archive copy is what the archive contains. Writing only the root copy
+          # meant `tar -C dist/artifact` shipped an archive with NO manifest in
+          # it, so the embedded-provenance gate failed on every run.
+          cp dist/artifact/release-manifest.json release-manifest.json
 
       # Archive the staged tree BEFORE the suites run.
       #
@@ -111,7 +116,7 @@ jobs:
           # `VERSION: $(node -p ...)` yields the text "$(node -p ...)" and the
           # filename silently becomes nonsense.
           ARCHIVE="dist/amd64/$(node -p \
-            "require('./release-manifest.json').artifact.name")"
+            "require('./dist/artifact/release-manifest.json').artifact.name")"
           mkdir -p dist/amd64
           tar -czf "$ARCHIVE" -C dist/artifact .
           npx tsx scripts/release-manifest.ts sha256 "$ARCHIVE" > "$ARCHIVE.sha256"
