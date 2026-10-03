@@ -323,6 +323,71 @@ check(
     installStep.includes('bash "$WORK/release-install.sh"'),
     "running it from elsewhere breaks the $SCRIPT_DIR/lib resolution",
   );
+  // The installer REJECTS a bare version. Its guard is
+  //   if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  //     die "Invalid version '$VERSION'. Expected an explicit semver tag such as v1.2.0." 2
+  // so passing --version 1.2.0 exits 2 BEFORE extracting anything. Checking that
+  // the FLAG is passed is not enough -- the VALUE's shape is what it refuses.
+  //
+  // This exact mistake shipped once: the arm64 install gate in ci.yml passed
+  // 1.2.0 and the run failed with that message. Every install gate in the repo,
+  // not just this workflow's, must pass a v-prefixed tag.
+  const TAG_GUARD = /\^v\[0-9\]\+\\\.\[0-9\]\+\\\.\[0-9\]\+\$/;
+  check(
+    "the installer's version guard is the v-prefixed semver this asserts against",
+    TAG_GUARD.test(installerSrc),
+    "could not find the ^v[0-9]+...$ guard in release-install.sh, so this " +
+      "suite cannot confirm any workflow passes the shape it demands",
+  );
+  const WF_DIR = path.join(REPO, ".github", "workflows");
+  for (const wf of fs.readdirSync(WF_DIR).filter((f) => f.endsWith(".yml"))) {
+    const yaml = fs.readFileSync(path.join(WF_DIR, wf), "utf8");
+    // Strip comments first. The workflows EXPLAIN this rule in prose, and one
+    // comment contains the literal text "--version must be ...", which a naive
+    // match reads as a flag with the value "must".
+    const code = yaml
+      .split("\n")
+      .map((l) => (/^\s*#/.test(l) ? "" : l))
+      .join("\n");
+    // Read the WHOLE quoted argument, not the first whitespace-delimited token.
+    // --version "$(node -p "...")" contains spaces, so /\S+/ captured only
+    // "$(node" and never saw the version shape -- which is why the first version
+    // of this gate passed on the exact defect it was written for.
+    const steps = [
+      ...code.matchAll(/--version\s+("(?:[^"\\]|\\.)*"|'[^']*'|[^\s\\]+)/g),
+    ].map((m) => m[1]);
+    if (steps.length === 0) continue;
+    // The value must resolve to a v-prefixed tag. Accepted forms:
+    //   "${{ needs.* }}"   -- a GitHub expression
+    //   "v$EXPR"           -- a v-prefixed substitution
+    //   "$VAR"             -- a variable set earlier in the step, whose value is
+    //                         itself v-prefixed (release.yml's $RELEASE_TAG)
+    // Anything else -- a bare 1.2.0, or "$EXPR" with no leading v -- is a
+    // version the installer's ^v[0-9]+\.[0-9]+\.[0-9]+$ guard rejects.
+    //
+    // A bare $VAR cannot be judged here without resolving it, so when the value
+    // is a plain variable the check follows it back to its assignment in the
+    // same workflow and requires the v-prefix there.
+    const assigns = new Map<string, string>();
+    for (const m of code.matchAll(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=["']?([^"'\s][^"']*)/gm)) {
+      assigns.set(m[1], m[2].trim());
+    }
+    const resolvesToTag = (v: string, depth = 0): boolean => {
+      if (/\$\{\{/.test(v)) return true;
+      if (/^["']?v/.test(v)) return true;
+      const varName = v.replace(/^["']|["']$/g, "");
+      if (!varName.startsWith("$") || depth > 4) return false;
+      const assigned = assigns.get(varName.slice(1));
+      return assigned === undefined ? false : resolvesToTag(assigned, depth + 1);
+    };
+    const bare = steps.filter((v) => !resolvesToTag(v));
+    check(
+      `${wf}: --version is a v-prefixed semver tag, never a bare version`,
+      bare.length === 0,
+      `passing ${bare.join(", ")} exits 2 with "Invalid version ... Expected an ` +
+        `explicit semver tag such as v1.2.0." before extracting anything`,
+    );
+  }
 }
 
 // --- 7. Negative control -----------------------------------------------------

@@ -343,8 +343,14 @@ jobs:
           cp scripts/lib/release-layout.sh scripts/lib/service-unit.sh "$WORK/lib/"
           # The installer requires uid 0 for a real install and exits 4 without
           # it; a run: step is the unprivileged `runner` user.
+          #
+          # --version must be a `v`-prefixed semver TAG, not the bare version.
+          # Passing 1.2.0 fails with:
+          #   Invalid version '1.2.0'. Expected an explicit semver tag such as v1.2.0.
+          # and exits 2 before extracting anything -- found by running this for
+          # real. release.yml gets this right from the version job's output.
           sudo bash "$WORK/release-install.sh" \
-            --version "$(node -p "require('./package.json').version")" \
+            --version "v$(node -p "require('./package.json').version")" \
             --archive "$ARCHIVE"
           # Installed is not the same as serving.
           code=""
