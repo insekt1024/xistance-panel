@@ -711,6 +711,31 @@ if [[ "$ready" != "true" ]]; then
   #
   # Best-effort: never let diagnostics mask the original failure.
   if command -v systemctl >/dev/null 2>&1; then
+    # Walk the WorkingDirectory path component by component. systemd reports only
+    # "Permission denied" for the whole path, so the offending component has to
+    # be identified here. This is the question the arm64 runner can answer and
+    # this host cannot: every component on the local amd64 targets is 0755 and
+    # traversable by the service user, yet arm64 fails with status=200/CHDIR.
+    echo "--- WorkingDirectory path, component by component ---" >&2
+    _xt_wd="${XT_CURRENT_LINK:-}"
+    _xt_probe_dir="$(dirname "$_xt_wd")"
+    for _xt_c in / "$(dirname "$_xt_probe_dir")" "$_xt_probe_dir" "$_xt_wd"; do
+      printf '  %-46s mode=%-6s owner=%s:%s\n' "$_xt_c" \
+        "$(stat -c %a "$_xt_c" 2>/dev/null || echo MISSING)" \
+        "$(stat -c %U "$_xt_c" 2>/dev/null || echo -)" \
+        "$(stat -c %G "$_xt_c" 2>/dev/null || echo -)" >&2
+    done
+    echo "  service user: ${SERVICE_USER}" >&2
+    echo "  can it traverse each component?" >&2
+    for _xt_c in / "$(dirname "$_xt_probe_dir")" "$_xt_probe_dir" "$_xt_wd"; do
+      if su -s /bin/sh -c "cd '$_xt_c'" "$SERVICE_USER" >/dev/null 2>&1; then
+        printf '    ok      %s\n' "$_xt_c" >&2
+      else
+        printf '    DENIED  %s\n' "$_xt_c" >&2
+      fi
+    done
+    echo "  (a DENIED line is the cause; a 200/CHDIR with all ok means the" >&2
+    echo "   sandbox directives are blocking it, not the path modes)" >&2
     echo "--- xistance.service status ---" >&2
     systemctl status xistance.service --no-pager --lines 20 >&2 2>/dev/null || true
     echo "--- recent journal ---" >&2
