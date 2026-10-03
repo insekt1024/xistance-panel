@@ -69,13 +69,17 @@ No `v1.2.0` tag, no commit, no push. The worktree is intentionally dirty
    the committed amd64 manifest), and the provenance step read the provisional
    seed instead of the staged manifest. Both fixed in `ci.yml` and
    `release.yml`.
-5. **The arm64 artifact has never been INSTALLED by any process** (TASK-119).
-   Still true, and now the *only* arm64 gap. TASK-139 built and verified it on
-   native hardware but deliberately did not install: the release workflow's
-   arm64 install gate is where that happens, after the tag. A CI install gate
-   exists on both matrix cells, before the upload — and its three defects (wrong
-   library path, drifting version argument, unprivileged invocation) plus the
-   self-copy no-op were all fixed in TASK-120.
+5. ~~**The arm64 artifact has never been INSTALLED by any process**~~
+   **RESOLVED (TASK-140).** Run `37156870877`, arm64 job 17/17 steps success on
+   native aarch64 — including `Install the arm64 archive (fail closed)`. The
+   release workflow's version of that gate had three defects (TASK-120) and the
+   new one found two more: it passed a bare `1.2.0` where the installer requires
+   a `v`-prefixed tag, and the installer's readiness failure reported no cause.
+   Diagnosing that exposed a real defect that was never about arm64 at all —
+   the release tree inherited the caller's umask, so on a runner with `077` it
+   landed `0700` and the service could not enter its own working directory
+   (`status=200/CHDIR`). The amd64 targets had been passing by accident on umask
+   `022`.
 6. ~~**FRP proxies with a plugin cannot work at all**~~ — **RESOLVED (TASK-132).**
    `buildFrpConfig()` emitted `addr` and `port` under `[proxies.plugin]`; frpc
    **0.70.1**, the pinned version, rejects both as unknown fields (exit 1), so any
