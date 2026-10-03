@@ -220,6 +220,33 @@ jobs:
       - name: Stage public and static assets
         run: npx tsx scripts/stage-release-assets.ts
 
+      # The stager REQUIRES release-manifest.json at the repo root, copies it
+      # into the staged tree, and then inspects it. The repository's committed
+      # manifest says amd64, so staging arm64 against it fails:
+      #
+      #   Release manifest architecture mismatch: expected arm64
+      #
+      # amd64 only works today because that committed file happens to match the
+      # architecture being built. The release workflow's arm64 cell would fail
+      # the same way -- this is a latent release blocker, not something the new
+      # job introduced.
+      #
+      # So seed an arm64 manifest first. Its digest is provisional, and that is
+      # fine: stagedPayloadDigest excludes release-manifest.json, because a file
+      # cannot contain its own hash. The real one is written after staging.
+      - name: Seed the arm64 release manifest
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          PRISMA_VERSION="$(node -p "require('./node_modules/prisma/package.json').version")"
+          npx tsx scripts/release-manifest.ts build \
+            release-manifest.json \
+            "$VERSION" \
+            "${{ github.sha }}" \
+            arm64 \
+            "xistance-panel-v${VERSION}-arm64.tar.gz" \
+            apps/web/.next/standalone \
+            "$PRISMA_VERSION"
+
       - name: Stage the arm64 artifact
         run: npx tsx scripts/stage-release-artifact.ts . dist/artifact --architecture arm64
 

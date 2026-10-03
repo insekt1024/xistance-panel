@@ -147,6 +147,33 @@ jobs:
       # The manifest must therefore be written into the staged tree, which means
       # staging has to happen first. `stagedPayloadDigest` excludes
       # release-manifest.json, because a file cannot contain its own hash.
+      # The stager requires release-manifest.json at the repo root, copies it
+      # into the staged tree, and inspects it -- and the repository's committed
+      # manifest says amd64. The amd64 cell therefore passes only by coincidence;
+      # the arm64 cell failed at staging with
+      #
+      #   Release manifest architecture mismatch: expected arm64
+      #
+      # Seed the manifest for THIS cell's architecture first. The digest here is
+      # provisional and gets rebuilt against the staged tree in the next step,
+      # which is fine: stagedPayloadDigest excludes release-manifest.json because
+      # a file cannot contain its own hash.
+      - name: Seed the release manifest for this architecture
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          ARCHITECTURE: ${{ matrix.architecture }}
+          ARTIFACT_NAME: xistance-panel-v${{ needs.version.outputs.version }}-${{ matrix.architecture }}.tar.gz
+        run: |
+          PRISMA_VERSION="$(node -p "require('./node_modules/prisma/package.json').version")"
+          npx tsx scripts/release-manifest.ts build \
+            release-manifest.json \
+            "$VERSION" \
+            "${{ github.sha }}" \
+            "$ARCHITECTURE" \
+            "$ARTIFACT_NAME" \
+            apps/web/.next/standalone \
+            "$PRISMA_VERSION"
+
       - name: Stage release artifact
         run: npx tsx scripts/stage-release-artifact.ts . dist/artifact --architecture "${{ matrix.architecture }}"
 
