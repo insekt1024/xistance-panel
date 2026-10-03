@@ -316,6 +316,50 @@ jobs:
           SAMPLE="$(echo "$ENGINES" | head -1)"
           file "$SAMPLE" || true
 
+      # The same install gate the release workflow runs on its arm64 cell
+      # (step "Install the archive on this architecture"), executed on every push
+      # instead of only after a tag. This is what closes TASK-119: the arm64
+      # artifact had never been installed by ANY process, because the only place
+      # that did it was post-tag and the tag needed this evidence.
+      #
+      # Done before the upload, exactly as release.yml does it, so an
+      # uninstallable payload fails the job rather than becoming an asset.
+      - name: Install the arm64 archive (fail closed)
+        run: |
+          set -euo pipefail
+          sudo -n true
+          ARCHIVE=$(ls dist/arm64/*.tar.gz | head -1)
+          echo "installing $ARCHIVE on $(uname -m)"
+          # The archive was checksummed above; re-verify so the installer is
+          # handed a payload proven identical to the one uploaded.
+          (cd dist/arm64 && sha256sum -c "$(basename "$ARCHIVE").sha256")
+          # Libraries must sit BESIDE the installer as $SCRIPT_DIR/lib. The
+          # installer resolves release-layout.sh relative to its own directory and
+          # dies with "Could not find release-layout.sh and service-unit.sh."
+          # exit 7 otherwise.
+          WORK="$(mktemp -d)"
+          cp scripts/release-install.sh "$WORK/release-install.sh"
+          mkdir -p "$WORK/lib"
+          cp scripts/lib/release-layout.sh scripts/lib/service-unit.sh "$WORK/lib/"
+          # The installer requires uid 0 for a real install and exits 4 without
+          # it; a run: step is the unprivileged `runner` user.
+          sudo bash "$WORK/release-install.sh" \
+            --version "$(node -p "require('./package.json').version")" \
+            --archive "$ARCHIVE"
+          # Installed is not the same as serving.
+          code=""
+          for _ in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              http://127.0.0.1:8080/api/health || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          [ "$code" = "200" ] || {
+            echo "::error::arm64 release does not answer /api/health (got ${code:-no response})" >&2
+            exit 1
+          }
+          echo "installed and healthy on $(uname -m)"
+
       - name: Upload the arm64 payload as an artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
