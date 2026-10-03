@@ -57,7 +57,21 @@ export function findPlaywright(): PW | null {
 }
 
 export function findChromium(): string | null {
-  const cache = path.join(os.homedir(), "AppData/Local/ms-playwright");
+  // The cache lives somewhere different on every platform. Hardcoding the
+  // Windows path meant this returned null on a Linux runner -- so `startApp`
+  // silently fell back to a mode without a browser, and the suites that boot an
+  // app and log in over HTTP failed against a half-started server.
+  //
+  // Playwright's own locations, in order of likelihood:
+  //   win32  %LOCALAPPDATA%\ms-playwright
+  //   darwin ~/Library/Caches/ms-playwright
+  //   linux  ~/.cache/ms-playwright   (and XDG_CACHE_HOME when set)
+  const cache =
+    process.platform === "win32"
+      ? path.join(os.homedir(), "AppData", "Local", "ms-playwright")
+      : process.platform === "darwin"
+        ? path.join(os.homedir(), "Library", "Caches", "ms-playwright")
+        : path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "ms-playwright");
   if (!fs.existsSync(cache)) return null;
   const dirs = fs.readdirSync(cache).filter((d) => d.startsWith("chromium")).sort().reverse();
   const rel = process.platform === "win32"
@@ -233,6 +247,16 @@ export async function startApp(opts: AppOptions): Promise<AppHandle> {
         // Test-only secrets. Real values never appear in this repo.
         XT_SESSION_SECRET: "harness-secret-0123456789abcdef0123456789abcdef",
         XT_ENCRYPTION_KEY: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        // getJwtSecret() THROWS when NODE_ENV=production and this is unset, so
+        // every /api/auth/login answered 500 -- "login failed: HTTP 500" across
+        // six suites -- on a machine without apps/web/.env.local.
+        //
+        // It went unnoticed for the opposite reason: the harness runs
+        // NODE_ENV=production unconditionally, but `next start` also loads
+        // .env.local from apps/web, and that file exists on the developer's
+        // machine and is correctly gitignored. So the suites passed locally and
+        // failed in CI, for a missing file rather than a missing setting.
+        JWT_SECRET: process.env.JWT_SECRET ?? "harness-jwt-secret-0123456789abcdef0123456789abcdef",
         XT_TRUST_PROXY: "false",
         // The engine's REMOTE config dir is a POSIX path (/etc/xistance) that
         // becomes "\etc\xistance" on Windows, so any deploy through the remote
