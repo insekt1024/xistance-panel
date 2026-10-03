@@ -13,10 +13,17 @@
 #     --admin-email you@example.com
 #
 # Bootstrap-only options (consumed here, rest forwarded to install.sh):
+#   --release           install a prebuilt release artifact (no source build)
+#   --version <TAG>     release tag to install, e.g. v1.2.0 (required with --release)
+#   --source            explicitly opt in to a full source checkout + build
 #   --repo <URL>        git repo (default: $XT_MIRROR or github.com/insekt1024/xistance-panel.git)
 #   --branch <NAME>     branch/tag to install, e.g. v1.1.2 (default: master)
 #   --workdir <DIR>     reuse an existing checkout dir instead of temp
 #   --help              show install.sh help
+#
+# Zero-build (recommended) — no npm, no next build on the server:
+#   curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/<TAG>/scripts/bootstrap.sh \
+#     -o /tmp/xp-install.sh && sudo bash /tmp/xp-install.sh --release --version <TAG>
 #
 # --repo/--branch are also forwarded to install.sh so later menu-driven
 # updates pull the same source. XT_MIRROR switches every download
@@ -30,16 +37,24 @@ set -uo pipefail
 GH_BASE="${XT_MIRROR:-https://github.com}"
 GH_BASE="${GH_BASE%/}"
 
-REPO_URL="${GH_BASE}/insekt1024/xistance-panel.git"
+REPO_SLUG="${XT_REPO_SLUG:-insekt1024/xistance-panel}"
+REPO_URL="${GH_BASE}/${REPO_SLUG}.git"
 BRANCH="master"
 WORKDIR=""
 CUSTOM_REPO=0
+RELEASE_MODE=0
+SOURCE_MODE=0
+RELEASE_VERSION=""
 
 ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --repo) REPO_URL="${2:-}"; CUSTOM_REPO=1; shift 2;;
-    --repo=*) REPO_URL="${1#*=}"; CUSTOM_REPO=1; shift;;
+    --release) RELEASE_MODE=1; shift;;
+    --version) RELEASE_VERSION="${2:-}"; shift 2;;
+    --version=*) RELEASE_VERSION="${1#*=}"; shift;;
+    --source) SOURCE_MODE=1; shift;;
+    --repo) REPO_SLUG="${2:-}"; REPO_URL="${GH_BASE}/${REPO_SLUG}.git"; CUSTOM_REPO=1; shift 2;;
+    --repo=*) REPO_SLUG="${1#*=}"; REPO_URL="${GH_BASE}/${REPO_SLUG}.git"; CUSTOM_REPO=1; shift;;
     --branch) BRANCH="${2:-}"; shift 2;;
     --branch=*) BRANCH="${1#*=}"; shift;;
     --workdir) WORKDIR="${2:-}"; shift 2;;
@@ -81,6 +96,47 @@ fi
 need_cmd() { command -v "$1" >/dev/null 2>&1; }
 need_cmd curl || { echo "curl is required to bootstrap the installer." >&2; exit 1; }
 need_cmd tar || { echo "tar is required to bootstrap the installer." >&2; exit 1; }
+
+# ---------------------------------------------------------------------------
+# Release mode: fetch only the release installer, never a source checkout.
+#
+# This is the zero-build path. A full `git clone` plus `npm ci` plus
+# `next build` on a 1 vCPU host is exactly what this release avoids, so a
+# checkout is only performed when it is explicitly requested with --source.
+# ---------------------------------------------------------------------------
+if [[ "$RELEASE_MODE" -eq 1 ]]; then
+  if [[ -z "$RELEASE_VERSION" ]]; then
+    echo "--release requires an explicit --version, for example: --release --version v1.2.0" >&2
+    echo "An unpinned install is not reproducible." >&2
+    exit 2
+  fi
+  # Re-exec as root so release-install.sh never has to ask mid-run.
+  if [[ "$(id -u)" -ne 0 ]]; then
+    echo "Re-executing as root via sudo…"
+    exec sudo -E bash "$0" --release --version "$RELEASE_VERSION" --repo "$REPO_SLUG" "${ARGS[@]}"
+  fi
+  RELEASE_INSTALLER_URL="${GH_BASE}/${REPO_SLUG}/raw/${RELEASE_VERSION}/scripts/release-install.sh"
+  echo "Downloading release installer for ${RELEASE_VERSION}…"
+  RELEASE_TMP="$(mktemp -d /tmp/xistance-rel.XXXXXX)"
+  trap 'rm -rf -- "$RELEASE_TMP"' EXIT
+  if ! curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 20 \
+       -o "${RELEASE_TMP}/release-install.sh" "$RELEASE_INSTALLER_URL"; then
+    echo "Could not download the release installer from ${RELEASE_INSTALLER_URL}" >&2
+    exit 1
+  fi
+  exec bash "${RELEASE_TMP}/release-install.sh" --version "$RELEASE_VERSION" \
+    --repo "$REPO_SLUG" "${ARGS[@]}"
+fi
+
+# A source checkout must be an explicit choice, not a silent default.
+if [[ "$SOURCE_MODE" -ne 1 ]]; then
+  echo "Refusing to perform a source build without an explicit --source flag." >&2
+  echo "Recommended (zero-build, prebuilt artifact):" >&2
+  echo "  sudo bash $0 --release --version v1.2.0" >&2
+  echo "Source checkout + build on this host:" >&2
+  echo "  sudo bash $0 --source" >&2
+  exit 2
+fi
 
 TMPDIR_CREATED=0
 if [[ -z "$WORKDIR" ]]; then

@@ -72,6 +72,38 @@ GOST_VERSION="${GOST_VERSION:-}"
 XRAY_VERSION="${XRAY_VERSION:-}"
 MIRROR="${XT_MIRROR:-https://github.com}"
 
+# Expected SHA-256 per binary, keyed "<name>_<arch>". Empty means "no expected
+# digest supplied" and the download is REFUSED unless XT_ALLOW_UNVERIFIED_BIN=1.
+#
+# Why this is opt-out rather than opt-in: a tunnel binary runs as a long-lived
+# privileged daemon that accepts inbound traffic. Trusting "the bytes that came
+# back from the URL" means trusting the mirror, the TLS path, and anything that
+# can answer a redirect -- with no independent evidence of WHAT arrived. The
+# upstream projects publish signed release checksums; a release that pins them
+# turns that from an assumption into a check.
+#
+# All eight entries below are NOT observations we made of our own download:
+# each was taken from the upstream project's own published checksum file AND
+# independently confirmed by re-downloading the asset and recomputing the
+# digest, so they are upstream-pinned values with a second source agreeing --
+# not a digest table filled from the same fetch it is meant to validate.
+# xray's come from its per-asset <asset>.dgst (SHA2-256 line). Sources, and the
+# verification run, are recorded in
+# .agent/evidence/task-45-tunnel-binary-digests.md.
+# An empty entry is still refused by default below, so removing a pin degrades
+# safely rather than silently.
+XT_ALLOW_UNVERIFIED_BIN="${XT_ALLOW_UNVERIFIED_BIN:-0}"
+declare -A BIN_SHA256=(
+  [backhaul_amd64]="57bf95c2eabeddb1152d2e94ac42f4310883ce0fb909ee2a57bd53503b2dabbc"
+  [backhaul_arm64]="9a424c97ff16fc3f682e8314c418790d2b5bf3136e008edbb6cd402ea00999f6"
+  [frp_amd64]="333da23d1b9009d7c01638e9ba38cf4600f7d37d393f854e96ee1396adefa9a6"
+  [frp_arm64]="3990f396a9a490ee7f0e5f355287750ed41520064ed999eab443b5e9a78d773d"
+  [gost_amd64]="1b6d47e6b850479b23fda484b3a8193c7bc0d5dc38fa5a02b4b4c57a77534d92"
+  [gost_arm64]="3c1bf20c223f424f9a706cc4a3042f6e79084ebe3becca4899e1dc9fb86fd661"
+  [xray_amd64]="23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"
+  [xray_arm64]="4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c"
+)
+
 STEPS=(preflight deps node swap binaries env build deploy db systemd firewall verify)
 
 # ---------------------------------------------------------------------------
@@ -312,9 +344,24 @@ preflight() {
   local mem_kb; mem_kb="$(awk '/MemTotal/{print $2}' /proc/meminfo 2>/dev/null || echo 0)"
   (( mem_kb > 0 && mem_kb < 900000 )) && warn "Low RAM ($((mem_kb/1024))M); build may be slow." "رم کم است."
   # Port must be free.
+  # `exec 3>&- 2>/dev/null` here REDIRECTED THE SHELL'S OWN STDERR for every
+  # subsequent command: `exec` with redirections replaces the shell's fds
+  # permanently. So the next line, `die "Port ... already in use"`, wrote its
+  # message to /dev/null and the installer exited 1 saying NOTHING. Found by
+  # running it: stderr was empty while the port check had clearly fired.
+  #
+  # Close fd 3 in a SUBSHELL, and never touch the shell's own stderr.
   if (command -v ss >/dev/null && ss -ltn 2>/dev/null | grep -q ":${PANEL_PORT} ") || \
      (exec 3<>"/dev/tcp/127.0.0.1/${PANEL_PORT}" 2>/dev/null); then
-    exec 3>&- 2>/dev/null || true
+    # Close fd 3 ONLY, in a subshell.
+    #
+    # The previous form was `exec 3>&- 2>/dev/null`. `exec` with redirections
+    # replaces the shell's OWN descriptors permanently, so fd 2 became /dev/null
+    # for the rest of the script: the `die` below wrote its "Port ... already in
+    # use" message into a black hole and the installer exited 1 with completely
+    # empty stderr. Found by RUNNING it -- the trace stopped dead at `+ exec` and
+    # nothing explained the failure.
+    (exec 3>&-) 2>/dev/null || true
     die "Port $PANEL_PORT is already in use. Pick another with --port." "پورت $PANEL_PORT اشغال است."
   fi
   # systemd + connectivity are warnings (mirror/offline setups exist).
@@ -475,20 +522,52 @@ latest_release() { # repo -> version tag (tag_name), "unknown" when unreachable
   printf '%s' "$tag"
 }
 
-fetch_and_extract() { # url asset-name dst-dir bin-names...
+fetch_and_extract() { # url asset-name dst-dir bin-names... -- expected-sha256
   local url="$1" asset="$2" dst="$3"; shift 3
+  # The expected digest is the LAST argument, after the binary names.
+  local bins=() want=""
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "--" ]]; then want="$2"; shift 2; break; fi
+    bins+=("$1"); shift
+  done
   local tmp; tmp="$(mktemp -d)"
   # NOTE: expand $tmp now — a single-quoted trap would see the local as
   # unbound when it fires on RETURN under `set -u`.
   trap "rm -rf '${tmp}'" RETURN
   curl -fL --retry 3 --connect-timeout 15 -o "$tmp/$asset" "$url" || return 1
+
+  # Verify BEFORE extracting. A tar that reaches `tar -xzf` is already being
+  # unpacked onto the filesystem; verifying afterwards leaves a window where
+  # unverified content exists on disk.
+  if [[ -n "$want" ]]; then
+    local got; got="$(sha256sum "$tmp/$asset" | cut -d" " -f1)"
+    if [[ "$got" != "$want" ]]; then
+      warn "Checksum mismatch for $asset" \
+           "احماز کلید نامعتبر برای ${asset}: expected ${want}, got ${got}"
+      return 1
+    fi
+    ok "Checksum verified for $asset" "احماز کلید تأیید شد."
+  elif [[ "$XT_ALLOW_UNVERIFIED_BIN" != "1" ]]; then
+    # Refuse rather than trust. The override exists for an air-gapped host
+    # where the operator supplies binaries out of band, and it is loud in the
+    # install log so an unverified install is never mistaken for a verified one.
+    warn "No pinned checksum for $asset — refusing to install it unverified." \
+         "برای ${asset} چک‌سام ثبت نشده؛ نصب بدون تأیید انجام نشد."
+    note "Set XT_ALLOW_UNVERIFIED_BIN=1 to install anyway, or pin the digest in install.sh:"
+    note "  ${url}"
+    return 1
+  else
+    warn "Installing $asset WITHOUT checksum verification (XT_ALLOW_UNVERIFIED_BIN=1)." \
+         "نصب ${asset} بدون تأیید احماز کلید."
+  fi
+
   case "$asset" in
     *.tar.gz|*.tgz) tar -xzf "$tmp/$asset" -C "$tmp" || return 1;;
     *.zip)          unzip -q -o "$tmp/$asset" -d "$tmp" || return 1;;
   esac
   mkdir -p "$dst"
   local n found=0
-  for n in "$@"; do
+  for n in "${bins[@]}"; do
     if find "$tmp" -type f -name "$n" -exec cp {} "$dst/" \; >/dev/null 2>&1; then
       chmod +x "$dst/$n"; found=1
     fi
@@ -500,48 +579,90 @@ install_binaries() {
   mkdir -p "$BIN_DIR"
   local bh_ver fp_ver gost_ver xray_ver x_asset fails=0
 
-  bh_ver="${BACKHAUL_VERSION:-$(latest_release Musixal/Backhaul)}"
-  [[ "$bh_ver" == "unknown" ]] && bh_ver="v0.7.2"
+  # A version and its pinned digest MUST come as a pair. If the version floats
+  # (resolved from the latest release at run time) while the digest stays pinned
+  # to one specific tag, then every upstream release silently invalidates the
+  # digest and the install refuses -- correct fail-closed behaviour, but it makes
+  # the default install impossible. So: when a digest is pinned for this arch,
+  # use the version that digest was taken from. Operators can still override
+  # with *_VERSION, and an override that no longer matches the pinned digest will
+  # be refused loudly rather than installed -- which is the point of pinning.
+  case "${BIN_SHA256[backhaul_${GO_ARCH}]:-}" in
+    "") bh_ver="${BACKHAUL_VERSION:-$(latest_release Musixal/Backhaul)}"
+        [[ "$bh_ver" == "unknown" ]] && bh_ver="v0.7.2";;
+    *)  bh_ver="${BACKHAUL_VERSION:-v0.7.2}"
+        [[ "$bh_ver" != "v0.7.2" ]] && \
+          warn "BACKHAUL_VERSION=$bh_ver does not match the pinned digest (from v0.7.2); it will be refused." \
+               "نسخه backhaul با چک‌سام پین‌شده مطابقت ندارد و رد خواهد شد.";;
+  esac
   info "Installing backhaul $bh_ver…" "در حال نصب backhaul…"
   if fetch_and_extract \
       "$MIRROR/Musixal/Backhaul/releases/download/$bh_ver/backhaul_linux_${GO_ARCH}.tar.gz" \
-      "backhaul_linux_${GO_ARCH}.tar.gz" "$BIN_DIR" backhaul; then
+      "backhaul_linux_${GO_ARCH}.tar.gz" "$BIN_DIR" backhaul -- "${BIN_SHA256[backhaul_${GO_ARCH}]:-}"; then
     ok "backhaul installed." "backhaul نصب شد."
   else
-    warn "backhaul download failed; try BACKHAUL_VERSION=<tag> or XT_MIRROR." \
+    warn "backhaul not installed; try BACKHAUL_VERSION=<tag>, XT_MIRROR, or a pinned checksum." \
          "دانلود backhaul ناموفق بود."; fails=1
   fi
 
-  fp_ver="${FRP_VERSION:-$(latest_release fatedier/frp)}"
-  [[ "$fp_ver" == "unknown" ]] && fp_ver="v0.70.1"
+  case "${BIN_SHA256[frp_${GO_ARCH}]:-}" in
+    "") fp_ver="${FRP_VERSION:-$(latest_release fatedier/frp)}"
+        [[ "$fp_ver" == "unknown" ]] && fp_ver="v0.70.1";;
+    *)  fp_ver="${FRP_VERSION:-v0.70.1}"
+        [[ "$fp_ver" != "v0.70.1" ]] && \
+          warn "FRP_VERSION=$fp_ver does not match the pinned digest (from v0.70.1); it will be refused." \
+               "نسخه frp با چک‌سام پین‌شده مطابقت ندارد و رد خواهد شد.";;
+  esac
   info "Installing frp $fp_ver (frpc + frps)…" "در حال نصب frp…"
   local fp_asset="frp_${fp_ver#v}_linux_${GO_ARCH}.tar.gz"
   if fetch_and_extract \
       "$MIRROR/fatedier/frp/releases/download/$fp_ver/$fp_asset" \
-      "$fp_asset" "$BIN_DIR" frpc frps; then
+      "$fp_asset" "$BIN_DIR" frpc frps -- "${BIN_SHA256[frp_${GO_ARCH}]:-}"; then
     ok "frpc + frps installed." "frpc و frps نصب شدند."
   else
-    warn "frp download failed; check FRP_VERSION=<tag>." "دانلود frp ناموفق بود."; fails=1
+    warn "frp not installed; check FRP_VERSION=<tag> or a pinned checksum." "دانلود frp ناموفق بود."; fails=1
   fi
 
-  gost_ver="${GOST_VERSION:-$(latest_release ginuerzh/gost)}"
-  [[ "$gost_ver" == "unknown" ]] && gost_ver="v2.12.0"
+  case "${BIN_SHA256[gost_${GO_ARCH}]:-}" in
+    "") gost_ver="${GOST_VERSION:-$(latest_release ginuerzh/gost)}"
+        [[ "$gost_ver" == "unknown" ]] && gost_ver="v2.12.0";;
+    *)  gost_ver="${GOST_VERSION:-v2.12.0}"
+        [[ "$gost_ver" != "v2.12.0" ]] && \
+          warn "GOST_VERSION=$gost_ver does not match the pinned digest (from v2.12.0); it will be refused." \
+               "نسخه gost با چک‌سام پین‌شده مطابقت ندارد و رد خواهد شد.";;
+  esac
   info "Installing gost $gost_ver…" "در حال نصب gost…"
   local g_asset="gost_${gost_ver#v}_linux_${GO_ARCH}.tar.gz"
   if fetch_and_extract \
       "$MIRROR/ginuerzh/gost/releases/download/$gost_ver/$g_asset" \
-      "$g_asset" "$BIN_DIR" gost; then
+      "$g_asset" "$BIN_DIR" gost -- "${BIN_SHA256[gost_${GO_ARCH}]:-}"; then
     ok "gost installed." "gost نصب شد."
   else
-    warn "gost download failed; check GOST_VERSION=<tag>." "دانلود gost ناموفق بود."; fails=1
+    warn "gost not installed; check GOST_VERSION=<tag> or a pinned checksum." "دانلود gost ناموفق بود."; fails=1
   fi
 
   # xray-core (XTLS/Xray-core) powers XRAY tunnels and reads 3X-UI inbound
   # credentials. Asset names differ per arch: Xray-linux-64.zip (amd64),
   # Xray-linux-arm64-v8a.zip (arm64); the binary inside is always `xray`.
-  # No pinned fallback: a guessed tag would 404, so offline hosts get a clear
-  # pointer to XRAY_VERSION instead of a misleading failure.
-  xray_ver="${XRAY_VERSION:-$(latest_release XTLS/Xray-core)}"
+  #
+  # Pinned like the other three, from upstream's own `<asset>.dgst` (SHA2-256
+  # line) for v26.3.27, each confirmed by re-downloading the asset and
+  # recomputing. An earlier revision of this file asserted that Xray published
+  # no checksum file and left both slots empty; that was wrong — every Xray
+  # release asset ships a .dgst alongside it. Those two empty slots are why xray
+  # was previously refused unless the operator set XT_ALLOW_UNVERIFIED_BIN=1,
+  # which made XRAY tunnels un-installable by the documented default path.
+  # Version and digest travel as a pair, exactly as for frp/gost/backhaul: a
+  # pinned digest with a floating tag would make every upstream release
+  # invalidate the pin, so the tag defaults to the one the digest came from.
+  case "${BIN_SHA256[xray_${GO_ARCH}]:-}" in
+    "") xray_ver="${XRAY_VERSION:-$(latest_release XTLS/Xray-core)}"
+        [[ "$xray_ver" == "unknown" ]] && xray_ver="v26.3.27";;
+    *)  xray_ver="${XRAY_VERSION:-v26.3.27}"
+        [[ "$xray_ver" != "v26.3.27" ]] && \
+          warn "XRAY_VERSION=$xray_ver does not match the pinned digest (from v26.3.27); it will be refused." \
+               "نسخه xray با چک‌سام پین‌شده مطابقت ندارد و رد خواهد شد.";;
+  esac
   if [[ "$xray_ver" == "unknown" ]]; then
     warn "xray version unknown (offline?); set XRAY_VERSION=<tag> to install it." \
          "نسخه xray مشخص نشد؛ با XRAY_VERSION نصب کنید."; fails=1
@@ -551,19 +672,28 @@ install_binaries() {
     info "Installing xray $xray_ver…" "در حال نصب xray…"
     if fetch_and_extract \
         "$MIRROR/XTLS/Xray-core/releases/download/$xray_ver/$x_asset" \
-        "$x_asset" "$BIN_DIR" xray; then
+        "$x_asset" "$BIN_DIR" xray -- "${BIN_SHA256[xray_${GO_ARCH}]:-}"; then
       ok "xray installed." "xray نصب شد."
     else
-      warn "xray download failed; check XRAY_VERSION=<tag>." "دانلود xray ناموفق بود."; fails=1
+      warn "xray not installed; check XRAY_VERSION=<tag> or a pinned checksum." "دانلود xray ناموفق بود."; fails=1
     fi
   fi
 
   ls -1 "$BIN_DIR" | sed 's/^/    /'
-  [[ -n "$(ls -A "$BIN_DIR" 2>/dev/null)" ]] || \
-    die "No binaries were installed. Provide network access or XT_MIRROR." \
-        "هیچ باینری نصب نشد. دسترسی شبکه یا XT_MIRROR را فراهم کنید."
-  [[ "$fails" -eq 0 ]] || warn "Some binaries failed; tunnels using them will error until installed." \
-    "برخی باینری‌ها نصب نشدند."
+  # A partially-verified install is a supported state, not a fatal one. Dying
+  # here because ONE binary was unreachable or unpinned would make the default
+  # install impossible -- the step would refuse everything and then refuse to
+  # continue. Fail only when nothing at all landed, and otherwise name exactly
+  # what is missing so the operator knows which tunnels will not work yet.
+  # All four are pinned now, so a partial result means network or mirror trouble
+  # rather than an un-pinnable upstream.
+  if [[ -z "$(ls -A "$BIN_DIR" 2>/dev/null)" ]]; then
+    die "No binaries were installed. Provide network access, XT_MIRROR, or pinned checksums." \
+        "هیچ باینری نصب نشد. دسترسی شبکه، XT_MIRROR یا چک‌سام پین‌شده را فراهم کنید."
+  fi
+  [[ "$fails" -eq 0 ]] || warn "Some binaries were NOT installed (unverified or unreachable). Tunnels using them will error until they are." \
+    "برخی باینری‌ها نصب نشدند (تأییدنشده یا غیرقابل‌دسترس). تونل‌های وابسته تا نصب خطا می‌دهند."
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -623,49 +753,69 @@ build_panel() {
   fi
   ( cd "$REPO_ROOT" && npm run build 2>&1 | tail -5 ) \
     || die "Panel build failed (see output above)." "ساخت پنل ناموفق بود."
-  if [[ -d "$REPO_ROOT/apps/web/.next/standalone" ]]; then
-    # The standalone server serves /_next/static from its OWN tree, so these
-    # assets must be staged beside it. Skipping or botching this leaves a
-    # panel that still returns 200 for every page while every stylesheet and
-    # script 404s: unstyled, non-interactive, and silent in the logs. It used
-    # to be `|| true`, which hid exactly that. Fail loudly instead.
-    local static_src="$REPO_ROOT/apps/web/.next/static"
-    local static_dst="$REPO_ROOT/apps/web/.next/standalone/apps/web/.next/static"
-    [[ -d "$static_src" ]] \
-      || die "Build produced no static assets ($static_src)." \
-             "بیلد فایل‌های استاتیک تولید نکرد."
-    # cp -r into an existing directory would nest it as static/static and
-    # break every asset path, so clear the destination first.
-    rm -rf "$static_dst"
-    mkdir -p "$(dirname "$static_dst")"
-    cp -r "$static_src" "$static_dst" \
-      || die "Could not stage static assets; the panel would load unstyled." \
-             "انتقال فایل‌های استاتیک ناموفق بود؛ پنل بدون استایل بالا می‌آمد."
-    [[ -d "$static_dst/chunks" ]] \
-      || die "Static assets staged but chunks/ is missing." \
-             "فایل‌های استاتیک کامل منتقل نشدند."
-  else
-    die "Build produced no standalone output." "خروجی standalone ساخته نشد."
-  fi
+  npx tsx "$REPO_ROOT/scripts/stage-release-assets.ts" "$REPO_ROOT" \
+    || die "Build did not produce a complete standalone release artifact." \
+           "خروجی standalone شامل فایل‌های استاتیک و public کامل نبود."
   ok "Panel build complete." "ساخت پنل کامل شد."
 }
 
 deploy_panel() {
   backup_existing
-  mkdir -p "$INSTALL_DIR" "$DATA_DIR" "$ETC_DIR"
-  info "Deploying to $INSTALL_DIR…" "در حال استقرار در $INSTALL_DIR…"
-  tar -C "$REPO_ROOT" --exclude=.git --exclude=.next --exclude=tunnels \
-      --exclude='*.db' --exclude='*.db-journal' -cf - . \
-    | tar -C "$INSTALL_DIR" -xf - \
-    || die "Deploy copy failed." "کپی استقرار ناموفق بود."
-  rm -rf "$INSTALL_DIR/apps/web/.next"
-  cp -r "$REPO_ROOT/apps/web/.next" "$INSTALL_DIR/apps/web/.next" \
+  mkdir -p "$DATA_DIR" "$ETC_DIR"
+  # Immutable, versioned release layout (TASK-10). The active release is a
+  # version-derived directory under $INSTALL_DIR/releases, activated through a
+  # pointer, so a published release is never overwritten in place.
+  local lib_file="$REPO_ROOT/scripts/lib/release-layout.sh"
+  # shellcheck source=lib/release-layout.sh
+  [[ -f "$lib_file" ]] && source "$lib_file"
+
+  local version candidate
+  version="$(xt_detect_version || true)"
+  info "Deploying release ${version}… " "در حال استقرار نسخه ${version}…"
+
+  if declare -F xt_create_release_dir >/dev/null 2>&1; then
+    candidate="$(xt_create_release_dir "$version" 2>/dev/null)" || candidate=""
+  fi
+
+  if [[ -n "$candidate" && -d "$candidate" ]]; then
+    info "Deploying to $candidate…" "در حال استقرار در $candidate…"
+    # Extract into the candidate only. If any step fails the active release is
+    # never touched, because activation happens after the copy succeeds.
+    if ! tar -C "$candidate" -xf - ; then
+      rm -rf -- "$candidate" 2>/dev/null || true
+      die "Deploy extraction failed; the previous release is untouched." \
+          "استخراج ناموفق بود؛ نسخه فعال قبلی دست‌نخورده باقی ماند."
+    fi
+    touch "$candidate/.bootstrap-ok" 2>/dev/null || true
+    ACTIVE_RELEASE_DIR="$candidate"
+  else
+    # Fallback for a source deploy (bootstrap path) that has no version marker:
+    # keep the previous single-directory behaviour rather than failing.
+    mkdir -p "$INSTALL_DIR"
+    info "Deploying to $INSTALL_DIR (source mode)…" "در حال استقرار در $INSTALL_DIR (حالت سورس)…"
+    tar -C "$REPO_ROOT" --exclude=.git --exclude=.next --exclude=tunnels \
+        --exclude='*.db' --exclude='*.db-journal' -cf - . \
+      | tar -C "$INSTALL_DIR" -xf - \
+      || die "Deploy copy failed." "کپی استقرار ناموفق بود."
+    touch "$INSTALL_DIR/.bootstrap-ok" 2>/dev/null || true
+    ACTIVE_RELEASE_DIR="$INSTALL_DIR"
+  fi
+
+  rm -rf "$ACTIVE_RELEASE_DIR/apps/web/.next"
+  cp -r "$REPO_ROOT/apps/web/.next" "$ACTIVE_RELEASE_DIR/apps/web/.next" \
     || die "Could not copy build output." "کپی خروجی ساخت ناموفق بود."
   cp "$REPO_ROOT/packages/tunnel-core/src/forwarder-runner.ts" "$DATA_DIR/forwarder-runner.ts" \
     || die "Could not deploy forwarder-runner." "استقرار forwarder ناموفق بود."
-  touch "$INSTALL_DIR/.bootstrap-ok" 2>/dev/null || true
   [[ -n "${XP_BOOTSTRAP_DIR:-}" ]] && touch "$XP_BOOTSTRAP_DIR/.bootstrap-ok" 2>/dev/null || true
-  ok "Deployed to $INSTALL_DIR." "استقرار در $INSTALL_DIR کامل شد."
+
+  # Activate only after the payload is complete, so a crash mid-deploy leaves
+  # the previous release serving traffic.
+  if [[ "$ACTIVE_RELEASE_DIR" != "$INSTALL_DIR" ]] && declare -F xt_activate_release >/dev/null 2>&1; then
+    xt_activate_release "$ACTIVE_RELEASE_DIR" \
+      || die "Could not activate release $ACTIVE_RELEASE_DIR." "فعال‌سازی نسخه ناموفق بود."
+  fi
+
+  ok "Deployed to $ACTIVE_RELEASE_DIR." "استقرار در $ACTIVE_RELEASE_DIR کامل شد."
 }
 
 # ---------------------------------------------------------------------------
@@ -679,19 +829,46 @@ init_db() {
   info "Initialising database…" "در حال مقداردهی پایگاه‌داده…"
   local dbdir="$INSTALL_DIR/packages/db"
   [[ -d "$dbdir" ]] || die "Deploy step missing ($dbdir). Re-run install." "استقرار ناقص است."
+  # The release artifact ships the Prisma CLIENT but deliberately not the CLI
+  # (see apply-migrations.mjs). Calling `npx prisma` here would resolve to
+  # nothing local and download the CLI from the registry at install time -- a
+  # network install on the target, running unpinned code that no manifest or
+  # checksum covers. Use the shipped zero-build entry points instead, and keep
+  # the CLI path only for an explicit source build where prisma is really there.
+  local migrator="$ACTIVE_RELEASE_DIR/apply-migrations.mjs"
+  local adminer="$ACTIVE_RELEASE_DIR/create-admin.mjs"
   (
-    cd "$dbdir" || exit 1
     set -a; . "$ENV_FILE"; set +a
-    npx prisma db push --accept-data-loss --skip-generate >/dev/null 2>&1 \
-      || { npx prisma generate >/dev/null 2>&1 \
-           && npx prisma db push --accept-data-loss >/dev/null 2>&1; } \
-      || exit 1
-    XT_ADMIN_EMAIL="$admin_email" XT_ADMIN_PASSWORD="$admin_pass" \
-      npx prisma db seed >/dev/null 2>&1 || exit 1
+    if [[ -f "$migrator" && -f "$adminer" ]]; then
+      # Zero-build path: node:sqlite + the migration SQL already in the artifact.
+      # `node` is the binary this installer already preflights (see need_cmd node),
+      # so there is no separate interpreter variable to introduce here.
+      need_cmd node || exit 1
+      node "$migrator" --database "${DATABASE_URL#file:}" \
+        --migrations "$ACTIVE_RELEASE_DIR/packages/db/prisma/migrations" \
+        >/dev/null 2>&1 || exit 1
+      XT_ADMIN_EMAIL="$admin_email" XT_ADMIN_PASSWORD="$admin_pass" \
+        node "$adminer" --database "${DATABASE_URL#file:}" \
+        --email "$admin_email" --password "$admin_pass" \
+        >/dev/null 2>&1 || exit 1
+    elif command -v prisma >/dev/null 2>&1; then
+      # Source build: the CLI genuinely exists, so the original path is correct.
+      cd "$dbdir" || exit 1
+      npx prisma db push --accept-data-loss --skip-generate >/dev/null 2>&1 \
+        || { npx prisma generate >/dev/null 2>&1 \
+             && npx prisma db push --accept-data-loss >/dev/null 2>&1; } \
+        || exit 1
+      XT_ADMIN_EMAIL="$admin_email" XT_ADMIN_PASSWORD="$admin_pass" \
+        npx prisma db seed >/dev/null 2>&1 || exit 1
+    else
+      # Neither path is available. Fail loudly rather than let npx reach the
+      # network: a silent registry fetch is exactly the case we are avoiding.
+      return 1
+    fi
   ) || die "Database init/seed failed." "مقداردهی پایگاه‌داده ناموفق بود."
   ok "Database ready. Admin: $admin_email" \
      "پایگاه‌داده آماده است. مدیر: $admin_email"
-  if [[ "$generated" -eq 1 ]]; then
+  if [[ "$generated" == 1 ]]; then
     say ""
     printf '%s%s%s\n' "$C_YEL" "  Initial admin password: $admin_pass" "$C_RST"
     printf '%s\n' "  رمز عبور اولیه مدیر: $admin_pass"
@@ -704,31 +881,53 @@ init_db() {
 # systemd
 # ---------------------------------------------------------------------------
 install_systemd() {
-  local server_js="$INSTALL_DIR/apps/web/.next/standalone/apps/web/server.js"
-  [[ -f "$server_js" ]] || server_js="$INSTALL_DIR/apps/web/server.js"
+  # Run through the active release pointer so a cutover takes effect on the
+  # next restart without rewriting the unit (TASK-11).
+  local release_root="$INSTALL_DIR/current"
+  local server_js="$release_root/apps/web/.next/standalone/apps/web/server.js"
+  [[ -f "$server_js" ]] || server_js="$release_root/apps/web/server.js"
+  # Fall back to the concrete release directory when no pointer exists yet
+  # (first install), so the unit is always resolvable.
+  if [[ ! -f "$server_js" ]]; then
+    local direct=""
+    direct="$(xt_current_release 2>/dev/null || true)"
+    if [[ -n "$direct" ]]; then
+      release_root="$direct"
+      server_js="$direct/apps/web/.next/standalone/apps/web/server.js"
+      [[ -f "$server_js" ]] || server_js="$direct/apps/web/server.js"
+    fi
+  fi
   [[ -f "$server_js" ]] || die "Server bundle missing ($server_js)." "باندل سرور یافت نشد."
-  cat > /etc/systemd/system/xistance.service <<EOF
-[Unit]
-Description=Xistance Tunnel Control Panel
-After=network-online.target
-Wants=network-online.target
+  # The unit runs unprivileged, so the account must exist and own the data
+  # directory; otherwise systemd cannot start the panel at all.
+  service_user="${XT_SERVICE_USER:-xistance}"
+  if ! id -u "$service_user" >/dev/null 2>&1; then
+    if command -v useradd >/dev/null 2>&1; then
+      useradd --system --no-create-home --shell /usr/sbin/nologin "$service_user" 2>/dev/null \
+        || warn "Could not create the service account ${service_user}." "ساخت حساب سرویس ممکن نشد."
+    fi
+  fi
+  if id -u "$service_user" >/dev/null 2>&1; then
+    chown -R "$service_user":"$service_user" /var/lib/xistance 2>/dev/null || true
+  else
+    warn "Service account ${service_user} is missing; the unit will fail to start." \
+         "حساب سرویس ${service_user} یافت نشد؛ سرویس اجرا نخواهد شد."
+  fi
 
-[Service]
-Type=simple
-EnvironmentFile=${ENV_FILE}
-WorkingDirectory=${INSTALL_DIR}
-ExecStart=/usr/bin/env node ${server_js}
-Restart=on-failure
-RestartSec=5
-User=root
-RuntimeDirectory=xistance
-RuntimeDirectoryMode=0750
-
-[Install]
-WantedBy=multi-user.target
-EOF
-  systemctl daemon-reload || die "systemctl daemon-reload failed (no systemd?)." "systemd در دسترس نیست."
-  systemctl enable xistance.service >/dev/null 2>&1 || true
+  # Rendered through the shared library so every value is sanitised and quoted;
+  # writing the unit inline is how a path with a space or a newline used to
+  # produce a service that silently pointed at the wrong file.
+  # shellcheck source=lib/service-unit.sh
+  source "$REPO_ROOT/scripts/lib/service-unit.sh"
+  unit_src="$(mktemp)"
+  if ! xt_render_service_unit "$ENV_FILE" "$release_root" "${XT_NODE_BIN:-/usr/bin/node}" \
+       "${XT_SERVICE_USER:-xistance}" > "$unit_src"; then
+    rm -f -- "$unit_src"
+    die "Could not render a safe systemd unit." "ساخت یونیت سیستم‌د ممکن نشد."
+  fi
+  xt_install_service "$unit_src" /etc/systemd/system/xistance.service \
+    || die "systemd did not accept the new unit (is systemd running?)." "سیستم‌د یونیت جدید را نپذیرفت."
+  rm -f -- "$unit_src"
   systemctl restart xistance.service || die "xistance.service failed to start. See: journalctl -u xistance -n 50" \
     "سرویس شروع نشد. لاگ: journalctl -u xistance -n 50"
   ok "Panel service installed + started (xistance.service)." \
@@ -786,6 +985,18 @@ show_status() {
   say ""
   say "  Xistance Panel — status / وضعیت"
   printf '  Service : %s\n' "$(systemctl is-active xistance.service 2>/dev/null || echo "unknown (no systemd?)")"
+  # Release layout (TASK-11): name the active and previous release so a rollback
+  # target is always visible. This prints paths only — never env values.
+  local layout_lib="$REPO_ROOT/scripts/lib/release-layout.sh"
+  if [[ -f "$layout_lib" ]]; then
+    # shellcheck source=lib/release-layout.sh
+    source "$layout_lib"
+    if declare -F xt_status_report >/dev/null 2>&1; then
+      while IFS= read -r line; do
+        printf '  %s\n' "$line"
+      done < <(xt_status_report 2>/dev/null || true)
+    fi
+  fi
   if curl -sf "http://127.0.0.1:${PANEL_PORT}/api/health" 2>/dev/null | head -c 300; then
     say ""; ok "Panel healthy on port $PANEL_PORT." "پنل سالم است."
   else
