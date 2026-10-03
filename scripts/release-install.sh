@@ -466,6 +466,27 @@ if [[ ! -f "$CANDIDATE_DIR/apps/web/server.js" ]]; then
   die "The artifact does not contain apps/web/server.js; refusing to activate it." 7
 fi
 
+# The release directory is created by whoever runs the installer, and it keeps
+# whatever mode that umask produces. The unit runs as ${SERVICE_USER}, so a
+# restrictive umask makes the service unable to enter its own working directory
+# and systemd aborts before exec:
+#
+#   resolved target mode=700  owner=runner:runner
+#   Main process exited, code=exited, status=200/CHDIR
+#
+# This is why amd64 never saw it and arm64 always does. It is not the
+# architecture: it is the caller's umask. GitHub's runners use 077, so the
+# release lands 0700 owned by `runner`; a normal admin shell uses 022, which
+# lands 0755 and works by luck. The installer must not inherit that accident --
+# it is invoked from sudo, CI, cron and one-line pipes, and each has its own.
+#
+# So pin the mode explicitly instead of relying on the caller's umask: every
+# directory in the release traversable, nothing world-writable.
+if command -v find >/dev/null 2>&1; then
+  find "$CANDIDATE_DIR" -type d -exec chmod 0755 {} + 2>/dev/null || true
+  find "$CANDIDATE_DIR" -type f -exec chmod go-w {} + 2>/dev/null || true
+fi
+
 # ---------------------------------------------------------------------------
 # Apply database migrations.
 #
