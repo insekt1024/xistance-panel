@@ -1,0 +1,52 @@
+# Xistance Panel — systemd unit reference
+#
+# The unit that actually gets installed is rendered by
+# scripts/lib/service-unit.sh (xt_render_service_unit), which sanitises and
+# quotes every value it interpolates. This file is the reference copy of that
+# output for a default install:
+#
+#   EnvironmentFile  /etc/xistance/xistance.env
+#   WorkingDirectory /opt/xistance/current
+#   ExecStart        /usr/bin/node /opt/xistance/current/apps/web/server.js
+#   User             xistance
+#
+# It is documentation, not a template to render. An @PLACEHOLDER@ template
+# filled with raw values is exactly how a newline in a path becomes an injected
+# ExecStart. The contract suite (scripts/test-service-contract.sh) asserts
+# against the library, not against this file.
+#
+# Why the panel does not run as root:
+#   It serves a web UI, executes tunnel binaries, and holds an encrypted key
+#   store. Any code-execution bug in any of those becomes a full host
+#   compromise if the process runs as root. The account owns only its data
+#   directory; releases stay root-owned and read-only, so a compromised service
+#   cannot replace its own code.
+[Unit]
+Description=Xistance Tunnel Control Panel
+Documentation=https://github.com/insekt1024/xistance-panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile="/etc/xistance/xistance.env"
+WorkingDirectory="/opt/xistance/current"
+ExecStart="/usr/bin/node" "/opt/xistance/current/apps/web/server.js"
+Restart=on-failure
+RestartSec=5
+User=xistance
+Group=xistance
+RuntimeDirectory=xistance
+RuntimeDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
