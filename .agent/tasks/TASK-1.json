@@ -1,0 +1,61 @@
+{
+  "id": "TASK-1",
+  "title": "Verify project prerequisites and access",
+  "category": "setup",
+  "description": "Verify that the repository, local environment, required runtime, test access, documentation, and release prerequisites are available before implementation. Record gaps without exposing secrets.",
+  "acceptanceCriteria": [
+    "The repository root and current branch are recorded without changing unrelated dirty files",
+    "`apps/web/.env.local` exists with only placeholder values or is explicitly marked as user-managed; no real secret is copied into task files",
+    "Node.js, npm, GitHub CLI authentication, browser automation, and required local dependencies are checked",
+    "The real Ubuntu VPS test path is either verified or recorded as an explicit blocker",
+    "Required documentation links and disposable test-account/fixture steps are recorded",
+    "Every unresolved prerequisite has a proceed/block decision and owner"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Read PRD prerequisites",
+      "details": "Read `.agent/prd/PRD.md` section 16 and list required environment, repository, documentation, test-user, VPS, browser, and release permissions.",
+      "pass": true
+    },
+    {
+      "step": 2,
+      "description": "Inspect local environment",
+      "details": "From `E:/codes/Projects/Xistance-Tunnel/xistance-panel`, record `git status --short --branch`, Node/npm versions, dependency installation state, and Docker daemon availability. Do not read secret values.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Check local environment template",
+      "details": "Verify `apps/web/.env.local` and `apps/web/.env.local.example` variable names only. Never print or persist values from the local file.",
+      "pass": true
+    },
+    {
+      "step": 4,
+      "description": "Check release and test access",
+      "details": "Verify `gh auth status` without printing tokens, confirm whether a disposable Ubuntu VPS and browser runner are available, and record any missing access.",
+      "pass": true
+    },
+    {
+      "step": 5,
+      "description": "Record gate decision",
+      "details": "Write a concise prerequisite result in `.agent/tasks/TASK-1.json` technical notes or a dedicated evidence file, with no secret values. Do not mark the task passed until the owner accepts any proceed decision.",
+      "pass": true
+    }
+  ],
+  "dependencies": [],
+  "estimatedComplexity": "low",
+  "technicalNotes": [
+    "Verified 2026-09-24: repository E:/codes/Projects/Xistance-Tunnel/xistance-panel, branch master, existing user changes preserved.",
+    "Verified 2026-09-24: Node v22.23.2, npm 10.9.8, Git 2.52.0, node_modules present, GitHub CLI authenticated, and browser helper available.",
+    "Verified 2026-09-24: apps/web/.env.local exists; only its variable names were inspected and values were not read or recorded.",
+    "Verified 2026-09-24: Docker CLI exists but daemon is unavailable in this environment; Docker is a non-blocking development-path gap per PRD.",
+    "Not yet verified: approved disposable Ubuntu 22.04/24.04 VPS access, architecture-specific runner, and Playwright/Puppeteer package. Browser helper exists but does not by itself prove a repository browser suite.",
+    "Required disposition: TASK-1 may proceed for local implementation, but real VPS tasks TASK-62/63/64/65 remain blocked until an approved disposable VPS access path is supplied. Do not use real credentials in evidence.",
+    "Required disposition: Docker-dependent verification remains explicitly unverified and must not be represented as passing.",
+    "Verified 2026-09-25: real VPS access supplied and confirmed. Host 45.82.136.139:2222 root; host key fingerprint pinned and independently verified; Ubuntu 24.04.1 LTS, 1 vCPU, 961 MB RAM, amd64, 5.6 GB free disk, Node v22.23.2 present, Docker absent. Credentials supplied only via process input and a transient deleted file; no secret recorded.",
+    "Verified 2026-09-25: VPS acceptance tasks TASK-62/63/64/65 are no longer blocked on access. They remain gated on real work: Prisma is not packaged for Linux, so the current artifact cannot boot on the host.",
+    "Still unverified 2026-09-25: Ubuntu 22.04, arm64, and Docker-dependent verification. Only Ubuntu 24.04 amd64 is available. These must not be represented as passing.",
+    "Still open 2026-09-25: no disposable test account or seeded fixture has been created yet."
+  ]
+}

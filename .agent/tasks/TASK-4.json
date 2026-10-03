@@ -1,0 +1,48 @@
+{
+  "id": "TASK-4",
+  "title": "Inventory environment variables and placeholder requirements",
+  "category": "setup",
+  "description": "Create a verified inventory of application and installer environment variable names and ensure project-local templates contain placeholders only.",
+  "acceptanceCriteria": [
+    "Every `process.env` name used by application/runtime TypeScript is listed with its source file and purpose",
+    "Every installer/update/bootstrap variable is listed with its default and whether it is secret",
+    "`apps/web/.env.local.example` contains only safe placeholders and no real values",
+    "Documentation distinguishes runtime, installer, and test-only variables"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Scan application environment usage",
+      "details": "Search `apps/web` and `packages` for `process.env` and record each name, source file, default, and whether it is sensitive.",
+      "pass": true
+    },
+    {
+      "step": 2,
+      "description": "Scan shell environment usage",
+      "details": "Search `scripts/*.sh` for parameter defaults and assignments; record version, architecture, mirror, path, and secret variables without values from an installed host.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Update placeholder template",
+      "details": "Add only missing safe placeholder entries to `apps/web/.env.local.example`; do not copy values from `apps/web/.env.local`.",
+      "pass": true
+    },
+    {
+      "step": 4,
+      "description": "Document variable boundaries",
+      "details": "Add a concise environment inventory to the release documentation or evidence, explicitly stating that real values must be entered manually on the VPS/local host.",
+      "pass": true
+    }
+  ],
+  "dependencies": [
+    "TASK-1"
+  ],
+  "estimatedComplexity": "medium",
+  "technicalNotes": [
+    "Evidence: `.agent/evidence/environment-inventory.md` records all observed application/runtime names and installer inputs.",
+    "Template: `apps/web/.env.local.example` contains only safe example paths/placeholders; real `.env.local` values were not read or recorded.",
+    "Verification: independent scanner found no required runtime name missing from the template or inventory, and confirmed secret placeholders.",
+    "Do not add a real value, token, password, key, or production connection string to this task or evidence."
+  ]
+}

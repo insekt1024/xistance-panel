@@ -1,0 +1,48 @@
+{
+  "id": "TASK-36",
+  "title": "Add tunnel diagnostic and recovery user flow",
+  "category": "functional",
+  "description": "Expose a practical user flow from degraded/failed tunnel state to logs, diagnostics, bounded retry/restart, and confirmed recovery in the bilingual UI.",
+  "acceptanceCriteria": [
+    "A user can open a tunnel's diagnostic details without exposing secrets",
+    "The UI distinguishes stopped, degraded, running, unknown, and probe failure states with text labels",
+    "Retry/restart actions are idempotent, bounded, disabled while pending, and report success/failure",
+    "After recovery, displayed state and logs/events refresh without a full page reload",
+    "English and Persian labels/actions are present"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Add failing UI contract test",
+      "details": "scripts/test-smoke-tunnel-diagnostics.ts covers the contract over the real production build: no optimistic state on a degraded tunnel, the control disabled while a request is in flight, a refused action announced as a failure, an out-of-catalog state rendering as readable text with a marker, the action state coming from the supervisor rather than the click, markup in a summary staying inert, and a dead XUI panel being reported as error/stopped. Baseline 69 passed, 0 failed.",
+      "pass": true
+    },
+    {
+      "step": 2,
+      "description": "Implement API/view flow",
+      "details": "Desired action status and actual supervisor state are separate facts: [id]/actions returns the requested status plus await engine.status(id); app/api/tunnels reports the engine-reported state after deploy; TunnelEngine.deploy no longer overwrites a classified XUI synchronization failure with running; status-badge normalizes an unknown state to a known key and still exposes the raw token; the diagnostics panel defers its initial load and renders summaries as text.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Add bilingual messages",
+      "details": "No new strings were required: the existing next-intl status catalog covers the normalized keys, and the unknown-state label resolves through status.unknown. Verified by the SSR probe that asserts the rendered LABEL plus the [data-unmapped-status] marker, not the raw token.",
+      "pass": true
+    },
+    {
+      "step": 4,
+      "description": "Verify browser flow",
+      "details": "Browser flow verified against the real build: baseline 69/69, and a full mutation sweep (m13) returned 8/8 killed, 0 invalid - M1 optimistic state, M2 pending disable, M3 outcome reported, M4 unknown-state label, M5 desired vs actual, M6 inert summary, M7 create hardcodes running, M8 deploy overwrites XUI sync failure. Each mutant had a distinct failing assertion. All five mutation targets verified restored: zero NUL bytes, no mutation markers, no *.mutate-tmp residue.",
+      "pass": true
+    }
+  ],
+  "dependencies": [
+    "TASK-22",
+    "TASK-50"
+  ],
+  "estimatedComplexity": "high",
+  "technicalNotes": [
+    "Do not add optimistic state transitions; the UI must wait for the server/process result."
+  ],
+  "passes": true
+}

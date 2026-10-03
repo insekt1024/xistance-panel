@@ -1,0 +1,53 @@
+{
+  "id": "TASK-63",
+  "title": "Test startup health and static assets on Ubuntu 24.04 VPS",
+  "category": "functional",
+  "description": "Run the final artifact on the approved Ubuntu 24.04 test path and verify startup, health, localized protected routes, embedded assets, and low-resource behavior.",
+  "acceptanceCriteria": [
+    "Ubuntu 24.04 host metadata and resource constraints are recorded without secrets",
+    "The artifact starts on Node 22 without a source build and reaches health/readiness",
+    "English and Persian login/protected routes load, and required JS/CSS/media assets return successful responses",
+    "A representative API operation and shutdown/restart complete without OOM or leaked processes"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Verify host and artifact",
+      "details": "Confirm OS/architecture/resources/runtime/artifact digest and disposable data paths using the approved access method.",
+      "pass": true
+    },
+    {
+      "step": 2,
+      "description": "Start and health-check",
+      "details": "Start the service, wait for readiness, query health, and record timings/status without response secrets.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Run localized asset smoke",
+      "details": "Use browser/API smoke checks for en/fa protected routes and required assets; fail on 404/MIME/unprotected-shell failures.",
+      "pass": true
+    },
+    {
+      "step": 4,
+      "description": "Run operation/restart",
+      "details": "Exercise a safe representative operation, restart, and cleanup; record process/resource results and unresolved limitations.",
+      "pass": true
+    }
+  ],
+  "dependencies": [
+    "TASK-1",
+    "TASK-13",
+    "TASK-16",
+    "TASK-51",
+    "TASK-54",
+    "TASK-55",
+    "TASK-57",
+    "TASK-61"
+  ],
+  "estimatedComplexity": "high",
+  "technicalNotes": [
+    "Do not mark this passed based on local Windows results or Docker configuration; Ubuntu host evidence is required."
+  ],
+  "evidence": ".agent/evidence/target-os-docker-available.md (22.04) and Ubuntu 24.04.5 run; see task-72-final-gate-decision-v2.md"
+}

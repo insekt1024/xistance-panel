@@ -1,0 +1,60 @@
+{
+  "id": "TASK-65",
+  "title": "Test representative tunnel load and reconnect on VPS",
+  "category": "functional",
+  "description": "Exercise representative existing tunnel methods or safe fixtures under the agreed load and failure/reconnect conditions on the approved VPS.",
+  "acceptanceCriteria": [
+    "Each method has a documented evidence level: real VPS, controlled fixture, builder-only, or blocked",
+    "Representative load includes start/stop/status/reconnect and records latency, retries, failures, and cleanup",
+    "No tight retry loop, orphan process, unbounded memory, or false running state is observed",
+    "Any method that cannot be safely run is explicitly blocked/waived rather than marked passed"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Select safe method fixtures",
+      "details": "Map the nine methods to approved disposable nodes/endpoints; avoid real production credentials and document unavailable methods.",
+      "pass": true
+    },
+    {
+      "step": 2,
+      "description": "Define load/failure window",
+      "details": "Set fixed request/process counts, concurrency, duration, and failure injection/reconnect criteria before running.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Run load/reconnect tests",
+      "details": "Execute the matrix, collect process/resource/state/retry evidence, and stop/clean all fixtures.",
+      "pass": true
+    },
+    {
+      "step": 4,
+      "description": "Review failures",
+      "details": "For any failure, follow root-cause investigation, add a regression test before a fix, and rerun the smallest relevant workload.",
+      "pass": true
+    },
+    {
+      "step": 5,
+      "description": "Save evidence",
+      "details": "Write sanitized `.agent/evidence/task-65-tunnel-traffic.md` with host, method coverage, measurements, and blockers.",
+      "pass": true
+    }
+  ],
+  "dependencies": [
+    "TASK-19",
+    "TASK-20",
+    "TASK-21",
+    "TASK-22",
+    "TASK-35",
+    "TASK-59",
+    "TASK-60",
+    "TASK-62",
+    "TASK-63"
+  ],
+  "estimatedComplexity": "very high",
+  "technicalNotes": [
+    "A real tunnel load test can affect external services; use disposable endpoints and approved test nodes only."
+  ],
+  "evidence": ".agent/evidence/task-65-tunnel-traffic.md"
+}

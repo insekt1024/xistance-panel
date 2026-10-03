@@ -1,0 +1,45 @@
+{
+  "id": "TASK-41",
+  "title": "Complete origin and CSRF negative tests",
+  "category": "security",
+  "description": "Complete negative coverage for Origin/Host/proxy handling and CSRF protection on all protected mutating/sensitive routes.",
+  "acceptanceCriteria": [
+    "Absent, malformed, cross-site, and allowed Origin cases are tested without trusting forged forwarded headers by default",
+    "Protected mutating/sensitive routes reject missing/invalid CSRF/session context and do not mutate data",
+    "`XT_ALLOWED_ORIGINS` parsing is strict, bounded, and cannot be used to inject arbitrary origins",
+    "Tests cover login/refresh exceptions, proxy trust flag, custom port, HTTPS, and XUI/tool exceptions"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Add failing origin/CSRF tests",
+      "details": "Add route-level cases for each protected route family and each origin/proxy state before production changes.",
+      "pass": true
+    },
+    {
+      "step": 2,
+      "description": "Read `src/lib/api.ts`, auth/session helpers, proxy.ts, route handlers, and existing origin tests; map the actual gate order.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Implement minimal fix",
+      "details": "Fix only demonstrated gaps, preserving the documented public health/login/refresh exceptions and XUI scope.",
+      "pass": true
+    },
+    {
+      "step": 4,
+      "description": "Run focused tests, custom harness, typecheck, lint, and inspect diffs for secret/logging regressions.",
+      "pass": true
+    }
+  ],
+  "dependencies": [
+    "TASK-40"
+  ],
+  "estimatedComplexity": "high",
+  "technicalNotes": [
+    "Origin absence may be allowed for non-browser clients; test the actual intended policy rather than assuming every absent header is hostile."
+  ],
+  "passes": true,
+  "evidence": ".agent/evidence/task-41.md"
+}

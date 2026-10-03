@@ -1,0 +1,3 @@
+bindPort = 17000
+auth.token = "7e5df0ab-f1d0-4894-a60d-64ec58562c8b"
+allowPorts = [{ start = 18100, end = 18199 }]

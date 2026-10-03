@@ -1,0 +1,157 @@
+{
+  "$comment": [
+    "Real-binary evidence ledger for the tunnel methods (TASK-65).",
+    "scripts/test-method-matrix.ts runs each method with an INJECTED process",
+    "handle and cannot execute a tunnel binary, so it reports realBinary:false",
+    "for every method by construction. That is honest about the harness but it",
+    "cannot see real-binary runs performed OUTSIDE the harness.",
+    "This file is the input that lets the matrix report what was actually proved:",
+    "an entry may only exist when a real tunnel binary was executed on the target",
+    "OS and real bytes crossed the tunnel. Everything not listed stays false.",
+    "Regenerate/verify with: npx tsx scripts/test-real-binary-evidence.ts"
+  ],
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "method": "GOST",
+      "binary": "gost",
+      "binaryVersion": "gost v2.12 (installed by scripts/install.sh into /var/lib/xistance/bin)",
+      "target": "Ubuntu 22.04.5 LTS x86_64, systemd PID 1 (privileged container)",
+      "configSource": "scripts/gen-traffic-fixtures.ts -> the product's own builder (buildGostCommand / buildDirectCommand / buildFrpPair / buildBackhaulConfig), each input parsed through the real Zod schema",
+      "trafficCrossed": true,
+      "checks": [
+        "1-hop 19099 -> 19098 carried HTTP 200 body=b'HELLO-XR'",
+        "2-hop 18080 -> 19099 -> 19098 carried HTTP 200 body=b'HELLO-XR'",
+        "RE-RUNNABLE: scripts/test-real-traffic-target-os.sh carried real bytes through this builder's output on Ubuntu 24.04.5 systemd (probe 18102, body=b'HELLO-XR')"
+      ],
+      "reconnect": true,
+      "reconnectNote": "Proved per-method on the target OS: systemd Restart=on-failure, kill -9 the tunnel process, and the SAME probe returns HELLO-XR again with no operator action.",
+      "evidence": ".agent/evidence/task-127-real-traffic-harness.md"
+    },
+    {
+      "method": "FRP",
+      "binary": "frps 0.70.1 / frpc 0.70.1",
+      "binaryVersion": "pinned in scripts/install.sh, digests verified on target",
+      "target": "Ubuntu 22.04.5 LTS x86_64, systemd PID 1 (privileged container)",
+      "configSource": "scripts/gen-traffic-fixtures.ts -> the product's own builder (buildGostCommand / buildDirectCommand / buildFrpPair / buildBackhaulConfig), each input parsed through the real Zod schema",
+      "trafficCrossed": true,
+      "checks": [
+        "frps started and bound its control port (17000)",
+        "frpc login to server success; proxy 'probe' start proxy success",
+        "frps:18081 -> frpc -> origin:19098 carried HTTP 200 body=b'HELLO-XR'",
+        "allowPorts emitted as {start,end} ranges and accepted by frps 0.70.1",
+        "RE-RUNNABLE: scripts/test-real-traffic-target-os.sh carried real bytes through this builder's output on Ubuntu 24.04.5 systemd (probe 18100, body=b'HELLO-XR')",
+        "RE-RUNNABLE: scripts/test-real-traffic-target-os.sh -- traffic AND SIGKILL reconnect, both observed on the target OS against this builder's own output."
+      ],
+      "reconnect": true,
+      "reconnectNote": "Proved per-method by scripts/test-real-traffic-target-os.sh on Ubuntu 24.04.5 with systemd Restart=on-failure: probe succeeds, SIGKILL the MainPID, the tunnel is observed DOWN, systemd restarts it with a new MainPID, and the SAME probe returns HELLO-XR with no operator action.",
+      "evidence": ".agent/evidence/task-127-real-traffic-harness.md"
+    },
+    {
+      "method": "XRAY",
+      "binary": "xray 26.3.27",
+      "binaryVersion": "pinned in scripts/install.sh, upstream .dgst digest independently recomputed",
+      "target": "Ubuntu 22.04.5 LTS x86_64, systemd PID 1 (privileged container)",
+      "configSource": "scripts/gen-traffic-fixtures.ts -> the product's buildXrayConfig(), with the 3X-UI vmess inbound written here sharing the same uuid",
+      "trafficCrossed": true,
+      "checks": [
+        "RE-RUNNABLE: scripts/test-real-traffic-target-os.sh carried real bytes (body=b'HELLO-XR', HTTP 200) 19098 through the product's own dokodemo-door -> vmess -> freedom path, plus SIGKILL reconnect",
+        "the inbound sets followRedirect:true; with false, dokodemo-door dials its own listen port and the tunnel is a loop (measured on the target OS, TASK-125)"
+      ],
+      "reconnect": true,
+      "reconnectNote": "Proved per-method by scripts/test-real-traffic-target-os.sh on Ubuntu 24.04.5 with systemd Restart=on-failure: probe succeeds, SIGKILL the MainPID, the tunnel is observed DOWN, systemd restarts it with a new MainPID, and the SAME probe returns HELLO-XR.",
+      "evidence": ".agent/evidence/task-130-xray-followredirect-fixed.md"
+    },
+    {
+      "method": "BACKHAUL",
+      "binary": "backhaul",
+      "binaryVersion": "backhaul v0.7.2 (pinned + checksum-verified by scripts/install.sh into /var/lib/xistance/bin)",
+      "target": "Ubuntu 22.04.5 LTS x86_64, systemd PID 1 (privileged container)",
+      "configSource": "scripts/gen-traffic-fixtures.ts -> the product's own builder (buildGostCommand / buildDirectCommand / buildFrpPair / buildBackhaulConfig), each input parsed through the real Zod schema",
+      "trafficCrossed": true,
+      "checks": [
+        "exposed port 19101 (server) -> tunnel -> origin 19098 carried HTTP 200 body=HELLO-XR",
+        "server logged 'control channel successfully established' and 'listening on address: [::]:19101'",
+        "wrong-token client could not establish a control channel (failed to receive control channel response) while legitimate traffic stayed up",
+        "RE-RUNNABLE: scripts/test-real-traffic-target-os.sh carried real bytes through this builder's output on Ubuntu 24.04.5 systemd (probe 18101, body=b'HELLO-XR')",
+        "RE-RUNNABLE: scripts/test-real-traffic-target-os.sh -- traffic AND SIGKILL reconnect, both observed on the target OS against this builder's own output."
+      ],
+      "reconnect": true,
+      "reconnectNote": "Proved per-method by scripts/test-real-traffic-target-os.sh on Ubuntu 24.04.5 with systemd Restart=on-failure: probe succeeds, SIGKILL the MainPID, the tunnel is observed DOWN, systemd restarts it with a new MainPID, and the SAME probe returns HELLO-XR with no operator action.",
+      "evidence": ".agent/evidence/task-127-real-traffic-harness.md"
+    },
+    {
+      "method": "SSH",
+      "binary": "ssh (OpenSSH client)",
+      "binaryVersion": "OpenSSH client from the target distribution repository; server is a real sshd (pid 4785)",
+      "target": "Ubuntu 22.04.5 LTS x86_64, systemd PID 1 (privileged container)",
+      "configSource": "buildSshCommand() in packages/tunnel-core/src/config/ssh.ts - the exact emitted argv was executed",
+      "trafficCrossed": true,
+      "checks": [
+        "local forward 19110 -> real sshd -> origin 19098 carried HTTP 200 body=HELLO-XR",
+        "product argv executed verbatim: ssh -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new -L 127.0.0.1:19110:127.0.0.1:19098 -p 22 probeuser@127.0.0.1",
+        "shipped assertSafeSshDestination blocked a leading-dash username (-oProxyCommand=...) while allowing a normal username; no ProxyCommand side effect",
+        "RE-RUNNABLE (argv): scripts/test-real-traffic-target-os.sh asserts the product's own buildSshCommand() output each run; data-path execution needs an sshd (TASK-128)"
+      ],
+      "reconnect": true,
+      "reconnectNote": "Proved per-method on the target OS (TASK-65): systemd Restart=on-failure, kill -9 the supervised ssh process, the tunnel is observed DOWN, systemd restarts it, and the SAME probe resumes with no operator action. Separately (TASK-128): the argv is now generated by the product's own builder and asserted on every run, but EXECUTION is not repeatable here because the target image has no /usr/sbin/sshd and no network to install one.",
+      "evidence": ".agent/evidence/task-65-backhaul-ssh-traffic.md"
+    },
+    {
+      "method": "DIRECT",
+      "binary": "gost",
+      "binaryVersion": "gost v2.12 (pinned + checksum-verified by scripts/install.sh into /var/lib/xistance/bin)",
+      "target": "Ubuntu 22.04.5 LTS x86_64, systemd PID 1 (privileged container)",
+      "configSource": "scripts/gen-traffic-fixtures.ts -> the product's own builder (buildGostCommand / buildDirectCommand / buildFrpPair / buildBackhaulConfig), each input parsed through the real Zod schema",
+      "trafficCrossed": true,
+      "checks": [
+        "gost -L tcp://:19120/172.18.0.3:19099: HTTP 200 body=HELLO-FAR served by the peer node (a second container)",
+        "traverse crossed from the tunnel node 172.18.0.2 to the foreign peer 172.18.0.3",
+        "RE-RUNNABLE: scripts/test-real-traffic-target-os.sh carried real bytes through this builder's output on Ubuntu 24.04.5 systemd (probe 18103, body=b'HELLO-XR')",
+        "RE-RUNNABLE: scripts/test-real-traffic-target-os.sh -- traffic AND SIGKILL reconnect, both observed on the target OS against this builder's own output."
+      ],
+      "reconnect": true,
+      "reconnectNote": "Proved per-method by scripts/test-real-traffic-target-os.sh on Ubuntu 24.04.5 with systemd Restart=on-failure: probe succeeds, SIGKILL the MainPID, the tunnel is observed DOWN, systemd restarts it with a new MainPID, and the SAME probe returns HELLO-XR with no operator action.",
+      "evidence": ".agent/evidence/task-127-real-traffic-harness.md"
+    },
+    {
+      "method": "PORT_FORWARD",
+      "binary": "node (userland relay, product code)",
+      "binaryVersion": "the product's own forwarder daemon; startForwarder() from packages/tunnel-core/src/forwarder.ts, transpiled for the target (not a reimplementation)",
+      "target": "Ubuntu 22.04.5 LTS x86_64, systemd PID 1 (privileged container)",
+      "configSource": "product PortForwardRule JSON: tcp 19130 -> 172.18.0.3:19099",
+      "trafficCrossed": true,
+      "checks": [
+        "userland net.Server/net.connect relay: 127.0.0.1:19130 -> peer 172.18.0.3:19099 carried HTTP 200 body=HELLO-FAR",
+        "forwarder daemon logged 'forwarder listening: protocol=tcp sourcePort=19130 -> 172.18.0.3:19099'",
+        "RE-RUNNABLE: scripts/test-port-forward-datapath.ts drives startForwarder() and moves real bytes"
+      ],
+      "reconnect": false,
+      "reconnectNote": "No supervised process to kill: the forwarder is in-process Node, so systemd Restart=on-failure does not apply. Lifecycle is covered instead by stop() releasing the listen port.",
+      "evidence": ".agent/evidence/task-129-port-forward-datapath.md"
+    },
+    {
+      "method": "REVERSE",
+      "binary": "ssh (OpenSSH client) + a real sshd",
+      "binaryVersion": "OpenSSH client against a real sshd (pid 4785) on the target OS",
+      "target": "Ubuntu 22.04.5 LTS x86_64, systemd PID 1 (privileged container)",
+      "configSource": "reverseToSshConfig() -> buildSshCommand() in packages/tunnel-core/src/config/{reverse,ssh}.ts - exact emitted argv executed",
+      "trafficCrossed": true,
+      "checks": [
+        "ssh -R 0.0.0.0:19140:127.0.0.1:19098: the listener sshd installed carried HTTP 200 body=HELLO-XR from this node's service",
+        "product argv executed verbatim including -o ExitOnForwardFailure=yes and the -R mapping reverseToSshConfig() produced",
+        "RE-RUNNABLE (argv): scripts/test-real-traffic-target-os.sh asserts the product's own buildSshCommand() output each run; data-path execution needs an sshd (TASK-128)"
+      ],
+      "reconnect": true,
+      "reconnectNote": "Proved per-method on the target OS (TASK-65): systemd Restart=on-failure, kill -9 the supervised ssh process, the tunnel is observed DOWN, systemd restarts it, and the SAME probe resumes with no operator action. Separately (TASK-128): the argv is now generated by the product's own builder and asserted on every run, but EXECUTION is not repeatable here because the target image has no /usr/sbin/sshd and no network to install one.",
+      "evidence": ".agent/evidence/task-65-two-node-traffic.md"
+    }
+  ],
+  "methodsWithoutRealBinaryEvidence": [
+    {
+      "method": "XUI",
+      "reason": "Metadata-only by design: X-UI records the status of a third-party 3x-ui panel and runs no tunnel binary on our nodes, so there is no binary to execute. Status is established by a real panel verification instead. This gap is by design, not an environment shortfall, and no credential would close it."
+    }
+  ],
+  "note": "Real-binary coverage is 8/9. Only XUI is listed without real-binary evidence, and it is metadata-only by design rather than blocked by the environment. Validated by scripts/test-real-binary-evidence.ts, which requires the two lists to be an exact partition of the nine methods and requires an explicit reason for every unproved entry."
+}

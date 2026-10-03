@@ -1,0 +1,48 @@
+{
+  "id": "TASK-42",
+  "title": "Complete SSRF and private-network tests",
+  "category": "security",
+  "description": "Verify SSRF protection for tool and node connectivity probes, including DNS/IP edge cases, redirects, URL credentials, and the narrow XUI exception.",
+  "acceptanceCriteria": [
+    "Private/local/link-local/metadata literals and supported DNS resolution outcomes are blocked for normal probes",
+    "Redirects are manual or revalidated so a public URL cannot redirect to a private target",
+    "URL credentials are rejected and probe errors are sanitized",
+    "The XUI test exception is explicitly scoped and cannot affect tools or arbitrary node routes",
+    "Tests cover IPv4/IPv6 literals, encoded/alternate forms where supported, ports, redirects, and exception boundaries"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Add failing SSRF tests",
+      "details": "Add negative and exception-scope cases before modifying `isBlockedTarget` or route logic.",
+      "pass": true
+    },
+    {
+      "step": 2,
+      "description": "Read `ssrf.ts`, tools route, node test route, xui test route, fetch options, DNS helpers, and current tests.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Implement minimal fix",
+      "details": "Tighten only demonstrated gaps, preserving the explicit XUI private-network behavior and no-credential-in-URL rule.",
+      "pass": true
+    },
+    {
+      "step": 4,
+      "description": "Verify security",
+      "details": "Run focused SSRF tests, auth/origin tests, custom harness, typecheck, and lint.",
+      "pass": true
+    }
+  ],
+  "dependencies": [
+    "TASK-40"
+  ],
+  "estimatedComplexity": "high",
+  "technicalNotes": [
+    "Do not treat a DNS lookup alone as a complete SSRF defense if the connection can resolve/rebind to a different address; document the implemented boundary."
+  ],
+  "passes": true,
+  "evidence": ".agent/evidence/task-42.md",
+  "actualOutcome": "101/101 SSRF assertions, 9/9 mutants killed. Five real defects fixed: isPrivateIp returned false for every IPv4-mapped IPv6 form (::ffff:127.0.0.1, ::ffff:169.254.169.254), a bracketed v6 literal skipped the literal branch entirely because net.isIP is 0 for it, twelve reserved IPv4 ranges were dialable (incl. 100.100.100.200 metadata and CGNAT), a host starting with '-' reached ping as a flag, and the node-test route returned raw ssh stderr to the browser. The XUI private-network exception is now pinned by tests rather than a comment. DNS rebinding is NOT defended against; the boundary is documented in the module header and in the evidence."
+}

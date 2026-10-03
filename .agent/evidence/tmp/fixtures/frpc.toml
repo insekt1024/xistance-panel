@@ -1,0 +1,13 @@
+serverAddr = "127.0.0.1"
+serverPort = 17000
+auth.token = "7e5df0ab-f1d0-4894-a60d-64ec58562c8b"
+
+[[proxies]]
+name = "probe"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 19098
+remotePort = 18100
+[proxies.transport]
+useEncryption = true
+useCompression = true

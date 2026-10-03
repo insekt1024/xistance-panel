@@ -1,0 +1,1 @@
+["ssh","-N","-o","ServerAliveInterval=30","-o","ServerAliveCountMax=3","-o","ExitOnForwardFailure=yes","-o","StrictHostKeyChecking=accept-new","-i","/root/.ssh/id_ed25519_traffic","-L","127.0.0.1:18104:127.0.0.1:19098","-p","22","root@127.0.0.1"]

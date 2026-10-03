@@ -1,0 +1,49 @@
+{
+ "id": "TASK-37",
+ "title": "Add health and resource telemetry",
+ "category": "functional",
+ "description": "Add bounded, low-overhead health/resource signals needed to verify low-resource operation without exposing secrets or creating high-cost polling.",
+ "acceptanceCriteria": [
+  "Health/metrics include service/database status, process/runtime counts, uptime, and resource fields that are safe to expose",
+  "Resource collection is bounded and does not add an unbounded per-request scan or tight timer",
+  "Metrics distinguish cache age, tunnel state, retry state, and error categories without credentials",
+  "A failing dependency is represented accurately and does not crash the endpoint",
+  "Tests cover healthy, degraded, and failed database/engine states"
+ ],
+ "steps": [
+  {
+   "step": 1,
+   "description": "Test response shape, redaction, bounded fields, and degraded database/engine behavior before production changes.",
+   "pass": true
+  },
+  {
+   "step": 2,
+   "description": "Trace current endpoints",
+   "details": "Read `/api/health`, `/api/metrics`, engine stats, sampler, and instrumentation; map current data sources and polling behavior.",
+   "pass": true
+  },
+  {
+   "step": 3,
+   "description": "Implement minimal telemetry",
+   "details": "Add only the low-cost fields needed for release evidence, reusing existing caches and timers; preserve public health compatibility.",
+   "pass": true
+  },
+  {
+   "step": 4,
+   "description": "Verify telemetry",
+   "details": "Run focused tests, custom harness, typecheck, lint, and a local endpoint smoke check with placeholder env.",
+   "pass": true
+  }
+ ],
+ "dependencies": [
+  "TASK-19",
+  "TASK-23",
+  "TASK-40",
+  "TASK-44"
+ ],
+ "estimatedComplexity": "medium",
+ "technicalNotes": [
+  "Do not expose raw process command lines or environment values through metrics."
+ ],
+ "passes": true
+}

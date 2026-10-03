@@ -1,0 +1,47 @@
+{
+  "id": "TASK-48",
+  "title": "Add contrast target-size and reflow checks",
+  "category": "ui-ux",
+  "description": "Verify and fix representative WCAG 2.2 AA contrast, non-text contrast, target-size, zoom, and reflow issues in the final UI.",
+  "acceptanceCriteria": [
+    "Text and non-text contrast pass AA on representative light/dark themes and both locales",
+    "Interactive targets meet the applicable minimum target-size/spacing requirements or have documented exceptions",
+    "Content remains usable at 200% zoom/reflow without two-dimensional scrolling or obscured focus",
+    "Checks produce before/after evidence for representative routes and themes"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Run a browser/automated check on representative routes for contrast, target sizes, reflow, and focus visibility; record failures before edits.",
+      "pass": true
+    },
+    {
+      "step": 2,
+      "description": "Read globals/theme styles, Tailwind tokens, buttons, badges, tables, and layout components; identify the smallest shared fixes.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Adjust tokens/components/layout only where evidence fails, preserving existing branding and both locales.",
+      "pass": true
+    },
+    {
+      "step": 4,
+      "description": "Repeat checks at desktop/mobile/zoom, light/dark, en/fa; run typecheck/lint/custom tests.",
+      "pass": true
+    }
+  ],
+  "dependencies": [
+    "TASK-46",
+    "TASK-47",
+    "TASK-49",
+    "TASK-54"
+  ],
+  "estimatedComplexity": "high",
+  "technicalNotes": [
+    "Do not claim full WCAG conformance from a few representative routes; record route scope and limitations."
+  ],
+  "passes": true,
+  "evidence": ".agent/evidence/task-48.md",
+  "actualOutcome": "72/72 contrast, non-text, target-size and reflow assertions pass across 8 routes x 2 locales x 2 themes in real Chromium; 8/8 mutants killed. Seven real defects fixed, the largest being a bare `* { border-color }` rule that silently defeated every border-<color> utility in the app (Tailwind v4 does not layer utilities above unlayered CSS). Not WCAG 2.2 AA certification: see limitations in the evidence file."
+}

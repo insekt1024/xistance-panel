@@ -1,0 +1,49 @@
+{
+  "id": "TASK-56",
+  "title": "Add browser evidence to CI or documented manual gate",
+  "category": "functional",
+  "description": "Make browser smoke and representative accessibility evidence a repeatable release gate without requiring unavailable local infrastructure silently.",
+  "acceptanceCriteria": [
+    "A documented command starts the disposable app/test database and runs the browser suite, or CI runs it automatically",
+    "The gate runs on the staged/prebuilt artifact at least once before publication",
+    "Failures produce sanitized logs and a clear manual fallback if a runner is unavailable",
+    "The release checklist links to the exact evidence file and records the environment"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Choose browser gate mode",
+      "details": "Inspect package manifests and CI capabilities; prefer an existing browser dependency, otherwise document a reproducible manual browser command and do not add an unverified dependency silently.",
+      "pass": true
+    },
+    {
+      "step": 2,
+      "description": "Add gate command/config",
+      "details": "Add a script or documented command that starts a disposable server, runs representative routes in en/fa, and shuts down cleanly.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Integrate CI/release docs",
+      "details": "Add the gate to the appropriate workflow or release checklist with timeout, artifact retention, and secret-safe logs.",
+      "pass": true
+    },
+    {
+      "step": 4,
+      "description": "Run gate",
+      "details": "Run the command or its closest available local validation and record the exact limitation if a real browser is unavailable.",
+      "pass": true
+    }
+  ],
+  "dependencies": [
+    "TASK-51",
+    "TASK-52",
+    "TASK-53",
+    "TASK-54",
+    "TASK-55"
+  ],
+  "estimatedComplexity": "high",
+  "technicalNotes": [
+    "Do not claim browser coverage when only static inspection or unit tests ran."
+  ]
+}

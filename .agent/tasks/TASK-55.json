@@ -1,0 +1,48 @@
+{
+  "id": "TASK-55",
+  "title": "Add browser smoke suite for static assets and localization",
+  "category": "functional",
+  "description": "Verify localized protected pages and their referenced JS/CSS/media assets from the standalone/prebuilt runtime, not the development source tree.",
+  "acceptanceCriteria": [
+    "A localized protected route returns the expected HTML and all referenced local assets return 200 with suitable content types",
+    "No required static asset is sourced from a development-only path or missing from the artifact",
+    "Locale switching and translated route assets work in en/fa",
+    "The smoke test fails when public/static assets are removed or nested incorrectly"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Add failing artifact asset fixture",
+      "details": "Start a staged/standalone server and assert the current asset paths; include a negative incomplete-artifact case.",
+      "pass": true
+    },
+    {
+      "step": 2,
+      "description": "Implement asset crawler",
+      "details": "Collect local script/style/media references from the protected response and request each with the correct locale/auth context.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Implement content/status checks",
+      "details": "Fail on 404, redirect to an unprotected shell, wrong MIME, empty body, or source-tree-only paths.",
+      "pass": true
+    },
+    {
+      "step": 4,
+      "description": "Run and record",
+      "details": "Run positive/negative fixtures and save sanitized evidence for TASK-16/TASK-70.",
+      "pass": true
+    }
+  ],
+  "dependencies": [
+    "TASK-6",
+    "TASK-16",
+    "TASK-51",
+    "TASK-54"
+  ],
+  "estimatedComplexity": "medium",
+  "technicalNotes": [
+    "Next standalone does not automatically copy public/static; the release path must explicitly stage them."
+  ]
+}

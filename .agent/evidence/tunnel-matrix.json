@@ -1,0 +1,215 @@
+{
+  "generatedAt": "2026-10-03T17:46:24.464Z",
+  "contract": "all-method shared regression matrix",
+  "disclaimer": "realBinary is false for every method. These results prove local command/config generation and engine lifecycle with an injected process handle. No tunnel binary was executed, no traffic crossed a tunnel, and no remote node was contacted. Release acceptance requires a separate real-binary/VPS pass per method.",
+  "methods": [
+    {
+      "method": "BACKHAUL",
+      "suite": "scripts/test-backhaul.ts",
+      "metadataOnly": false,
+      "lifecycleExercised": true,
+      "realBinary": false,
+      "evidenceKind": "local_command+injected_process",
+      "checksRun": 21,
+      "checksPassed": 21,
+      "dimensions": {
+        "config": "yes",
+        "lifecycle": "yes",
+        "failure": "referenced",
+        "cleanup": "yes",
+        "resource": "yes",
+        "realBinary": false
+      },
+      "notes": [
+        "a deployed tunnel reports a known status"
+      ],
+      "releaseComplete": false
+    },
+    {
+      "method": "FRP",
+      "suite": "scripts/test-frp.ts",
+      "metadataOnly": false,
+      "lifecycleExercised": true,
+      "realBinary": false,
+      "evidenceKind": "local_command+injected_process",
+      "checksRun": 21,
+      "checksPassed": 21,
+      "dimensions": {
+        "config": "yes",
+        "lifecycle": "yes",
+        "failure": "referenced",
+        "cleanup": "yes",
+        "resource": "yes",
+        "realBinary": false
+      },
+      "notes": [
+        "a deployed tunnel reports a known status"
+      ],
+      "releaseComplete": false
+    },
+    {
+      "method": "GOST",
+      "suite": "scripts/test-gost.ts",
+      "metadataOnly": false,
+      "lifecycleExercised": true,
+      "realBinary": false,
+      "evidenceKind": "local_command+injected_process",
+      "checksRun": 21,
+      "checksPassed": 21,
+      "dimensions": {
+        "config": "yes",
+        "lifecycle": "yes",
+        "failure": "referenced",
+        "cleanup": "yes",
+        "resource": "yes",
+        "realBinary": false
+      },
+      "notes": [
+        "partial-deploy cleanup is not applicable to a single-process method",
+        "a deployed tunnel reports a known status"
+      ],
+      "releaseComplete": false
+    },
+    {
+      "method": "SSH",
+      "suite": "scripts/test-ssh.ts",
+      "metadataOnly": false,
+      "lifecycleExercised": true,
+      "realBinary": false,
+      "evidenceKind": "local_command+injected_process",
+      "checksRun": 21,
+      "checksPassed": 21,
+      "dimensions": {
+        "config": "yes",
+        "lifecycle": "yes",
+        "failure": "referenced",
+        "cleanup": "yes",
+        "resource": "yes",
+        "realBinary": false
+      },
+      "notes": [
+        "partial-deploy cleanup is not applicable to a single-process method",
+        "a deployed tunnel reports a known status"
+      ],
+      "releaseComplete": false
+    },
+    {
+      "method": "PORT_FORWARD",
+      "suite": "scripts/test-port-forward.ts",
+      "metadataOnly": false,
+      "lifecycleExercised": true,
+      "realBinary": false,
+      "evidenceKind": "local_command+injected_process",
+      "checksRun": 21,
+      "checksPassed": 21,
+      "dimensions": {
+        "config": "yes",
+        "lifecycle": "yes",
+        "failure": "referenced",
+        "cleanup": "yes",
+        "resource": "yes",
+        "realBinary": false
+      },
+      "notes": [
+        "partial-deploy cleanup is not applicable to a single-process method",
+        "a deployed tunnel reports a known status"
+      ],
+      "releaseComplete": false
+    },
+    {
+      "method": "DIRECT",
+      "suite": "scripts/test-direct.ts",
+      "metadataOnly": false,
+      "lifecycleExercised": true,
+      "realBinary": false,
+      "evidenceKind": "local_command+injected_process",
+      "checksRun": 21,
+      "checksPassed": 21,
+      "dimensions": {
+        "config": "yes",
+        "lifecycle": "yes",
+        "failure": "referenced",
+        "cleanup": "yes",
+        "resource": "yes",
+        "realBinary": false
+      },
+      "notes": [
+        "partial-deploy cleanup is not applicable to a single-process method",
+        "a deployed tunnel reports a known status"
+      ],
+      "releaseComplete": false
+    },
+    {
+      "method": "REVERSE",
+      "suite": "scripts/test-reverse.ts",
+      "metadataOnly": false,
+      "lifecycleExercised": true,
+      "realBinary": false,
+      "evidenceKind": "local_command+injected_process",
+      "checksRun": 21,
+      "checksPassed": 21,
+      "dimensions": {
+        "config": "yes",
+        "lifecycle": "yes",
+        "failure": "referenced",
+        "cleanup": "yes",
+        "resource": "yes",
+        "realBinary": false
+      },
+      "notes": [
+        "partial-deploy cleanup is not applicable to a single-process method",
+        "a deployed tunnel reports a known status"
+      ],
+      "releaseComplete": false
+    },
+    {
+      "method": "XRAY",
+      "suite": "scripts/test-xray.ts",
+      "metadataOnly": false,
+      "lifecycleExercised": true,
+      "realBinary": false,
+      "evidenceKind": "local_command+injected_process",
+      "checksRun": 21,
+      "checksPassed": 21,
+      "dimensions": {
+        "config": "yes",
+        "lifecycle": "yes",
+        "failure": "referenced",
+        "cleanup": "yes",
+        "resource": "yes",
+        "realBinary": false
+      },
+      "notes": [
+        "partial-deploy cleanup is not applicable to a single-process method",
+        "a deployed tunnel reports a known status"
+      ],
+      "releaseComplete": false
+    },
+    {
+      "method": "XUI",
+      "suite": "scripts/test-xui.ts",
+      "metadataOnly": true,
+      "lifecycleExercised": true,
+      "realBinary": false,
+      "evidenceKind": "local_command+injected_process",
+      "checksRun": 17,
+      "checksPassed": 17,
+      "dimensions": {
+        "config": "yes",
+        "lifecycle": "yes",
+        "failure": "referenced",
+        "cleanup": "yes",
+        "resource": "yes",
+        "realBinary": false
+      },
+      "notes": [
+        "partial-deploy cleanup is not applicable to a single-process method",
+        "a deployed tunnel reports a known status",
+        "restarting a metadata-only method does not throw",
+        "restarting a metadata-only method does not throw",
+        "a metadata-only method keeps zero processes"
+      ],
+      "releaseComplete": false
+    }
+  ]
+}

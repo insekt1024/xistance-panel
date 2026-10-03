@@ -1,0 +1,318 @@
+{
+  "verdict": "PASS",
+  "passed": 76,
+  "total": 76,
+  "seconds": 868,
+  "recordedAt": "2026-10-03T17:49:24.356Z",
+  "head": "8e366d808321c9f3ad41e255cc0eb5e180e141ba",
+  "failures": [],
+  "failureDetail": [],
+  "skipped": [],
+  "blocked": [],
+  "suites": [
+    {
+      "label": "test-release-manifest.ts",
+      "code": 0
+    },
+    {
+      "label": "test-release-artifact.ts",
+      "code": 0
+    },
+    {
+      "label": "test-prisma-engine-targets.ts",
+      "code": 0
+    },
+    {
+      "label": "test-foreign-native-bins.ts",
+      "code": 0
+    },
+    {
+      "label": "test-stage-source-architecture.ts",
+      "code": 0
+    },
+    {
+      "label": "test-stage-arg-parsing.ts",
+      "code": 0
+    },
+    {
+      "label": "test-pick-port.ts",
+      "code": 0
+    },
+    {
+      "label": "test-release-manifest-freshness.ts",
+      "code": 0
+    },
+    {
+      "label": "test-release-assets.ts",
+      "code": 0
+    },
+    {
+      "label": "test-release-attestation.ts",
+      "code": 0
+    },
+    {
+      "label": "test-release-audit.ts",
+      "code": 0
+    },
+    {
+      "label": "test-release-workflow.ts",
+      "code": 0
+    },
+    {
+      "label": "test-release-workflow-manifest-order.ts",
+      "code": 0
+    },
+    {
+      "label": "test-release-version-commit-parity.ts",
+      "code": 0
+    },
+    {
+      "label": "test-release-installer-assets.ts",
+      "code": 0
+    },
+    {
+      "label": "test-documented-install-command.ts",
+      "code": 0
+    },
+    {
+      "label": "test-dashboard-legibility.ts",
+      "code": 0
+    },
+    {
+      "label": "test-docker-image-architecture.ts",
+      "code": 0
+    },
+    {
+      "label": "test-prd-success-metrics.ts",
+      "code": 0
+    },
+    {
+      "label": "test-manifest-runtime-node.ts",
+      "code": 0
+    },
+    {
+      "label": "test-verify-artifact.ts",
+      "code": 0
+    },
+    {
+      "label": "test-real-archive-verify.ts",
+      "code": 0
+    },
+    {
+      "label": "test-partial-extraction-safety.ts",
+      "code": 0
+    },
+    {
+      "label": "test-embedded-manifest-provenance.ts",
+      "code": 0
+    },
+    {
+      "label": "test-target-runs-shipped-payload.ts",
+      "code": 0
+    },
+    {
+      "label": "test-rollback-drill.ts",
+      "code": 0
+    },
+    {
+      "label": "test-rewrite-build-paths.ts",
+      "code": 0
+    },
+    {
+      "label": "test-release-layout.sh",
+      "code": 0
+    },
+    {
+      "label": "test-release-cutover.sh",
+      "code": 0
+    },
+    {
+      "label": "test-release-payload-linux.sh",
+      "code": 0
+    },
+    {
+      "label": "test-browser-scrub.ts",
+      "code": 0
+    },
+    {
+      "label": "reconcile-task-ledger.py",
+      "code": 0
+    },
+    {
+      "label": "test-release-installer.sh",
+      "code": 0
+    },
+    {
+      "label": "test-supply-chain.ts",
+      "code": 0
+    },
+    {
+      "label": "test-release-docs.ts",
+      "code": 0
+    },
+    {
+      "label": "test-line-endings.sh",
+      "code": 0
+    },
+    {
+      "label": "test-ssh-destination-injection.ts",
+      "code": 0
+    },
+    {
+      "label": "test-ssrf-guard.ts",
+      "code": 0
+    },
+    {
+      "label": "test-auth-security.ts",
+      "code": 0
+    },
+    {
+      "label": "test-origin-csrf.ts",
+      "code": 0
+    },
+    {
+      "label": "test-secret-redaction.ts",
+      "code": 0
+    },
+    {
+      "label": "test-rate-limit.ts",
+      "code": 0
+    },
+    {
+      "label": "test-protected-routes.ts",
+      "code": 0
+    },
+    {
+      "label": "test-method-matrix.ts",
+      "code": 0
+    },
+    {
+      "label": "test-real-traffic-target-os.ts",
+      "code": 0
+    },
+    {
+      "label": "test-real-traffic-target-os.sh",
+      "code": 0
+    },
+    {
+      "label": "test-real-binary-evidence.ts",
+      "code": 0
+    },
+    {
+      "label": "test-backhaul.ts",
+      "code": 0
+    },
+    {
+      "label": "test-frp.ts",
+      "code": 0
+    },
+    {
+      "label": "test-gost.ts",
+      "code": 0
+    },
+    {
+      "label": "test-ssh.ts",
+      "code": 0
+    },
+    {
+      "label": "test-port-forward.ts",
+      "code": 0
+    },
+    {
+      "label": "test-port-forward-datapath.ts",
+      "code": 0
+    },
+    {
+      "label": "test-direct.ts",
+      "code": 0
+    },
+    {
+      "label": "test-reverse.ts",
+      "code": 0
+    },
+    {
+      "label": "test-xray.ts",
+      "code": 0
+    },
+    {
+      "label": "test-xui.ts",
+      "code": 0
+    },
+    {
+      "label": "test-tunnel-lifecycle.ts",
+      "code": 0
+    },
+    {
+      "label": "test-diagnostics.ts",
+      "code": 0
+    },
+    {
+      "label": "test-retry-bounds.ts",
+      "code": 0
+    },
+    {
+      "label": "test-bounded-caches.ts",
+      "code": 0
+    },
+    {
+      "label": "test-disposal-cleanup.ts",
+      "code": 0
+    },
+    {
+      "label": "test-forward-reconcile.ts",
+      "code": 0
+    },
+    {
+      "label": "test-port-allocation.ts",
+      "code": 0
+    },
+    {
+      "label": "test-optimizations.ts",
+      "code": 0
+    },
+    {
+      "label": "test-apply-migrations.ts",
+      "code": 0
+    },
+    {
+      "label": "test-create-admin.ts",
+      "code": 0
+    },
+    {
+      "label": "test-health-telemetry.ts",
+      "code": 0
+    },
+    {
+      "label": "test-resource-budgets.ts",
+      "code": 0
+    },
+    {
+      "label": "test-backup-restore.sh",
+      "code": 0
+    },
+    {
+      "label": "test-readme-fa-parity.ts",
+      "code": 0
+    },
+    {
+      "label": "test-locale-parity.ts",
+      "code": 0
+    },
+    {
+      "label": "test-service-contract.sh",
+      "code": 0
+    },
+    {
+      "label": "test-cli-regression.sh",
+      "code": 0
+    },
+    {
+      "label": "test-update-flow.sh",
+      "code": 0
+    },
+    {
+      "label": "test-lowram-cgroup-gate.sh",
+      "code": 0
+    }
+  ]
+}

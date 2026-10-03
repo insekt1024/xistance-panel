@@ -1,0 +1,46 @@
+{
+ "id": "TASK-38",
+ "title": "Add backup and restore verification path",
+ "category": "functional",
+ "description": "Make backup and restore a tested, safe part of update and recovery rather than an unverified tar command.",
+ "acceptanceCriteria": [
+  "Backup includes the required database/config/runtime metadata and excludes transient logs where documented",
+  "Backup creation checkpoints SQLite when applicable and reports a verifiable archive checksum",
+  "Restore validates archive paths/content, preserves permissions, and can restore into a temporary fixture",
+  "Update/rollback automatically verifies that the required backup exists before changing the active release",
+  "Tests cover successful backup/restore, missing/corrupt archive, and path traversal rejection"
+ ],
+ "steps": [
+  {
+   "step": 1,
+   "description": "Use temporary data directories to test archive contents, checksum, corrupt archive, missing database, and traversal entries.",
+   "pass": true
+  },
+  {
+   "step": 2,
+   "description": "Read `scripts/backup.sh`, installer backup/rollback, database URL resolution, and docs; record exact data paths and permissions.",
+   "pass": true
+  },
+  {
+   "step": 3,
+   "description": "Add validation/checksum/report metadata and safe extraction while preserving existing backup location/CLI compatibility.",
+   "pass": true
+  },
+  {
+   "step": 4,
+   "description": "Run focused backup/restore tests and an update/rollback fixture; do not touch production data.",
+   "pass": true
+  }
+ ],
+ "dependencies": [
+  "TASK-10",
+  "TASK-12",
+  "TASK-14",
+  "TASK-44"
+ ],
+ "estimatedComplexity": "high",
+ "technicalNotes": [
+  "Never commit `.data`, databases, keys, or backups. Treat real backup files as sensitive even if SQLite is intended to be encrypted at rest."
+ ],
+ "passes": true
+}

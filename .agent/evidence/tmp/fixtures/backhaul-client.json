@@ -1,0 +1,10 @@
+[client]
+remote_addr = "127.0.0.1:19001"
+transport = "tcpmux"
+token = "29c1ca93-795a-41ae-b91a-8c905a82f05e"
+connection_pool = 8
+keepalive_period = 75
+nodelay = true
+retry_interval = 3
+dial_timeout = 10
+log_level = "info"

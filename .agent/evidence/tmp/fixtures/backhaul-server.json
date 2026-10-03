@@ -1,0 +1,11 @@
+[server]
+bind_addr = "127.0.0.1:19001"
+transport = "tcpmux"
+token = "29c1ca93-795a-41ae-b91a-8c905a82f05e"
+ports = ["18101=19098"]
+nodelay = true
+keepalive_period = 75
+heartbeat = 40
+channel_size = 2048
+mux_con = 64
+log_level = "info"

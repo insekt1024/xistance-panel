@@ -1,0 +1,51 @@
+{
+  "id": "TASK-3",
+  "title": "Define supported release architecture and runtime contract",
+  "category": "setup",
+  "description": "Make the release target explicit and verify that the proposed prebuilt artifact can run without a source build while retaining Node.js 22 and supported Ubuntu architectures.",
+  "acceptanceCriteria": [
+    "amd64 and arm64 are explicitly listed as supported artifact targets or a documented gate explains why one is excluded",
+    "Node.js 22 and standalone `server.js` are documented as runtime requirements",
+    "The artifact boundary separates app code, runtime dependencies, tunnel binaries, mutable data, and secrets",
+    "A feasibility check records the actual Next standalone output and Prisma/native dependency behavior"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Inspect package and Next output",
+      "details": "Read root/web manifests, `next.config.ts`, Dockerfile, and the standalone build output. Record the exact server path and required runtime files.",
+      "pass": true
+    },
+    {
+      "step": 2,
+      "description": "Inspect native dependencies",
+      "details": "Identify Prisma engine, SQLite, OpenSSH, and any other native/binary dependencies that must be present in a prebuilt artifact or explicitly installed by the installer.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Define architecture matrix",
+      "details": "Document amd64/arm64 mapping and reject unsupported hosts with an actionable installer error. Do not add a new architecture without evidence.",
+      "pass": true
+    },
+    {
+      "step": 4,
+      "description": "Review feasibility",
+      "details": "Record whether the selected ‘one immutable release artifact’ contract can be implemented without rebuilding Next on the VPS; flag native dependency risks rather than assuming success.",
+      "pass": true
+    }
+  ],
+  "dependencies": [
+    "TASK-1",
+    "TASK-2"
+  ],
+  "estimatedComplexity": "medium",
+  "technicalNotes": [
+    "Evidence: `.agent/evidence/release-contract.md` records the verified standalone server, Node 22 runtime, amd64/arm64 mapping, native Prisma/sharp dependencies, and external tunnel-binary boundary.",
+    "The artifact is a prebuilt standalone bundle per architecture plus Node 22 runtime, not a native self-contained executable.",
+    "Cross-architecture native assets and Ubuntu VPS install evidence remain separate required gates; local Windows build evidence is not a substitute.",
+    "No secret values, environment-file values, database contents, or production credentials were recorded.",
+    "Resolved 2026-09-30: the arm64 feasibility gate required by PRD L42 is owned by THIS task (step 4), not by TASK-1, and it is now DISCHARGED as FEASIBLE. Prisma 6.19.3 publishes native linux-arm64-openssl-3.0.x query engines (engines commit c2990dca591cba766e3b7ef5d9e8a84796e47ab7), verified against binaries.prisma.sh with an x64 control. Evidence: .agent/evidence/task-77-arm64-feasibility-gate.md and the gate section of .agent/evidence/release-contract.md.",
+    "Still open and NOT claimed done: no arm64 artifact has been built or tested; this host has no arm64 QEMU/binfmt, so an arm64 runner is required; and sharp's arm64 native availability is unverified (only the Prisma query engine was probed)."
+  ]
+}

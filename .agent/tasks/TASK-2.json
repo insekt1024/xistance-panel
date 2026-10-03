@@ -1,0 +1,61 @@
+{
+  "id": "TASK-2",
+  "title": "Record baseline verification and repository state",
+  "category": "setup",
+  "description": "Run the exact existing baseline commands from the repository root and save sanitized results as the before-state for PRD acceptance.",
+  "acceptanceCriteria": [
+    "`npm run version:check`, `npm run lint`, `npm run typecheck`, `TURBO_DISABLE=true npx tsx scripts/test-optimizations.ts`, and `TURBO_DISABLE=true npm run build` are each invoked from `xistance-panel/`",
+    "The sanitized result records exit code, test counts, warnings, and environment gaps",
+    "No output contains passwords, tokens, cookies, private keys, or database contents",
+    "The baseline is not represented as passing if any command failed"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Run version check",
+      "details": "Execute `npm run version:check` and capture its exit code and output; do not alter version files.",
+      "pass": true
+    },
+    {
+      "step": 2,
+      "description": "Run lint",
+      "details": "Execute `npm run lint` and capture warnings/errors separately from the exit code.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Run typecheck",
+      "details": "Execute `npm run typecheck` and capture the first actionable failure if any.",
+      "pass": true
+    },
+    {
+      "step": 4,
+      "description": "Run custom tests",
+      "details": "Execute `TURBO_DISABLE=true npx tsx scripts/test-optimizations.ts`; record passed/failed counts and failing test names only.",
+      "pass": true
+    },
+    {
+      "step": 5,
+      "description": "Run production build",
+      "details": "Execute `TURBO_DISABLE=true npm run build`; record success, warnings, and route/build output without copying source paths containing secrets.",
+      "pass": true
+    },
+    {
+      "step": 6,
+      "description": "Save evidence",
+      "details": "Create `.agent/evidence/baseline.md` with commands, exit codes, sanitized results, host/tool versions, and unresolved gaps. Keep every task pass flag false until evidence is reviewed.",
+      "pass": true
+    }
+  ],
+  "dependencies": [
+    "TASK-1"
+  ],
+  "estimatedComplexity": "low",
+  "technicalNotes": [
+    "Evidence: `.agent/evidence/baseline.md` records the sanitized repository, toolchain, and environment state.",
+    "Re-verified 2026-09-25: version:check, lint, typecheck, the 77-test optimization harness, production build, and shell syntax all exited 0.",
+    "The build warning set is recorded separately; the first Windows Prisma EPERM was traced to a stale dev process and resolved without changing application code.",
+    "The baseline is not a release acceptance result: Docker daemon, architecture-specific artifacts, browser suite evidence, and real Ubuntu VPS evidence remain separate gates.",
+    "No secret values, environment-file values, database contents, cookies, tokens, or private keys were recorded."
+  ]
+}

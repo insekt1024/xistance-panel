@@ -1,0 +1,54 @@
+{
+  "id": "TASK-73",
+  "title": "Package the Prisma client and native engine for Linux in the release artifact",
+  "category": "functional",
+  "description": "Fix the release artifact so the staged standalone tree contains a complete, runnable Prisma client with the correct Linux native engine for each target architecture, instead of only a Windows engine and schema.prisma.",
+  "acceptanceCriteria": [
+    "The staged release artifact contains the Prisma client JavaScript entry points (index.js, default.js) and the client package.json",
+    "The staged artifact contains a Linux Prisma query engine matching the artifact architecture and contains no foreign-platform engine",
+    "Inspection fails when the Prisma client or a usable native engine is missing, so an unbootable artifact cannot pass the release gate",
+    "A bootable artifact is proven by actually starting the standalone server on Linux and completing a real database-backed request",
+    "Windows and Linux engine selection is explicit rather than incidental, and does not silently ship a foreign binary"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Add failing inspection and packaging test",
+      "details": "Extend the release artifact inspection tests so a staged tree without the Prisma client entry points or without a Linux engine is rejected, and so a foreign-platform engine is rejected. Run the test and record the expected RED failure.",
+      "pass": true
+    },
+    {
+      "step": 2,
+      "description": "Package the Prisma client deterministically",
+      "details": "Make the release staging include the generated Prisma client JavaScript and package manifest, and select the native engine for the target architecture explicitly. Do not rely on incidental Next file tracing, which currently copies nothing from packages/db.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Add inspection rules for the Prisma runtime",
+      "details": "Require the client entry points, the client manifest, and an engine matching the requested architecture; reject foreign-platform engines and Windows-only payloads in a Linux release.",
+      "pass": true
+    },
+    {
+      "step": 4,
+      "description": "Prove the artifact boots on Linux",
+      "details": "Start the staged standalone server on the Ubuntu VPS with a temporary database, confirm the process stays up, and complete a real database-backed HTTP request. Record memory and startup behavior. Never write real secrets.",
+      "pass": true
+    },
+    {
+      "step": 5,
+      "description": "Run full quality gates",
+      "details": "Run the focused release tests, lint, typecheck, the optimization harness, and the build. Record any platform limitation as an explicit evidence gap rather than a pass.",
+      "pass": true
+    }
+  ],
+  "dependencies": ["TASK-5", "TASK-6", "TASK-7", "TASK-8"],
+  "estimatedComplexity": "high",
+  "technicalNotes": [
+    "Root cause confirmed 2026-09-25: Next standalone traces zero files from packages/db. required-server-files.json contains 0 entries matching packages/db, generated, or prisma. The standalone tree has no node_modules/@prisma and no node_modules/@xistance. The only things present under packages/db/generated/client are query_engine-windows.dll.node and schema.prisma, copied incidentally rather than traced.",
+    "The app imports the Prisma client through the workspace symlink node_modules/@xistance/db -> ../../packages/db, whose package.json main points at a .ts source file. Tracing therefore resolves to TypeScript sources that have no runnable standalone runtime path.",
+    "This blocks all VPS acceptance work (TASK-62/63/64/65): the current artifact cannot boot on Ubuntu. Verified VPS profile: Ubuntu 24.04.1, 1 vCPU, 961 MB RAM, amd64.",
+    "Do not claim a pass from a Windows-only build. The engine must match the artifact architecture, and the boot proof must come from a real Linux start.",
+    "Never place real secrets, database contents, or credentials in evidence or on the VPS."
+  ]
+}

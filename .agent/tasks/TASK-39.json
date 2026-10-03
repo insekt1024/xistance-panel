@@ -1,0 +1,50 @@
+{
+  "id": "TASK-39",
+  "title": "Add update and recovery audit records",
+  "category": "security",
+  "description": "Record sanitized update, migration, readiness, rollback, and recovery events in the existing audit trail.",
+  "acceptanceCriteria": [
+    "Update/migration/rollback actions create audit records with actor/action/version/outcome/error category but no secrets",
+    "Records are created only after the relevant action outcome is known and survive pagination",
+    "Failed rollback/readiness events are queryable and distinguish attempted from completed actions",
+    "Authorization and rate limits apply to update/rollback endpoints if exposed through the API",
+    "Tests cover successful update, failed migration, failed readiness, rollback success/failure, and secret redaction"
+  ],
+  "steps": [
+    {
+      "step": 1,
+      "description": "Assert the expected audit actions/fields and absence of passwords/tokens/raw command lines for each recovery path.",
+      "pass": true,
+      "details": "Suite scripts/test-release-audit.ts asserts the allowlist contract, the closed error-category set, version clipping, and that a raw error message is reduced to 'unknown'. No secret or command line is stored."
+    },
+    {
+      "step": 2,
+      "description": "Read audit helper, relevant update/settings routes, installer result handling, and current audit tests; identify the smallest integration point.",
+      "pass": true
+    },
+    {
+      "step": 3,
+      "description": "Record only allowlisted metadata and bounded error categories; preserve existing audit schema/indexes unless a migration is explicitly required.",
+      "pass": true,
+      "details": "apps/web/src/lib/release-audit.ts builds details from a fixed key allowlist and stores only a bounded errorCategory. No schema change: the existing AuditLog table already has actorId/action/target/details/ip/createdAt. maintenance.ts now exempts retained release actions from the 90-day prune so lifecycle evidence survives. apps/web/app/api/settings/backup/route.ts records a release-audit event alongside the existing backup event."
+    },
+    {
+      "step": 4,
+      "description": "Run focused audit tests, pagination checks, custom harness, typecheck, and lint.",
+      "pass": true,
+      "details": "npx tsx scripts/test-release-audit.ts -> 28 passed, 0 failed, 0 skipped, exit 0, against the real production build over HTTP. Proves unauthenticated 401, non-admin 403, per-user rate limit, the full ok/failed outcome matrix, actorId null for host-side actions, and a release record reachable past page 1 of the audit API. apps/web typecheck and targeted ESLint clean."
+    }
+  ],
+  "dependencies": [
+    "TASK-14",
+    "TASK-22",
+    "TASK-38",
+    "TASK-40",
+    "TASK-44"
+  ],
+  "estimatedComplexity": "medium",
+  "technicalNotes": [
+    "Do not add a new audit table if the existing action metadata can represent the event; schema changes require separate migration evidence."
+  ],
+  "passes": true
+}
