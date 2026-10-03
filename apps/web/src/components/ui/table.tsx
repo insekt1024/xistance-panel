@@ -65,9 +65,13 @@ TableRow.displayName = "TableRow";
 const TableHead = React.forwardRef<
   HTMLTableCellElement,
   React.ThHTMLAttributes<HTMLTableCellElement>
->(({ className, ...props }, ref) => (
+>(({ className, scope = "col", ...props }, ref) => (
+  // Default scope="col": without it, a screen reader announces a data cell
+  // without saying which column it belongs to (WCAG 1.3.1). Consumers can pass
+  // scope="row" for a row header.
   <th
     ref={ref}
+    scope={scope}
     className={cn(
       "h-10 px-2 text-left align-middle font-medium text-muted-foreground rtl:text-right",
       className,
@@ -83,7 +87,7 @@ const TableCell = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <td
     ref={ref}
-    className={cn("p-2 align-middle [&:has([role=checkbox])]:pr-0", className)}
+    className={cn("p-2 align-middle [&:has([role=checkbox])]:pe-0", className)}
     {...props}
   />
 ));

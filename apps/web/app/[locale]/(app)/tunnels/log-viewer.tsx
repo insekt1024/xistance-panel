@@ -199,13 +199,13 @@ export function LogViewer({
         </div>
         <div className="flex items-center gap-2 border-b px-4 py-1.5">
           <div className="relative flex-1">
-            <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Search className="absolute start-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
               type="text"
               placeholder={t("logSearchPlaceholder")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="h-8 w-full rounded-md border bg-background pl-8 pr-2 text-xs outline-none focus:ring-1 focus:ring-ring"
+              className="h-8 w-full rounded-md border bg-background ps-8 pe-2 text-xs outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
           <select

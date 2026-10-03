@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/routing";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,31 +14,62 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 
 export function LoginForm() {
   const t = useTranslations("auth");
+  const tCommon = useTranslations("common");
   const router = useRouter();
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  // Arriving here with an expired access token but a still-valid refresh
+  // cookie is the common case after an idle period — the server render cannot
+  // set cookies, so it redirects here. Renew silently and go back rather than
+  // asking for a password the user did not need to re-enter.
+  React.useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const m = /xt_csrf=([^;]+)/.exec(document.cookie);
+      if (!m) return; // never logged in on this browser
+      try {
+        const res = await fetch("/api/auth/refresh", {
+          method: "POST",
+          headers: { "X-CSRF-Token": m[1] },
+        });
+        if (!cancelled && res.ok) router.replace("/");
+      } catch {
+        // Offline: fall through to the normal login form.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setLoading(true);
     setError(null);
-    const form = new FormData(e.currentTarget);
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: form.get("email"),
-        password: form.get("password"),
-      }),
-    });
-    if (res.ok) {
-      toast.success(t("welcomeBack"));
-      router.push("/");
-    } else {
-      const data = await res.json().catch(() => ({}));
-      setError(data.error ?? t("invalidCredentials"));
+    try {
+      const form = new FormData(e.currentTarget);
+      // apiFetch: 30s timeout so slow/reset networks cannot hang the button,
+      // and a thrown network error lands in the catch below (loading always
+      // clears in finally). CSRF header is attached automatically.
+      const res = await apiFetch<{ error?: string }>("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({
+          email: form.get("email"),
+          password: form.get("password"),
+        }),
+      });
+      if (res.ok) {
+        toast.success(t("welcomeBack"));
+        router.push("/");
+      } else {
+        setError(res.data?.error ?? t("invalidCredentials"));
+      }
+    } catch {
+      setError(tCommon("networkError"));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   return (

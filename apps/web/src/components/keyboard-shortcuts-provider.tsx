@@ -38,11 +38,24 @@ export function KeyboardShortcutsProvider({
     },
   });
 
+  // Both dialogs stay MOUNTED and are driven by `open`.
+  //
+  // Conditionally rendering them ({open && <Dialog .../>}) was the defect
+  // scripts/test-dialog-keyboard.ts was written to catch: Radix restores focus
+  // to the element that had it before the dialog opened, but unmounting the
+  // dialog unmounts the app shell's trigger ref with it, so focus lands on
+  // <body> and a keyboard user loses their place. Measured in a real browser:
+  //   "returns focus to the trigger" -> focus fell back to <body>
+  // Every other dialog in the app (nodes, tunnels, users, webhooks) was already
+  // mounted this way; these two were the outliers.
+  //
+  // next/dynamic keeps the chunk out of the initial bundle, so holding it
+  // mounted costs nothing until the shortcut is first used.
   return (
     <>
       {children}
-      {searchOpen && <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />}
-      {helpOpen && <KeyboardShortcutsHelp open={helpOpen} onOpenChange={setHelpOpen} />}
+      <SearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      <KeyboardShortcutsHelp open={helpOpen} onOpenChange={setHelpOpen} />
     </>
   );
 }

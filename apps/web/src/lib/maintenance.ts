@@ -1,4 +1,5 @@
 import { prisma } from "@xistance/db";
+import { RETAINED_RELEASE_ACTIONS } from "./release-audit";
 
 // ---------------------------------------------------------------------------
 // Periodic maintenance: prune data that would otherwise grow without bound.
@@ -21,8 +22,11 @@ export function startMaintenance(): void {
     const now = Date.now();
     try {
       const auditCutoff = new Date(now - AUDIT_RETAIN_DAYS * 24 * 3600_000);
+      // Release records are excluded: they are the evidence of what was DEPLOYED
+      // on this host, and an operator asking "which version has this box run for
+      // the last six months?" is exactly the question the prune would erase.
       const audits = await prisma.auditLog.deleteMany({
-        where: { createdAt: { lt: auditCutoff } },
+        where: { createdAt: { lt: auditCutoff }, action: { notIn: [...RETAINED_RELEASE_ACTIONS] } },
       });
       if (audits.count > 0) {
         console.log(`[maintenance] pruned ${audits.count} audit logs older than ${AUDIT_RETAIN_DAYS}d`);

@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import type { z } from "zod";
 import { prisma } from "@xistance/db";
-import { assertCsrf, getSession, originAllowed, type SafeUser } from "./auth";
+import {
+  assertCsrf,
+  getSession,
+  originAllowed,
+  refreshSession,
+  requestIsHttps,
+  type SafeUser,
+} from "./auth";
 import { CACHE_ACTIVITY, invalidateCache } from "./query-cache";
 
 // ---------------------------------------------------------------------------
@@ -71,7 +78,14 @@ export async function requireSession(
 ): Promise<{ ok: true; user: SafeUser } | { ok: false; response: NextResponse }> {
   const csrf = csrfGuard(request);
   if (csrf) return { ok: false, response: csrf };
-  const user = await getSession();
+  let user = await getSession();
+  if (!user) {
+    // The access token lives 15 minutes; the refresh token lives 30 days and
+    // was never being used, so every session died after 15 minutes. Route
+    // handlers may set cookies, so renew here rather than bouncing a working
+    // session to the login screen.
+    user = await refreshSession({ secure: requestIsHttps(request) });
+  }
   if (!user) return { ok: false, response: apiError("Unauthorized", 401) };
   const rank: Record<string, number> = { USER: 0, ADMIN: 1, SUPER_ADMIN: 2 };
   // Deny by default: unknown roles get rank -1 (below USER).

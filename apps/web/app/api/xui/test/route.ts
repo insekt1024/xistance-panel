@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { XUI_LOGIN_PATHS, normalizePanelUrl } from "@xistance/tunnel-core";
 import { apiError, json, parseBody, requireSession } from "@/lib/api";
+import { rejectPanelProbeHost } from "@/lib/panel-probe-host";
 import { rateLimit } from "@/lib/rate-limit";
 
 const xuiTestSchema = z.object({
@@ -11,9 +12,16 @@ const xuiTestSchema = z.object({
 
 // Verify reachability + credentials against X-UI / 3X-UI HTTP API.
 // Tries known login paths (x-ui vs 3x-ui differ); success = session cookie.
-// NOTE: intentionally no SSRF private-IP block here — 3X-UI panels usually
-// live on the user's own VPS (often a private/tailnet address). Rate-limited
-// per user (10/min) and requires a signed-in session.
+//
+// The private/tailnet address space is deliberately reachable — a 3X-UI panel
+// usually lives on the user's own VPS at a private address, and blocking RFC1918
+// would break the feature. But "private" is not the same as "anything on the
+// panel host", so three targets are refused unconditionally: loopback (the
+// panel itself and any co-tenant service), link-local (the cloud metadata
+// service at 169.254.169.254), and unspecified/broadcast. A USER is not
+// supposed to reach the panel's own admin port through this route.
+//
+// Rate-limited per user (10/min) and requires a signed-in session.
 export async function POST(request: Request) {
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
@@ -34,6 +42,8 @@ export async function POST(request: Request) {
   if (parsed.username || parsed.password) {
     return apiError("Put credentials in the fields, not in the URL", 400);
   }
+  const hostProblem = rejectPanelProbeHost(parsed.hostname);
+  if (hostProblem) return apiError(hostProblem, 400);
   const form = new URLSearchParams();
   form.set("username", body.data.username);
   form.set("password", body.data.password);

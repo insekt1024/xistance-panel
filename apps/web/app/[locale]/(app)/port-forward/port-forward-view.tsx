@@ -33,7 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Card } from "@/components/ui/card";
+import { StateBlock } from "@/components/state-block";
 
 export interface ForwardRow {
   id: string;
@@ -159,36 +159,51 @@ export function PortForwardView({ rules }: { rules: ForwardRow[] }) {
       </div>
 
       {rules.length === 0 ? (
-        <Card className="animate-fade-in border-dashed p-10 text-center text-muted-foreground">{t("empty")}</Card>
+          <StateBlock
+    kind="empty"
+    message={t("empty")}
+    description={t("emptyHint")}
+    action={
+      <Button size="sm" onClick={() => setOpen(true)}>
+        <Plus aria-hidden className="size-4" />
+        {t("addRule")}
+      </Button>
+    }
+  />
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t("name")}</TableHead>
-              <TableHead>{t("direction")}</TableHead>
-              <TableHead>{t("protocol")}</TableHead>
-              <TableHead>{t("sourcePort")}</TableHead>
-              <TableHead>{t("destHost")}</TableHead>
-              <TableHead>{t("destPort")}</TableHead>
-              <TableHead>{t("enabled")}</TableHead>
-              <TableHead className="text-right">{tCommon("actions")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("name")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("direction")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("protocol")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("sourcePort")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("destHost")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("destPort")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("enabled")}</TableHead>
+              <TableHead className="text-left rtl:text-right">{tCommon("actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rules.map((r, i) => (
               <TableRow key={r.id} className="animate-fade-in-up" style={{ "--stagger": Math.min(i, 10) } as React.CSSProperties}>
-                <TableCell className="font-medium">{r.name}</TableCell>
+                {/* An identifier in a table cell. The wrapper already scrolls horizontally, so `whitespace-nowrap` lets the TABLE scroll rather than wrapping the value across several lines in a narrow column. Measured with realistic long values by test-dashboard-legibility.ts. */}
+                <TableCell className="whitespace-nowrap font-medium">{r.name}</TableCell>
                 <TableCell>
                   {r.direction === "IRAN_TO_FOREIGN" ? t("iranToForeign") : t("foreignToIran")}
                 </TableCell>
-                <TableCell>{r.protocol.toUpperCase()}</TableCell>
-                <TableCell className="font-mono text-xs">{r.sourcePort}</TableCell>
-                <TableCell className="font-mono text-xs">{r.destHost}</TableCell>
-                <TableCell className="font-mono text-xs">{r.destPort}</TableCell>
+                {/* An identifier in a table cell. The wrapper already scrolls horizontally, so `whitespace-nowrap` lets the TABLE scroll rather than wrapping the value across several lines in a narrow column. Measured with realistic long values by test-dashboard-legibility.ts. */}
+                <TableCell className="whitespace-nowrap">{r.protocol.toUpperCase()}</TableCell>
+                {/* An identifier in a table cell. The wrapper already scrolls horizontally, so `whitespace-nowrap` lets the TABLE scroll rather than wrapping the value across several lines in a narrow column. Measured with realistic long values by test-dashboard-legibility.ts. */}
+                <TableCell className="whitespace-nowrap font-mono text-xs">{r.sourcePort}</TableCell>
+                {/* An identifier in a table cell. The wrapper already scrolls horizontally, so `whitespace-nowrap` lets the TABLE scroll rather than wrapping the value across several lines in a narrow column. Measured with realistic long values by test-dashboard-legibility.ts. */}
+                <TableCell className="whitespace-nowrap font-mono text-xs">{r.destHost}</TableCell>
+                {/* An identifier in a table cell. The wrapper already scrolls horizontally, so `whitespace-nowrap` lets the TABLE scroll rather than wrapping the value across several lines in a narrow column. Measured with realistic long values by test-dashboard-legibility.ts. */}
+                <TableCell className="whitespace-nowrap font-mono text-xs">{r.destPort}</TableCell>
                 <TableCell>
                   <StatusBadge status={r.enabled ? "running" : "stopped"} />
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell className="text-left rtl:text-right">
                   <div className="flex items-center justify-end gap-1">
                     <Button
                       variant="outline"

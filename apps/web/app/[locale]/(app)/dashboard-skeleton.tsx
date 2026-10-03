@@ -1,10 +1,23 @@
+import { useTranslations } from "next-intl";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export function DashboardSkeleton() {
+  const t = useTranslations("common");
   return (
-    <div className="animate-fade-in space-y-6">
+    /*
+     * aria-busy plus a named status: the individual Skeletons are aria-hidden
+     * decoration, so without this the loading state is completely silent and a
+     * screen-reader user is given no indication that content is on its way
+     * (WCAG 4.1.3).
+     */
+    <div
+      aria-busy="true"
+      aria-live="polite"
+      aria-label={t("loading")}
+      className="animate-fade-in space-y-6"
+    >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
           <Card key={i} className="animate-fade-in-up" style={{ "--stagger": i } as React.CSSProperties}>
@@ -72,7 +85,7 @@ export function DashboardSkeleton() {
                   <TableCell><Skeleton className="h-4 w-32" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-10" /></TableCell>
                   <TableCell><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
-                  <TableCell className="text-right"><Skeleton className="h-8 w-16 ml-auto" /></TableCell>
+                  <TableCell className="text-left rtl:text-right"><Skeleton className="h-8 w-16 ms-auto" /></TableCell>
                 </TableRow>
               ))}
             </TableBody>

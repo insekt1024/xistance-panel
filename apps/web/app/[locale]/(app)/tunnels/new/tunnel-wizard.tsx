@@ -522,10 +522,15 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
         ))}
       </div>
 
-      <Card className="p-6">
+      {/* `p-4 sm:p-6` rather than a flat p-6. Twenty-four pixels on each side of
+          a 320px viewport leaves a 158px content column, and at 200% text a
+          25-character heading needs five lines in it. Padding does not scale with
+          a user's text-size setting -- which is precisely the asymmetry this
+          fixes. Measured by test-dashboard-legibility.ts at 320px @200%. */}
+      <Card className="p-4 sm:p-6">
         {step === 0 && (
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold">{t("step1Title")}</h2>
+            <h2 className="min-w-0 break-words text-lg font-semibold">{t("step1Title")}</h2>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {METHODS.map((m) => (
                 <button
@@ -551,7 +556,7 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
 
         {step === 1 && (
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold">{t("step2Title")}</h2>
+            <h2 className="min-w-0 break-words text-lg font-semibold">{t("step2Title")}</h2>
             {isSingleNode && (
               <p className="text-xs text-muted-foreground">{t("singleNodeHint")}</p>
             )}
@@ -607,7 +612,7 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
 
         {step === 2 && method && (
           <div className="space-y-5">
-            <h2 className="text-lg font-semibold">{t("step3Title")}</h2>
+            <h2 className="min-w-0 break-words text-lg font-semibold">{t("step3Title")}</h2>
             <Field label={t("name")}>
               <Input
                 value={name}
@@ -1470,7 +1475,7 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
 
         {step === 3 && method && (
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold">{t("step4Title")}</h2>
+            <h2 className="min-w-0 break-words text-lg font-semibold">{t("step4Title")}</h2>
             <dl className="grid gap-2 text-sm sm:grid-cols-2">
               <div>
                 <dt className="text-muted-foreground">{t("name")}</dt>

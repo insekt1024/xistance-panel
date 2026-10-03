@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
+import { rateLimit } from "@/lib/rate-limit";
 
 const webhookCreateSchema = z.object({
   name: z.string().min(1).max(80),
@@ -52,6 +53,10 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const auth = await requireSession(request, "ADMIN");
   if (!auth.ok) return auth.response;
+  // Abuse bound: one authenticated session had no ceiling on this write, and
+  // the cost is real server work, not just a database row.
+  const rl = rateLimit(`webhooks-create:${auth.user.id}`, 20, 60000);
+  if (!rl.ok) return apiError("Too many requests, slow down", 429);
 
   const body = await parseBody(request, webhookCreateSchema);
   if (!body.ok) return body.response;

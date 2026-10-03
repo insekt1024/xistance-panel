@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { useTranslations } from "next-intl";
-import { ChevronLeft, ChevronRight, Filter, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Filter, Loader2, X } from "lucide-react";
+import { toast } from "sonner";
 import { apiFetch } from "@/lib/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/table";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { StateBlock } from "@/components/state-block";
 import {
   Select,
   SelectContent,
@@ -98,17 +100,22 @@ export function UserActivityView({
 
   async function navigate(cursor: string | null) {
     setLoading(true);
-    const data = await loadPage(
-      cursor,
-      filterUser === "all" ? null : filterUser,
-      filterAction === "all" ? null : filterAction,
-    );
-    if (data) {
-      setLogs(data.logs);
-      setHasNext(data.hasNext);
-      setNextCursor(data.nextCursor);
+    try {
+      const data = await loadPage(
+        cursor,
+        filterUser === "all" ? null : filterUser,
+        filterAction === "all" ? null : filterAction,
+      );
+      if (data) {
+        setLogs(data.logs);
+        setHasNext(data.hasNext);
+        setNextCursor(data.nextCursor);
+      }
+    } catch {
+      toast.error(tCommon("networkError"));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   function applyFilters() {
@@ -127,6 +134,9 @@ export function UserActivityView({
         setHasNext(data.hasNext);
         setNextCursor(data.nextCursor);
       }
+    }).catch(() => {
+      toast.error(tCommon("networkError"));
+    }).finally(() => {
       setLoading(false);
     });
   }
@@ -148,8 +158,14 @@ export function UserActivityView({
     <div className="space-y-4">
       <Card className="p-4">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Filter className="h-4 w-4" />
+          {/* `shrink-0` so the label is not squeezed into a 63px column and
+              wrapped to two lines inside its one-line box -- measured in BOTH
+              locales at 320px and 390px. The row already wraps (`flex-wrap`), so
+              the whole label moves to the next line rather than breaking
+              internally; `whitespace-nowrap` keeps the word intact.
+              Found by test-dashboard-legibility.ts. */}
+          <div className="flex shrink-0 items-center gap-2 whitespace-nowrap text-sm text-muted-foreground">
+            <Filter className="h-4 w-4 shrink-0" />
             {t("filters")}
           </div>
           <div className="flex-1 min-w-[140px]">
@@ -194,27 +210,36 @@ export function UserActivityView({
         </div>
       </Card>
 
+      {loading ? <StateBlock kind="loading" message={t("loading")} /> : null}
       {logs.length === 0 && !loading ? (
-        <Card className="animate-fade-in border-dashed p-10 text-center text-muted-foreground">
-          {t("empty")}
-        </Card>
+        <StateBlock
+          kind="empty"
+          message={t("empty")}
+          description={t("emptyHint")}
+          action={
+            <Button size="sm" variant="outline" onClick={clearFilters} disabled={loading}>
+              <X aria-hidden className="size-4" />
+              {t("clear")}
+            </Button>
+          }
+        />
       ) : (
         <div className="space-y-3">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{t("user")}</TableHead>
-                <TableHead>{t("action")}</TableHead>
-                <TableHead>{t("target")}</TableHead>
-                <TableHead>{t("time")}</TableHead>
-                <TableHead>{t("ip")}</TableHead>
+                <TableHead className="whitespace-nowrap">{t("user")}</TableHead>
+                <TableHead className="whitespace-nowrap">{t("action")}</TableHead>
+                <TableHead className="whitespace-nowrap">{t("target")}</TableHead>
+                <TableHead className="whitespace-nowrap">{t("time")}</TableHead>
+                <TableHead className="whitespace-nowrap">{t("ip")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow>
+                <TableRow aria-hidden>
                   <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    {tCommon("loading")}
+                    <Loader2 className="mx-auto size-4 animate-spin" />
                   </TableCell>
                 </TableRow>
               ) : (

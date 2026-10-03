@@ -10,7 +10,15 @@ const actionSchema = z.object({
   action: z.enum(["start", "stop", "restart"]),
 });
 
-const STATE = {
+/**
+ * The DESIRED state for an action -- what the operator asked for.
+ *
+ * This is deliberately NOT the same value as the `state` column. `status`
+ * records the request; `state` records what the process supervisor reported
+ * afterwards. Collapsing them is how a tunnel ends up displaying `running`
+ * while the forwarder is failing.
+ */
+const DESIRED = {
   start: "running",
   stop: "stopped",
   restart: "running",
@@ -94,12 +102,33 @@ export async function POST(
     return apiError((err as Error).message || "Action failed", 500);
   }
 
-  const state = STATE[action];
+  // `status` is the DESIRED state (what the operator asked for) and `state` is
+  // the ACTUAL state reported by the process supervisor -- the schema says so,
+  // and the two columns mean different things.
+  //
+  // This route used to write STATE[action] into BOTH. That is the action the
+  // user clicked, not the result: a PORT_FORWARD start succeeds at the process
+  // level even when the forwarder is failing, so the row claimed `running`
+  // while the tunnel was degraded. Read the engine's answer instead, so the UI
+  // never shows an outcome the supervisor did not report.
+  const desired = DESIRED[action];
+  let actual: string = desired;
+  try {
+    actual = await engine.status(id);
+  } catch {
+    // If the status probe itself fails we must not invent a good answer. Record
+    // that the truth is unknown rather than claiming a clean success.
+    actual = "unknown";
+  }
   await prisma.tunnel.update({
     where: { id },
-    data: { state, status: state, errorMessage: null },
+    data: {
+      status: desired,
+      state: actual,
+      errorMessage: actual === "unknown" ? "status probe failed" : null,
+    },
   });
   await auditLog(auth.user.id, `tunnel.${action}`, id, tunnel.name, getClientIp(request));
   invalidateCache(CACHE_METRICS);
-  return json({ ok: true, state });
+  return json({ ok: actual !== "error", status: desired, state: actual });
 }

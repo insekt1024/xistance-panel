@@ -1,5 +1,11 @@
 import { prisma, type PortForward as DbPortForward, type Node as DbNode } from "@xistance/db";
 import { getEngine } from "./engine";
+import { coalescer } from "@xistance/tunnel-core";
+import {
+  planGroupsAndApply,
+  type ReconcileNode,
+  type ReconcileRule,
+} from "./forward-supervisor-logic";
 import { buildSpec } from "./tunnels";
 import type { PortForwardRule } from "@xistance/types";
 
@@ -49,122 +55,60 @@ function toRule(r: Pick<RuleRow, "name" | "direction" | "protocol" | "sourcePort
   };
 }
 
-function resolveTargetNode(
-  rule: RuleRow,
-  nodes: NodeRow[],
-): NodeRow | null {
-  if (rule.nodeId) return nodes.find((n) => n.id === rule.nodeId) ?? null;
-  const byType = nodes.filter(
-    (n) => n.type === (rule.direction === "IRAN_TO_FOREIGN" ? "IRAN" : "FOREIGN"),
-  );
-  // Auto-created rules always pin nodeId, so this fallback only serves legacy
-  // manual rules. Previously multiple same-type nodes meant a permanent
-  // "needs_node" dead-end; pick the first candidate instead so the rule runs
-  // somewhere predictable rather than nowhere.
-  return byType[0] ?? null;
-}
-
+/**
+ * One reconcile pass.
+ *
+ * All decisions live in forward-supervisor-logic.ts with the I/O injected, so
+ * the failure paths (deploy throws, teardown throws, duplicates, needs_node)
+ * are reachable from a test. This function only supplies the real engine and
+ * database and translates rule rows into the planner's shape.
+ */
 export async function reconcilePortForwards(): Promise<void> {
   const engine = getEngine();
-  const [rules, nodes] = await Promise.all([
-    prisma.portForward.findMany({
-      select: { id: true, name: true, direction: true, protocol: true, sourcePort: true, destHost: true, destPort: true, enabled: true, nodeId: true, status: true, userId: true },
-    }) as Promise<RuleRow[]>,
-    getNodes(),
-  ]);
-  const enabled = rules.filter((r) => r.enabled);
+  const nodes = (await getNodes()) as unknown as ReconcileNode[];
 
-  // Group enabled rules by resolved target node.
-  const groups = new Map<string, RuleRow[]>();
-  const statuses = new Map<string, string>(); // ruleId -> status
-  for (const rule of enabled) {
-    const node = resolveTargetNode(rule, nodes);
-    if (!node) {
-      statuses.set(rule.id, "needs_node");
-      continue;
-    }
-    if (!groups.has(node.id)) groups.set(node.id, []);
-    groups.get(node.id)!.push(rule);
-    statuses.set(rule.id, "running");
-  }
-  for (const rule of rules.filter((r) => !r.enabled)) {
-    statuses.set(rule.id, "stopped");
-  }
-
-  // Legacy data may hold two enabled rules with the same protocol+port on
-  // one node (the API 409-guard only covers new writes). They would share a
-  // systemd unit name and the second bind would fail the whole group deploy,
-  // so keep the first and report the rest as error instead.
-  for (const [nodeId, nodeRules] of groups) {
-    const seen = new Set<string>();
-    const unique: RuleRow[] = [];
-    for (const rule of nodeRules) {
-      const k = `${rule.protocol}:${rule.sourcePort}`;
-      if (seen.has(k)) {
-        statuses.set(rule.id, "error");
-        continue;
-      }
-      seen.add(k);
-      unique.push(rule);
-    }
-    groups.set(nodeId, unique);
-  }
-
-  // Deploy/replace one PORT_FORWARD tunnel per node group (in parallel).
-  const deployResults = await Promise.all(
-    [...groups.entries()].map(async ([nodeId, nodeRules]) => {
-      const node = nodes.find((n) => n.id === nodeId)!;
-      const tunnelId = `${TUNNEL_PREFIX}${nodeId}`;
-      try {
-        const spec = await buildSpec(
-          tunnelId,
-          `Port-forward (${node.name})`,
-          "PORT_FORWARD",
-          {
-            method: "PORT_FORWARD",
-            portForwards: nodeRules.map(toRule),
-          },
-          node.type === "IRAN" ? node : null,
-          node.type === "FOREIGN" ? node : null,
-        );
-        // Always go through the deploy path: engine.restart() only restarts the
-        // existing processes and never rewrites rules.json, so rule edits
-        // would never take effect. deploy() rewrites the files AND disposes
-        // the predecessor runtime first (see TunnelEngine.deploy).
-        await engine.deploy(spec);
-        return { nodeId, node, success: true };
-      } catch (err) {
-        console.error(`[port-forward] deploy to ${node.name} failed`, err);
-        return { nodeId, node, success: false, error: err };
-      }
-    }),
-  );
-  for (const r of deployResults) {
-    if (r.success) {
-      active.set(r.nodeId, `${TUNNEL_PREFIX}${r.nodeId}`);
-    } else {
-      const errs = groups.get(r.nodeId)!;
-      for (const rule of errs) statuses.set(rule.id, "error");
-    }
-  }
-
-  // Remove groups whose node no longer has enabled rules.
-  for (const [nodeId, tunnelId] of active) {
-    if (!groups.has(nodeId) && engine.has(tunnelId)) {
-      await engine.remove(tunnelId);
-      active.delete(nodeId);
-    }
-  }
-
-  // Persist statuses (best-effort per rule: one stale row must not fail
-  // the whole reconcile and leave every other rule unreported).
-  await Promise.allSettled(
-    [...statuses].map(([ruleId, status]) =>
-      prisma.portForward.update({ where: { id: ruleId }, data: { status } }),
-    ),
-  );
+  await planGroupsAndApply({
+    loadRules: () =>
+      prisma.portForward.findMany({
+        select: {
+          id: true, name: true, direction: true, protocol: true, sourcePort: true,
+          destHost: true, destPort: true, enabled: true, nodeId: true, status: true, userId: true,
+        },
+      }) as Promise<ReconcileRule[]>,
+    loadNodes: async () => nodes,
+    has: (tunnelId) => engine.has(tunnelId),
+    deploy: async (tunnelId, rules) => {
+      const nodeId = tunnelId.slice(TUNNEL_PREFIX.length);
+      const node = nodes.find((n) => n.id === nodeId);
+      if (!node) throw new Error(`node ${nodeId} is no longer available`);
+      // Always go through the deploy path: engine.restart() only restarts the
+      // existing processes and never rewrites rules.json, so rule edits would
+      // never take effect. deploy() rewrites the files AND disposes the
+      // predecessor runtime first (see TunnelEngine.deploy).
+      const spec = await buildSpec(
+        tunnelId,
+        `Port-forward (${node.name})`,
+        "PORT_FORWARD",
+        {
+          method: "PORT_FORWARD",
+          portForwards: rules.map(toRule),
+        },
+        node.type === "IRAN" ? (node as never) : null,
+        node.type === "FOREIGN" ? (node as never) : null,
+      );
+      await engine.deploy(spec);
+    },
+    remove: (tunnelId) => engine.remove(tunnelId),
+    setStatus: async (ruleId, status) => {
+      // Resolve to void: the planner only needs the write to have happened, and
+      // returning the row made the dependency signature `Promise<PortForward>`,
+      // which is not assignable to `Promise<void>`.
+      await prisma.portForward.update({ where: { id: ruleId }, data: { status } });
+    },
+    activeGroups: active,
+    log: (message, err) => console.error(`[port-forward] ${message}`, err),
+  });
 }
-
 
 // ---------------------------------------------------------------------------
 // Request-facing reconcile.
@@ -180,30 +124,18 @@ export async function reconcilePortForwards(): Promise<void> {
 // exactly one follow-up so the last write still gets applied.
 // ---------------------------------------------------------------------------
 
-let inFlight: Promise<void> | null = null;
-let queued = false;
-
-function runReconcile(): Promise<void> {
-  if (inFlight) {
-    queued = true;
-    return inFlight;
-  }
-  const run = (async () => {
-    try {
-      await reconcilePortForwards();
-    } finally {
-      inFlight = null;
-      if (queued) {
-        queued = false;
-        void runReconcile().catch(() => {
-          /* logged by the awaiting caller, or below */
-        });
-      }
-    }
-  })();
-  inFlight = run;
-  return run;
-}
+// Coalescing is delegated to the shared helper (TASK-23) rather than
+// reimplemented here. The behavioural difference that matters: a caller
+// arriving mid-run now JOINS the run instead of flagging a follow-up, so N
+// concurrent callers cause 1 run rather than N+1. `scheduleFollowUp` is
+// reserved for the case that genuinely needs a second pass -- a rule write that
+// landed after the in-flight run had already read the database.
+const runReconcile = coalescer<void>(
+  () => reconcilePortForwards(),
+  (err) => {
+    console.error("[port-forward] follow-up reconcile failed:", err);
+  },
+);
 
 /**
  * Apply rule changes without hanging the request.

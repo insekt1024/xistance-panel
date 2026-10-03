@@ -96,7 +96,7 @@ const TableRowWrapper = React.forwardRef<
                 <span className="text-xs font-medium text-muted-foreground shrink-0">
                   {headers[i]}
                 </span>
-                <div className="text-right min-w-0">
+                <div className="text-left rtl:text-right min-w-0">
                   {cell}
                 </div>
               </div>

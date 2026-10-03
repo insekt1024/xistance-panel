@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { hashPassword, randomPassword } from "@xistance/tunnel-core";
 import { apiError, auditLog, getClientIp, invalidCursorResponse, json, paginationParams, parseBody, requireSession } from "@/lib/api";
+import { rateLimit } from "@/lib/rate-limit";
 
 const userCreateSchema = z.object({
   email: z.string().email(),
@@ -49,6 +50,10 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const auth = await requireSession(request, "ADMIN");
   if (!auth.ok) return auth.response;
+  // Abuse bound: one authenticated session had no ceiling on this write, and
+  // the cost is real server work, not just a database row.
+  const rl = rateLimit(`users-create:${auth.user.id}`, 10, 60000);
+  if (!rl.ok) return apiError("Too many requests, slow down", 429);
   const body = await parseBody(request, userCreateSchema);
   if (!body.ok) return body.response;
   const data = body.data;

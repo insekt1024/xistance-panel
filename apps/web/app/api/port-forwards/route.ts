@@ -2,7 +2,17 @@ import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 import { reconcilePortForwardsSoon } from "@/lib/forward-supervisor";
-import { findFreePort, usedPortsOf } from "@/lib/ports";
+import { rateLimit } from "@/lib/rate-limit";
+import { rejectForwardHost } from "@/lib/forward-host";
+import {
+  AUTO_PORT_END,
+  AUTO_PORT_START,
+  PortRangeExhaustedError,
+  allocatePortAsync,
+  findFreePort,
+  isPortOccupied,
+  usedPortsOf,
+} from "@/lib/ports";
 
 const ruleSchema = z.object({
   name: z.string().min(1).max(80),
@@ -44,8 +54,17 @@ export async function GET(request: Request) {
   // Auto-port helper for simple mode + the tunnel wizard: returns the first
   // free source port without creating anything.
   if (searchParams.get("free") === "1") {
+    // Advisory only, and deliberately WITHOUT the OS probe: this is a
+    // suggestion shown in the form, and binding a socket per candidate on a
+    // read-only GET would be needlessly expensive. The authoritative check
+    // happens on create, below.
     const port = findFreePort(await collectUsedPorts());
-    if (port === null) return apiError("No free ports left in the auto range", 409);
+    if (port === null) {
+      return apiError(
+        new PortRangeExhaustedError(AUTO_PORT_START, AUTO_PORT_END).message,
+        409,
+      );
+    }
     return json({ port });
   }
   const cursor = searchParams.get("cursor") ? { id: searchParams.get("cursor")! } : undefined;
@@ -86,8 +105,15 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
+  // Abuse bound: one authenticated session had no ceiling on this write, and
+  // the cost is real server work, not just a database row.
+  const rl = rateLimit(`pf-create:${auth.user.id}`, 20, 60000);
+  if (!rl.ok) return apiError("Too many requests, slow down", 429);
   const body = await parseBody(request, ruleSchema);
   if (!body.ok) return body.response;
+
+  const hostProblem = await rejectForwardHost(body.data.destHost);
+  if (hostProblem) return apiError(hostProblem, 400);
 
   // Validate pinned node upfront: invalid UUID already rejected by schema,
   // but a well-formed unknown id must 404 instead of Prisma P2003 500.
@@ -102,9 +128,18 @@ export async function POST(request: Request) {
   // Automatic mode (default simple flow): allocate the first free port.
   let sourcePort = body.data.sourcePort;
   if (body.data.auto || sourcePort === 0) {
-    const free = findFreePort(await collectUsedPorts());
-    if (free === null) return apiError("No free ports left in the auto range", 409);
-    sourcePort = free;
+    // Authoritative allocation: consult the database AND the host. A port can
+    // be free in the database and already held by an unrelated process, and
+    // handing that out produced a generic tunnel failure at deploy time rather
+    // than a port conflict the user could act on.
+    try {
+      sourcePort = await allocatePortAsync(await collectUsedPorts(), {
+        isOccupied: isPortOccupied,
+      });
+    } catch (err) {
+      if (err instanceof PortRangeExhaustedError) return apiError(err.message, 409);
+      throw err;
+    }
   }
 
   // Fail loudly on collision: two rules (or a tunnel) on the same
@@ -124,6 +159,17 @@ export async function POST(request: Request) {
   if (clash) {
     return apiError(
       `Port ${sourcePort}/${body.data.protocol} is already forwarded by "${clash.name}" — pick another port or edit that rule`,
+      409,
+    );
+  }
+
+  // A user-specified port can also be held by a process outside the panel, or
+  // by another rule on a different node scope. That is a port conflict, not a
+  // generic failure, and it is worth reporting before the rule is created --
+  // otherwise the user only finds out when the deploy fails.
+  if (await isPortOccupied(sourcePort)) {
+    return apiError(
+      `Port ${sourcePort}/${body.data.protocol} is already in use by another process on this host — pick another port`,
       409,
     );
   }

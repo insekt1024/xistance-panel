@@ -101,8 +101,9 @@ export function ToolsView() {
           {(active === "tcp" || active === "latency") && (
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label>{t("host")}</Label>
+                <Label htmlFor="tools-host">{t("host")}</Label>
                 <Input
+                  id="tools-host"
                   value={host}
                   onChange={(e) => setHost(e.target.value)}
                   placeholder="203.0.113.10"
@@ -110,8 +111,9 @@ export function ToolsView() {
               </div>
               {active === "tcp" && (
                 <div className="space-y-1.5">
-                  <Label>{t("port")}</Label>
+                  <Label htmlFor="tools-port">{t("port")}</Label>
                   <Input
+                    id="tools-port"
                     type="number"
                     value={port}
                     onChange={(e) => setPort(Number(e.target.value))}
@@ -122,8 +124,9 @@ export function ToolsView() {
           )}
           {active === "http" && (
             <div className="space-y-1.5">
-              <Label>{t("url")}</Label>
+              <Label htmlFor="tools-url">{t("url")}</Label>
               <Input
+                id="tools-url"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 placeholder="https://example.com"
@@ -190,7 +193,7 @@ export function ToolsView() {
                         style={{ "--stagger": i } as React.CSSProperties}
                       >
                         <span className="font-mono">{h.host}</span>
-                        <Badge variant={h.ok ? "success" : "destructive"} className="ml-2">
+                        <Badge variant={h.ok ? "success" : "destructive"} className="ms-2">
                           {h.ok ? `${h.ms}ms` : "✕"}
                         </Badge>
                       </div>

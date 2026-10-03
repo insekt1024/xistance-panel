@@ -3,22 +3,14 @@
 import * as React from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/routing";
-import {
-  Download,
-  Loader2,
-  MoreHorizontal,
-  Network,
-  Play,
-  RotateCw,
-  Square,
-  Terminal,
-  Trash2,
-} from "lucide-react";
+import { Download, Loader2, MoreHorizontal, Play, RotateCw, Square, Stethoscope, Terminal, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { apiFetch } from "@/lib/client";
 import { cn } from "@/lib/utils";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
+import { StateBlock } from "@/components/state-block";
+import { TunnelDiagnosticsPanel } from "@/components/tunnel-diagnostics-panel";
 import {
   Table,
   TableCell,
@@ -74,11 +66,13 @@ export interface TunnelRow {
 
 export function TunnelTable({ tunnels }: { tunnels: TunnelRow[] }) {
   const t = useTranslations("tunnels");
+  const tDiag = useTranslations("diagnostics");
   const tCommon = useTranslations("common");
   const router = useRouter();
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [deleteId, setDeleteId] = React.useState<TunnelRow | null>(null);
   const [stopId, setStopId] = React.useState<TunnelRow | null>(null);
+  const [diagId, setDiagId] = React.useState<string | null>(null);
   const [logsId, setLogsId] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
   const [batchBusy, setBatchBusy] = React.useState(false);
@@ -169,27 +163,34 @@ export function TunnelTable({ tunnels }: { tunnels: TunnelRow[] }) {
   return (
     <>
       {tunnels.length === 0 ? (
-        <div className="animate-fade-in flex flex-col items-center gap-2 rounded-lg border border-dashed py-16 text-center">
-          <Network className="h-8 w-8 text-muted-foreground/40" />
-          <p className="text-muted-foreground">{t("empty")}</p>
-          <Button asChild variant="outline" size="sm" className="mt-2">
-            <a href="/tunnels/new">{t("new")}</a>
-          </Button>
-        </div>
+        <StateBlock
+          kind="empty"
+          message={t("empty")}
+          description={t("emptyHint")}
+          action={
+            <Button asChild variant="outline" size="sm">
+              <a href="/tunnels/new">{t("new")}</a>
+            </Button>
+          }
+        />
       ) : (
         <>
           {selected.size > 0 && (
-            <div className="animate-fade-in flex items-center gap-3 rounded-lg border bg-muted/50 px-4 py-2.5">
+            // flex-wrap on BOTH rows: five buttons plus a count in a single
+            // non-wrapping row pushed the document ~457px past the viewport at
+            // 768px, in both locales. The batch toolbar is the densest row in
+            // the app, so it is the one that must wrap.
+            <div className="animate-fade-in flex flex-wrap items-center gap-3 rounded-lg border bg-muted/50 px-4 py-2.5">
               <span className="text-sm text-muted-foreground">
                 {t("selectedCount", { count: selected.size })}
               </span>
-              <div className="flex items-center gap-1.5 ml-auto">
+              <div className="flex flex-wrap items-center gap-1.5 ms-auto">
                 <Button
                   size="sm"
                   disabled={batchBusy}
                   onClick={() => runBatchAction("start")}
                 >
-                  {batchBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Play className="h-3.5 w-3.5 mr-1" />}
+                  {batchBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin me-1" /> : <Play className="h-3.5 w-3.5 me-1" />}
                   {t("batchStart")}
                 </Button>
                 <Button
@@ -198,7 +199,7 @@ export function TunnelTable({ tunnels }: { tunnels: TunnelRow[] }) {
                   disabled={batchBusy}
                   onClick={() => runBatchAction("stop")}
                 >
-                  {batchBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Square className="h-3.5 w-3.5 mr-1" />}
+                  {batchBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin me-1" /> : <Square className="h-3.5 w-3.5 me-1" />}
                   {t("batchStop")}
                 </Button>
                 <Button
@@ -207,7 +208,7 @@ export function TunnelTable({ tunnels }: { tunnels: TunnelRow[] }) {
                   disabled={batchBusy}
                   onClick={() => runBatchAction("restart")}
                 >
-                  {batchBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RotateCw className="h-3.5 w-3.5 mr-1" />}
+                  {batchBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin me-1" /> : <RotateCw className="h-3.5 w-3.5 me-1" />}
                   {t("batchRestart")}
                 </Button>
                 <Button
@@ -231,7 +232,9 @@ export function TunnelTable({ tunnels }: { tunnels: TunnelRow[] }) {
                   <button
                     type="button"
                     onClick={toggleSelectAll}
-                    className="flex items-center justify-center"
+                    // min-h/min-w give the control a 24x24 hit area (WCAG 2.5.8)
+                    // while the inner span keeps the 16x16 visual checkbox.
+                    className="-m-1.5 flex min-h-6 min-w-6 items-center justify-center p-1.5"
                     aria-label={allSelected ? t("deselectAll") : t("selectAll")}
                   >
                     <span
@@ -257,7 +260,7 @@ export function TunnelTable({ tunnels }: { tunnels: TunnelRow[] }) {
                 <TableHead>{t("nodes")}</TableHead>
                 <TableHead>{t("port")}</TableHead>
                 <TableHead>{t("status")}</TableHead>
-                <TableHead className="text-right">{t("actions")}</TableHead>
+                <TableHead className="text-left rtl:text-right">{t("actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBodyWrapper>
@@ -267,7 +270,8 @@ export function TunnelTable({ tunnels }: { tunnels: TunnelRow[] }) {
                     <button
                       type="button"
                       onClick={() => toggleSelect(row.id)}
-                      className="flex items-center justify-center"
+                      // 24x24 hit area (WCAG 2.5.8) around a 16x16 visual box.
+                      className="-m-1.5 flex min-h-6 min-w-6 items-center justify-center p-1.5"
                       aria-label={selected.has(row.id) ? t("deselect") : t("select")}
                     >
                       <span
@@ -299,7 +303,7 @@ export function TunnelTable({ tunnels }: { tunnels: TunnelRow[] }) {
                   <TableCell>
                     <StatusBadge status={row.state} />
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-left rtl:text-right">
                     <div className="flex items-center justify-end gap-1">
                       <Button
                         variant="outline"
@@ -333,6 +337,10 @@ export function TunnelTable({ tunnels }: { tunnels: TunnelRow[] }) {
                           <DropdownMenuItem onClick={() => setLogsId(row.id)}>
                             <Terminal className="h-4 w-4" />
                             {t("logViewer")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setDiagId(row.id)}>
+                            <Stethoscope className="h-4 w-4" />
+                            {tDiag("title")}
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => runAction(row.id, "restart")}>
                             <RotateCw className="h-4 w-4" />
@@ -408,6 +416,21 @@ export function TunnelTable({ tunnels }: { tunnels: TunnelRow[] }) {
         </DialogContent>
       </Dialog>
 
+      {diagId ? (
+        <Dialog open onOpenChange={(o) => !o && setDiagId(null)}>
+          <DialogContent className="max-w-2xl" aria-describedby={undefined}>
+            <DialogHeader>
+              <DialogTitle>{tDiag("title")}</DialogTitle>
+            </DialogHeader>
+            <div className="max-h-[70vh] overflow-y-auto pe-1">
+              <TunnelDiagnosticsPanel
+                tunnelId={diagId}
+                onRecovered={() => router.refresh()}
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+      ) : null}
       {logsId && <LogViewer tunnelId={logsId} onClose={() => setLogsId(null)} />}
     </>
   );

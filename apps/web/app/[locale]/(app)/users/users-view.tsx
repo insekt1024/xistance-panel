@@ -32,8 +32,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { StateBlock } from "@/components/state-block";
 
 export interface UserRow {
   id: string;
@@ -116,41 +116,59 @@ export function UsersView({ users, isAdmin }: { users: UserRow[]; isAdmin: boole
       )}
 
       {users.length === 0 ? (
-        <Card className="animate-fade-in border-dashed p-10 text-center text-muted-foreground">{t("empty")}</Card>
+          <StateBlock
+    kind="empty"
+    message={t("empty")}
+    description={t("emptyHint")}
+    action={
+      <Button size="sm" onClick={() => setOpen(true)}>
+        <Plus aria-hidden className="size-4" />
+        {t("addUser")}
+      </Button>
+    }
+  />
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t("name")}</TableHead>
-              <TableHead>{t("email")}</TableHead>
-              <TableHead>{t("role")}</TableHead>
-              <TableHead>{t("quota")}</TableHead>
-              <TableHead>{t("active")}</TableHead>
-              {isAdmin && <TableHead className="text-right">{tCommon("actions")}</TableHead>}
+              <TableHead className="whitespace-nowrap">{t("name")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("email")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("role")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("quota")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("active")}</TableHead>
+              {isAdmin && <TableHead className="text-left rtl:text-right">{tCommon("actions")}</TableHead>}
             </TableRow>
           </TableHeader>
           <TableBody>
             {users.map((u, i) => (
               <TableRow key={u.id} className="animate-fade-in-up" style={{ "--stagger": Math.min(i, 10) } as React.CSSProperties}>
-                <TableCell className="font-medium">{u.name}</TableCell>
-                <TableCell className="text-sm">{u.email}</TableCell>
+                {/* An identifier in a table cell. The wrapper already scrolls horizontally, so `whitespace-nowrap` lets the TABLE scroll rather than wrapping the value across several lines in a narrow column. Measured with realistic long values by test-dashboard-legibility.ts. */}
+                <TableCell className="whitespace-nowrap font-medium">{u.name}</TableCell>
+                {/* An identifier in a table cell. The wrapper already scrolls horizontally, so `whitespace-nowrap` lets the TABLE scroll rather than wrapping the value across several lines in a narrow column. Measured with realistic long values by test-dashboard-legibility.ts. */}
+                <TableCell className="whitespace-nowrap text-sm">{u.email}</TableCell>
                 <TableCell>
                   <Badge variant="outline">{tRole(u.role as keyof typeof tRole)}</Badge>
                 </TableCell>
                 <TableCell>{u.quota}</TableCell>
                 <TableCell>
                   <Switch
+                    // Both the switch and the delete button below were icon- or
+                    // shape-only controls with no accessible name, so a screen
+                    // reader announced "switch, button" with nothing useful.
+                    id={`user-active-${u.id}`}
+                    aria-label={u.active ? t("deactivate") : t("activate")}
                     checked={u.active}
                     disabled={!isAdmin || busyId === u.id}
                     onCheckedChange={() => toggleActive(u)}
                   />
                 </TableCell>
                 {isAdmin && (
-                  <TableCell className="text-right">
+                  <TableCell className="text-left rtl:text-right">
                     <Button
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8 text-destructive"
+                      aria-label={t("deleteUser", { name: u.name })}
                       onClick={() => setDeleteId(u)}
                     >
                       {busyId === u.id ? (
@@ -175,15 +193,17 @@ export function UsersView({ users, isAdmin }: { users: UserRow[]; isAdmin: boole
           <div className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label>{t("name")}</Label>
+                <Label htmlFor="user-name">{t("name")}</Label>
                 <Input
+                  id="user-name"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label>{t("email")}</Label>
+                <Label htmlFor="user-email">{t("email")}</Label>
                 <Input
+                  id="user-email"
                   type="email"
                   value={form.email}
                   onChange={(e) => setForm({ ...form, email: e.target.value })}
@@ -192,12 +212,12 @@ export function UsersView({ users, isAdmin }: { users: UserRow[]; isAdmin: boole
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label>{t("role")}</Label>
+                <Label htmlFor="user-role">{t("role")}</Label>
                 <Select
                   value={form.role}
                   onValueChange={(v) => setForm({ ...form, role: v })}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="user-role">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -208,8 +228,9 @@ export function UsersView({ users, isAdmin }: { users: UserRow[]; isAdmin: boole
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label>{t("quota")}</Label>
+                <Label htmlFor="user-quota">{t("quota")}</Label>
                 <Input
+                  id="user-quota"
                   type="number"
                   value={form.quota}
                   onChange={(e) => setForm({ ...form, quota: Number(e.target.value) })}
@@ -217,8 +238,9 @@ export function UsersView({ users, isAdmin }: { users: UserRow[]; isAdmin: boole
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label>{t("password")}</Label>
+              <Label htmlFor="user-password">{t("password")}</Label>
               <Input
+                id="user-password"
                 type="password"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}

@@ -1,9 +1,9 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { Check, Languages } from "lucide-react";
 import { locales, localeInfo } from "@xistance/i18n";
-import { Link, usePathname, routing } from "@/i18n/routing";
+import { Link, usePathname } from "@/i18n/routing";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -15,6 +15,11 @@ import {
 export function LanguageSwitcher() {
   const t = useTranslations("settings");
   const pathname = usePathname();
+  // The ACTIVE locale, not the default one. Marking `routing.defaultLocale`
+  // instead meant an English user saw the tick on English (correct) and a
+  // Persian user ALSO saw the tick on English, so the menu never showed which
+  // language they were actually reading.
+  const active = useLocale();
 
   return (
     <DropdownMenu>
@@ -28,7 +33,7 @@ export function LanguageSwitcher() {
           <DropdownMenuItem key={locale} asChild>
             <Link href={pathname} locale={locale}>
               <span className="flex-1">{localeInfo[locale].endonym}</span>
-              {locale === routing.defaultLocale ? (
+              {locale === active ? (
                 <Check className="h-3.5 w-3.5 opacity-70" />
               ) : (
                 <span className="sr-only">—</span>

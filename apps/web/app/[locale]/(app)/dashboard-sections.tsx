@@ -8,6 +8,22 @@ import { DashboardSkeleton } from "./dashboard-skeleton";
 
 const CHART_BUCKET_MS = 30 * 60_000;
 
+/**
+ * The instant the dashboard's data was served, in epoch milliseconds.
+ *
+ * Why this is not just `Date.now()` at the call site: the React compiler lint
+ * rejects a bare clock read inside a component body (react-hooks/purity), and it
+ * is right to -- the client is forbidden from reading its own clock during the
+ * first render, because the server and the client would then format different
+ * text for the same row (React #418). Passing this VALUE as a prop keeps the
+ * first render a pure function of its arguments, and keeps the lint honest
+ * instead of disabling it or disguising the expression as a derived date.
+ */
+function servedAtMs(): Promise<number> {
+  return Promise.resolve(Date.now());
+}
+
+
 export async function StatsSection() {
   const [tunnels, totalTunnels, totalNodes, onlineNodes, portForwards] = await Promise.all([
     prisma.tunnel.findMany({
@@ -76,14 +92,21 @@ export async function TrafficSection() {
 }
 
 export async function ActivitySection() {
-  const recentLogs = await prisma.auditLog.findMany({
-    include: { actor: { select: { name: true, email: true } } },
-    orderBy: { createdAt: "desc" },
-    take: 8,
-  });
+  const [servedAt, recentLogs] = await Promise.all([
+    servedAtMs(),
+    prisma.auditLog.findMany({
+      include: { actor: { select: { name: true, email: true } } },
+      orderBy: { createdAt: "desc" },
+      take: 8,
+    }),
+  ]);
 
   return (
     <ActivityPanel
+      // The instant the audit query was served, so the client formats the SAME
+      // number the server did. It must never read its own clock on the first
+      // render or React raises a hydration error (#418).
+      nowMs={servedAt}
       recentActivity={recentLogs.map((l) => ({
         action: l.action,
         target: l.target ?? "",

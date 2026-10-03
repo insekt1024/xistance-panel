@@ -34,7 +34,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Card } from "@/components/ui/card";
+import { StateBlock } from "@/components/state-block";
 
 export interface NodeRow {
   id: string;
@@ -200,33 +200,60 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
       </div>
 
       {nodes.length === 0 ? (
-        <Card className="animate-fade-in border-dashed p-10 text-center text-muted-foreground">{t("empty")}</Card>
+        <StateBlock
+          kind="empty"
+          message={t("empty")}
+          description={t("emptyHint")}
+          action={
+            <Button size="sm" onClick={() => setDialogOpen(true)}>
+              <Plus aria-hidden className="size-4" />
+              {t("add")}
+            </Button>
+          }
+        />
       ) : (
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t("name")}</TableHead>
-              <TableHead>{t("type")}</TableHead>
-              <TableHead>{t("host")}</TableHead>
-              <TableHead>{t("sshPort")}</TableHead>
-              <TableHead>{t("authMethod")}</TableHead>
-              <TableHead>{t("status")}</TableHead>
-              <TableHead className="text-right">{tCommon("actions")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("name")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("type")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("host")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("sshPort")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("authMethod")}</TableHead>
+              <TableHead className="whitespace-nowrap">{t("status")}</TableHead>
+              <TableHead className="text-end">{tCommon("actions")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {nodes.map((n, i) => (
               <TableRow key={n.id} className="animate-fade-in-up" style={{ "--stagger": Math.min(i, 10) } as React.CSSProperties}>
-                <TableCell className="font-medium">{n.name}</TableCell>
+                {/* A node's name is an IDENTIFIER. Measured with a realistic
+                    43-character name it wrapped to SIX lines inside an 82px
+                    column and overflowed by up to 69px. The table wrapper
+                    already scrolls horizontally, so `whitespace-nowrap` lets the
+                    table scroll rather than shredding the name.
+                    Found by test-dashboard-legibility.ts. */}
+                <TableCell className="whitespace-nowrap font-medium">{n.name}</TableCell>
                 <TableCell>
                   {n.type === "IRAN" ? t("iran") : t("foreign")}
                 </TableCell>
-                <TableCell className="font-mono text-xs">{n.host}</TableCell>
-                <TableCell>{n.sshPort}</TableCell>
-                <TableCell>
+                {/* Same reasoning as the name: a FQDN is not prose. */}
+                <TableCell className="whitespace-nowrap font-mono text-xs">{n.host}</TableCell>
+                {/* An identifier in a table cell. The wrapper already scrolls horizontally, so `whitespace-nowrap` lets the TABLE scroll rather than wrapping the value across several lines in a narrow column. Measured with realistic long values by test-dashboard-legibility.ts. */}
+                <TableCell className="whitespace-nowrap tabular-nums">{n.sshPort}</TableCell>
+                {/* An emoji and a word in one text node give the cell TWO line
+                    boxes -- measured at 48px of content inside an 18px box. The
+                    cell is now one line, and the emoji sits in its own inline
+                    span so it cannot set the box height. The glyph is
+                    aria-hidden because the word beside it already names it.
+                    Found by test-dashboard-legibility.ts. */}
+                <TableCell className="whitespace-nowrap">
                   {n.authMethod === "key" ? (
                     n.hasKey ? (
-                      "🔑 key"
+                      <span className="inline-flex items-center gap-1 align-middle">
+                        <span aria-hidden="true">🔑</span>
+                        <span>key</span>
+                      </span>
                     ) : (
                       <span className="text-muted-foreground">key —</span>
                     )
@@ -237,7 +264,7 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
                 <TableCell>
                   <StatusBadge status={n.status} />
                 </TableCell>
-                <TableCell className="text-right">
+                <TableCell className="text-end">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={tCommon("actions")}>
@@ -278,7 +305,10 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        {/* Stable hook for the browser suite. Locating this dialog by its
+            translated title broke when the copy changed, and the test then
+            reported "the form is empty" while talking to a page with no form. */}
+        <DialogContent data-testid="node-create-dialog">
           <DialogHeader>
             <DialogTitle>{t("add")}</DialogTitle>
           </DialogHeader>
@@ -340,23 +370,30 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
             </FormSelect>
             {form.authMethod === "key" ? (
               <div className="space-y-1.5">
-                <label className="text-sm font-medium">
+                {/* Programmatic association. This control had a <label> with no
+                    htmlFor, so it had NO accessible name at all -- WCAG 2.2 AA
+                    1.3.1, 3.3.2 and 4.1.2 all fail without it. */}
+                <label className="text-sm font-medium" htmlFor="node-key-input">
                   {t("key")}
-                  <span className="ml-0.5 text-destructive">*</span>
+                  <span className="ms-0.5 text-destructive">*</span>
                 </label>
                 <textarea
-                  className={`min-h-20 w-full rounded-md bg-transparent px-3 py-2 font-mono text-xs shadow-sm transition-all duration-200 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 ${
+                  id="node-key-input"
+                  aria-required="true"
+                  aria-invalid={keyField.error ? true : undefined}
+                  aria-describedby={keyField.error ? "node-key-input-error" : undefined}
+                  className={`min-h-20 w-full rounded-md bg-transparent px-3 py-2 font-mono text-xs
                     keyField.error
                       ? "border border-destructive focus-visible:ring-destructive/30"
                       : "border border-input focus-visible:ring-ring"
-                  }`}
+                  `}
                   placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
                   value={form.key}
                   onChange={(e) => setForm({ ...form, key: e.target.value })}
                   onBlur={() => keyField.setTouched(true)}
                 />
                 {keyField.error && (
-                  <p className="flex items-center gap-1 text-xs text-destructive">
+                  <p id="node-key-input-error" role="alert" className="flex items-center gap-1 text-xs text-destructive">
                     <XCircle className="h-3 w-3 shrink-0" />
                     {keyField.error}
                   </p>
@@ -364,8 +401,12 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
               </div>
             ) : (
               <div className="space-y-1.5">
-                <label className="text-sm font-medium">{t("password")}</label>
+                {/* Same fix as the key field: the label needs htmlFor. */}
+                <label className="text-sm font-medium" htmlFor="node-password-input">
+                  {t("password")}
+                </label>
                 <Input
+                  id="node-password-input"
                   type="password"
                   value={form.password}
                   onChange={(e) => setForm({ ...form, password: e.target.value })}
@@ -448,22 +489,25 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
             </FormSelect>
             {editForm.authMethod === "key" ? (
               <div className="space-y-1.5">
-                <label className="text-sm font-medium">
+                <label className="text-sm font-medium" htmlFor="edit-node-key-input">
                   {t("key")}
                 </label>
                 <textarea
-                  className={`min-h-20 w-full rounded-md bg-transparent px-3 py-2 font-mono text-xs shadow-sm transition-all duration-200 placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 ${
+                  id="edit-node-key-input"
+                  aria-invalid={editKeyField.error ? true : undefined}
+                  aria-describedby={editKeyField.error ? "edit-node-key-input-error" : undefined}
+                  className={`min-h-20 w-full rounded-md bg-transparent px-3 py-2 font-mono text-xs
                     editKeyField.error
                       ? "border border-destructive focus-visible:ring-destructive/30"
                       : "border border-input focus-visible:ring-ring"
-                  }`}
+                  `}
                   placeholder={t("keepExistingKey")}
                   value={editForm.key}
                   onChange={(e) => setEditForm({ ...editForm, key: e.target.value })}
                   onBlur={() => editKeyField.setTouched(true)}
                 />
                 {editKeyField.error && (
-                  <p className="flex items-center gap-1 text-xs text-destructive">
+                  <p id="edit-node-key-input-error" role="alert" className="flex items-center gap-1 text-xs text-destructive">
                     <XCircle className="h-3 w-3 shrink-0" />
                     {editKeyField.error}
                   </p>
@@ -471,8 +515,9 @@ export function NodesView({ nodes }: { nodes: NodeRow[] }) {
               </div>
             ) : (
               <div className="space-y-1.5">
-                <label className="text-sm font-medium">{t("password")}</label>
+                <label className="text-sm font-medium" htmlFor="edit-node-password-input">{t("password")}</label>
                 <Input
+                  id="edit-node-password-input"
                   type="password"
                   value={editForm.password}
                   placeholder={t("keepExistingKey")}

@@ -2,6 +2,7 @@ import { prisma } from "@xistance/db";
 import { apiError, auditLog, getClientIp, json, requireSession } from "@/lib/api";
 import { getEngine } from "@/lib/engine";
 import { CACHE_METRICS, invalidateCache } from "@/lib/query-cache";
+import { rateLimit } from "@/lib/rate-limit";
 
 async function findTunnel(id: string, includeConfig: boolean) {
   if (includeConfig) {
@@ -62,6 +63,10 @@ export async function GET(request: Request, ctx: { params: Promise<{ id: string 
 export async function DELETE(request: Request, ctx: { params: Promise<{ id: string }> }) {
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
+  // Abuse bound: one authenticated session had no ceiling on this write, and
+  // the cost is real server work, not just a database row.
+  const rl = rateLimit(`tunnel-delete:${auth.user.id}`, 30, 60000);
+  if (!rl.ok) return apiError("Too many requests, slow down", 429);
   const { id } = await ctx.params;
   const tunnel = await findTunnelMeta(id);
   if (!tunnel) return apiError("Tunnel not found", 404);

@@ -1,3 +1,4 @@
+import { ZodError, type ZodIssue } from "zod";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import {
@@ -35,10 +36,65 @@ export function loadTunnelConfig(
     // back to parsing the stored value directly instead of crashing.
     // Only throw if BOTH the decrypt path and the plaintext path fail.
     const plain = typeof stored === "string" ? stored : JSON.stringify(stored);
-    const parsed = TunnelConfigSchema.parse(JSON.parse(plain));
-    console.warn("[tunnels] loaded legacy plaintext tunnel config; re-save to migrate to encrypted storage");
-    return parsed;
+    try {
+      const parsed = TunnelConfigSchema.parse(JSON.parse(plain));
+      console.warn("[tunnels] loaded legacy plaintext tunnel config; re-save to migrate to encrypted storage");
+      return parsed;
+    } catch (e) {
+      // Re-throw as something an operator can act on.
+      //
+      // A ZodError's `.message` is a JSON dump of every issue, and it was
+      // travelling verbatim from here to the API response to the UI -- 348
+      // characters naming internal paths like `gost.forwardHost`. That happens
+      // for any row stored BEFORE a schema was tightened (GOST's required relay
+      // target in TASK-131 is the current example): the tunnel is unstartable,
+      // and the only clue it gives is a schema dump.
+      throw new Error(describeConfigProblem(e));
+    }
   }
+}
+
+/**
+ * Turn a schema failure into one sentence an operator can act on.
+ *
+ * A row stored before a schema tightened cannot be repaired by re-validating it,
+ * so the useful message names the tunnel's method, the offending field, and the
+ * remedy -- not the internal issue object.
+ */
+/**
+ * One clause describing what is wrong, in the operator's terms.
+ *
+ * Zod's own messages are developer-facing ("String must contain at least 1
+ * character(s)"), and they were reaching the UI verbatim. Only the three cases
+ * that a stored row can actually hit are translated; anything unrecognised falls
+ * back to a generic clause rather than leaking the raw message.
+ */
+function describeIssue(issue: ZodIssue | undefined): string {
+  if (!issue) return "is not valid";
+  if (issue.code === "invalid_type" && issue.received === "undefined") return "is missing";
+  if (issue.code === "unrecognized_keys") return "has fields this version no longer accepts";
+  if (issue.code === "too_small" && /at least 1 character/.test(issue.message ?? "")) {
+    return "is empty";
+  }
+  if (issue.code === "custom" || issue.code === "invalid_string" || /must not|must be/.test(issue.message ?? "")) {
+    return "has a value this version does not accept";
+  }
+  return "is not valid";
+}
+
+function describeConfigProblem(e: unknown): string {
+  if (e instanceof ZodError) {
+    const first = e.issues[0];
+    const field = first?.path.length ? first.path.join(".") : "config";
+    const what = describeIssue(first);
+    return (
+      `This tunnel's stored configuration is no longer valid: "${field}" ${what}. ` +
+      `It was saved by an earlier version of the panel. Delete the tunnel and ` +
+      `create it again with the current fields.`
+    );
+  }
+  if (e instanceof Error) return e.message;
+  return "This tunnel's stored configuration could not be read.";
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +186,53 @@ export function redactNode(node: DbNode) {
     hasPassword: Boolean(sshPasswordEnc),
     hasApiToken: Boolean(apiTokenEncrypted),
   };
+}
+
+/**
+ * Credential field names inside a tunnel config, at any depth.
+ *
+ * A tunnel's `config` is a JSON blob stored in PLAINTEXT, because the engine
+ * has to hand the token to a process at start time. That makes every config
+ * field below a live credential, and the backup endpoint exports the blob
+ * verbatim -- so an export handed to an operator, pasted into a ticket, or
+ * committed to a repo carries every tunnel secret in the install.
+ *
+ * Matching is by NAME at any depth rather than by an exhaustive per-method
+ * list, because the alternative rots: a new method with a new secret field
+ * would silently be exported until someone remembered to update a switch.
+ * `secretKey` lives on a FRP proxy, `password` on FRP/SSH/XUI, `key` on SSH and
+ * REVERSE, `token` on BACKHAUL/FRP/XUI.
+ */
+const CONFIG_SECRET_FIELDS = new Set([
+  "token",
+  "secretkey",
+  "password",
+  "passphrase",
+  "key",
+  "apikey",
+  "apitoken",
+  "privatekey",
+  "psk",
+  "authkey",
+]);
+
+/** Strip credential values from a tunnel config, keeping the shape. */
+export function redactTunnelConfig(config: unknown): unknown {
+  if (Array.isArray(config)) return config.map(redactTunnelConfig);
+  if (config && typeof config === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(config as Record<string, unknown>)) {
+      if (CONFIG_SECRET_FIELDS.has(k.toLowerCase())) {
+        // Keep the KEY so the restore path can tell "was set" from "never set",
+        // but never the value.
+        out[k] = "***";
+        continue;
+      }
+      out[k] = redactTunnelConfig(v);
+    }
+    return out;
+  }
+  return config;
 }
 
 /**

@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import { useTranslations } from "next-intl";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { apiFetch } from "@/lib/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Card } from "@/components/ui/card";
+import { StateBlock } from "@/components/state-block";
 
 interface AuditActor {
   id: string;
@@ -63,13 +64,18 @@ export function AuditView({ initialLogs, initialHasNext, initialNextCursor }: Pr
 
   async function navigate(cursor: string | null) {
     setLoading(true);
-    const data = await loadPage(cursor);
-    if (data) {
-      setLogs(data.logs);
-      setHasNext(data.hasNext);
-      setNextCursor(data.nextCursor);
+    try {
+      const data = await loadPage(cursor);
+      if (data) {
+        setLogs(data.logs);
+        setHasNext(data.hasNext);
+        setNextCursor(data.nextCursor);
+      }
+    } catch {
+      toast.error(tCommon("networkError"));
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
 
   function goNext() {
@@ -92,27 +98,36 @@ export function AuditView({ initialLogs, initialHasNext, initialNextCursor }: Pr
         <p className="text-muted-foreground">{t("subtitle")}</p>
       </div>
 
+      {loading ? <StateBlock kind="loading" message={t("loading")} /> : null}
       {logs.length === 0 && !loading ? (
-        <Card className="animate-fade-in border-dashed p-10 text-center text-muted-foreground">
-          {t("empty")}
-        </Card>
+        <StateBlock
+          kind="empty"
+          message={t("empty")}
+          description={t("emptyHint")}
+          action={
+            <Button size="sm" variant="outline" onClick={goPrev} disabled={history.length <= 1 || loading}>
+              <ChevronLeft aria-hidden className="size-4" />
+              {t("prev")}
+            </Button>
+          }
+        />
       ) : (
         <div className="space-y-3">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{t("time")}</TableHead>
-                <TableHead>{t("actor")}</TableHead>
-                <TableHead>{t("action")}</TableHead>
-                <TableHead>{t("target")}</TableHead>
-                <TableHead>{t("ip")}</TableHead>
+                <TableHead className="whitespace-nowrap">{t("time")}</TableHead>
+                <TableHead className="whitespace-nowrap">{t("actor")}</TableHead>
+                <TableHead className="whitespace-nowrap">{t("action")}</TableHead>
+                <TableHead className="whitespace-nowrap">{t("target")}</TableHead>
+                <TableHead className="whitespace-nowrap">{t("ip")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow>
+                <TableRow aria-hidden>
                   <TableCell colSpan={5} className="text-center text-muted-foreground">
-                    {tCommon("loading")}
+                    <Loader2 className="mx-auto size-4 animate-spin" />
                   </TableCell>
                 </TableRow>
               ) : (
@@ -127,13 +142,36 @@ export function AuditView({ initialLogs, initialHasNext, initialNextCursor }: Pr
                     </TableCell>
                     <TableCell>
                       {log.actor ? (
-                        <span className="font-medium">{log.actor.name}</span>
+                        /* An actor name is an IDENTIFIER, so it must not wrap:
+                           measured at 85px, "Super Admin" broke across two lines
+                           inside a one-line box. But this column is NOT inside the
+                           scrollable wrapper the other tables use, so a bare
+                           `whitespace-nowrap` overflowed its cell by up to 154px.
+
+                           The right answer for a bounded column is truncation,
+                           with the full value still reachable: `title` carries
+                           it for a pointer user, and the row itself is a record
+                           the user can inspect. Found by
+                           test-dashboard-legibility.ts. */
+                        <span
+                          className="block max-w-[180px] truncate font-medium"
+                          title={log.actor.name}
+                        >
+                          {log.actor.name}
+                        </span>
                       ) : (
                         <span className="text-muted-foreground">{t("system")}</span>
                       )}
                     </TableCell>
                     <TableCell>
-                      <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{log.action}</code>
+                      {/* py-0.5 on a 12px code chip is what pushed the box to
+                          24px of content inside a 20px line and clipped it. The chip is
+                          now inline-flex with an explicit line-height, so its box is
+                          derived from its text rather than from padding stacked on top
+                          of it. Measured by test-dashboard-legibility.ts. */}
+                      <code className="inline-flex items-center whitespace-nowrap rounded bg-muted px-1.5 text-xs leading-5">
+                        {log.action}
+                      </code>
                     </TableCell>
                     <TableCell className="max-w-[200px] truncate text-xs text-muted-foreground">
                       {log.details ?? log.target ?? "—"}

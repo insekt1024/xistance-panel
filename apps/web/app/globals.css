@@ -12,19 +12,25 @@
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
+  /* 0.556 measured 4.35:1 on --muted, a hair under the 4.5 AA floor. */
+  --muted-foreground: oklch(0.528 0 0);
   --accent: oklch(0.96 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  /* 3:1 against the surface, per WCAG 1.4.11: an input boundary that is
+     * the only cue that a field exists must be perceivable. The old 0.922 grey
+     * measured 1.26:1. */
+  --input: oklch(0.55 0 0);
   --ring: oklch(0.546 0.245 262.881);
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --success: oklch(0.627 0.194 149.214);
+  --success-foreground: oklch(0.436 0.141 149.214);
   --warning: oklch(0.795 0.184 86.047);
+  --warning-foreground: oklch(0.502 0.13 74.047);
 }
 
 .dark {
@@ -45,12 +51,17 @@
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.985 0 0);
   --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  --input: oklch(1 0 0 / 38%);
   --ring: oklch(0.546 0.245 262.881);
   --sidebar: oklch(0.16 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --success: oklch(0.627 0.194 149.214);
-  --warning: oklch(0.795 0.184 86.047);
+  /* In dark mode the ORIGINAL lightness values are the text colour, so they
+     are legible on the dark card. The foreground tokens are the light-mode
+     values, needed here because the tint is now light rather than dark. */
+  --success: oklch(0.718 0.182 149.214);
+  --success-foreground: oklch(0.828 0.152 149.214);
+  --warning: oklch(0.828 0.162 86.047);
+  --warning-foreground: oklch(0.885 0.145 86.047);
 }
 
 @theme inline {
@@ -76,7 +87,9 @@
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
   --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -97,8 +110,17 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-* {
-  border-color: var(--border);
+/* Default border colour for elements that never ask for one.
+ *
+ * Declared in @layer base on purpose: a bare `*` rule in Tailwind v4 competes
+ * with utilities at equal specificity and, being later in source order, wins --
+ * which silently overrode every border-<color> class in the app. In @layer
+ * base it sits beneath the utilities, so the default applies until a component
+ * names a colour of its own. */
+@layer base {
+  * {
+    border-color: var(--border);
+  }
 }
 
 ::selection {

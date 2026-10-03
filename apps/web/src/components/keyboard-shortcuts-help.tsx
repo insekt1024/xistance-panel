@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { useTranslations } from "next-intl";
 import { Keyboard } from "lucide-react";
 import {
@@ -26,6 +27,18 @@ export function KeyboardShortcutsHelp({
 }: KeyboardShortcutsHelpProps) {
   const t = useTranslations("shortcuts");
 
+  // Opened by the "?" shortcut, so Radix has no trigger to restore focus to and
+  // would send it to <body>. Remember the opener and hand focus back from
+  // onCloseAutoFocus, which is the documented override and runs after Radix's
+  // own restore instead of racing it.
+  const returnFocusRef = React.useRef<HTMLElement | null>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const active = document.activeElement;
+    returnFocusRef.current =
+      active instanceof HTMLElement && active !== document.body ? active : null;
+  }, [open]);
+
   const shortcuts: Shortcut[] = [
     { keys: ["?"], label: t("showHelp") },
     { keys: ["Ctrl", "K"], label: t("openSearch") },
@@ -35,7 +48,15 @@ export function KeyboardShortcutsHelp({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const target = returnFocusRef.current;
+          returnFocusRef.current = null;
+          if (target && document.contains(target)) target.focus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Keyboard className="h-5 w-5" />

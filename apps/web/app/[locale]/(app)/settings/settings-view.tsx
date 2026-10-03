@@ -143,16 +143,18 @@ export function SettingsView({ isAdmin }: { isAdmin: boolean }) {
           </CardHeader>
           <CardContent className="max-w-md space-y-4">
             <div className="space-y-1.5">
-              <Label>{t("currentPassword")}</Label>
+              <Label htmlFor="settings-current-password">{t("currentPassword")}</Label>
               <Input
+                id="settings-current-password"
                 type="password"
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
               />
             </div>
             <div className="space-y-1.5">
-              <Label>{t("newPassword")}</Label>
+              <Label htmlFor="settings-new-password">{t("newPassword")}</Label>
               <Input
+                id="settings-new-password"
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
@@ -219,9 +221,9 @@ export function SettingsView({ isAdmin }: { isAdmin: boolean }) {
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-1.5">
-              <Label>{t("theme")}</Label>
+              <Label htmlFor="settings-theme">{t("theme")}</Label>
               <Select value={theme ?? "system"} onValueChange={setTheme}>
-                <SelectTrigger className="w-full max-w-xs">
+                <SelectTrigger id="settings-theme" className="w-full max-w-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -247,7 +249,10 @@ export function SettingsView({ isAdmin }: { isAdmin: boolean }) {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>{t("apiDocs")}</Label>
+              {/* This is a section heading, not a label: there is no control for a
+                  <Label> to name here, and an unassociated label is worse than
+                  plain text. */}
+              <p className="text-sm font-medium">{t("apiDocs")}</p>
               <p className="text-sm text-muted-foreground">{t("apiDocsDescription")}</p>
               <Button variant="outline" asChild>
                 <a href="/api/docs" target="_blank" rel="noopener noreferrer">
@@ -270,7 +275,7 @@ export function SettingsView({ isAdmin }: { isAdmin: boolean }) {
                     href={update.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                    className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   >
                     {t("updateAvailable")}: v{update.current} → v{update.latest.replace(/^v/, "")}
                   </a>

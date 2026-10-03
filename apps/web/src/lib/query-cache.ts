@@ -76,6 +76,19 @@ export async function cached<T>(
   return p;
 }
 
+/**
+ * Age in ms of a cached entry, or null when it is not cached.
+ *
+ * An operator reading a dashboard needs to know how stale the numbers are: a
+ * summary computed 20s ago and one computed 19 minutes ago both render as
+ * "current" otherwise. Computed from the entry's own timestamp, so it costs a
+ * single Map lookup and never scans.
+ */
+export function cacheAge(key: string): number | null {
+  const hit = store.get(key);
+  return hit ? Date.now() - hit.at : null;
+}
+
 /** Invalidate one or all cache entries (call after writes that affect them). */
 export function invalidateCache(prefix?: string): void {
   if (!prefix) {

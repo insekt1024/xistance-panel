@@ -144,10 +144,10 @@ export function TrafficChart({
   return (
     <div className={cn("space-y-3", loading && "opacity-60")}>
       {/* Controls row */}
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         {/* Time range selector */}
-        <div className="flex items-center gap-1">
-          <Clock className="h-3.5 w-3.5 text-muted-foreground mr-1" />
+        <div className="flex flex-wrap items-center gap-1">
+          <Clock className="h-3.5 w-3.5 text-muted-foreground me-1" />
           {RANGES.map((r) => (
             <Button
               key={r.key}
@@ -162,11 +162,11 @@ export function TrafficChart({
         </div>
 
         {/* Chart type toggle */}
-        <div className="flex items-center rounded-lg bg-muted p-0.5">
+        <div className="flex flex-wrap items-center rounded-lg bg-muted p-0.5">
           <button
             onClick={() => setChartType("area")}
             className={cn(
-              "rounded-md px-2.5 py-1 text-xs font-medium transition-all",
+              "min-h-6 rounded-md px-2.5 py-1 text-xs font-medium transition-all",
               chartType === "area"
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
@@ -177,7 +177,7 @@ export function TrafficChart({
           <button
             onClick={() => setChartType("line")}
             className={cn(
-              "rounded-md px-2.5 py-1 text-xs font-medium transition-all",
+              "min-h-6 rounded-md px-2.5 py-1 text-xs font-medium transition-all",
               chartType === "line"
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
@@ -194,6 +194,7 @@ export function TrafficChart({
           {t("noTraffic")}
         </div>
       ) : (
+      <div className="min-w-0 w-full overflow-hidden">
       <ResponsiveContainer width="100%" height={224}>
         {chartType === "area" ? (
           <AreaChart data={points} margin={{ top: 4, right: 4, bottom: 0, left: -16 }}>
@@ -225,35 +226,35 @@ export function TrafficChart({
           </LineChart>
         )}
       </ResponsiveContainer>
+        </div>
       )}
-
       {/* Summary stats row */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-4">
         <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
           <ArrowDown className="h-3.5 w-3.5 text-primary" />
           <div>
-            <p className="text-[10px] text-muted-foreground">{t("download")}</p>
+            <p className="text-xs text-muted-foreground leading-snug">{t("download")}</p>
             <p className="text-sm font-semibold tabular-nums">{formatBytes(totalIn)}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
           <ArrowUp className="h-3.5 w-3.5 text-success" />
           <div>
-            <p className="text-[10px] text-muted-foreground">{t("upload")}</p>
+            <p className="text-xs text-muted-foreground leading-snug">{t("upload")}</p>
             <p className="text-sm font-semibold tabular-nums">{formatBytes(totalOut)}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
           <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
           <div>
-            <p className="text-[10px] text-muted-foreground">↓ {t("speedIn")}</p>
+            <p className="text-xs text-muted-foreground leading-snug">↓ {t("speedIn")}</p>
             <p className="text-sm font-semibold tabular-nums">{formatSpeed(avgSpeedIn)}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2">
           <Gauge className="h-3.5 w-3.5 text-muted-foreground" />
           <div>
-            <p className="text-[10px] text-muted-foreground">↑ {t("speedOut")}</p>
+            <p className="text-xs text-muted-foreground leading-snug">↑ {t("speedOut")}</p>
             <p className="text-sm font-semibold tabular-nums">{formatSpeed(avgSpeedOut)}</p>
           </div>
         </div>

@@ -1,13 +1,24 @@
 {
-  "_comment": "XRAY tunnel example — mirrors buildXrayConfig() in packages/tunnel-core/src/config/xray.ts. Local apps point at the dokodemo-door inbound (port 10808); xray forwards into the VLESS outbound. Copy address/uuid/sni from your X-UI / 3X-UI inbound. Run: xray run -c xray.json",
-  "log": { "loglevel": "warning" },
+  "_comment": "XRAY tunnel example - mirrors buildXrayConfig() in packages/tunnel-core/src/config/xray.ts. Copy address/uuid/sni from your X-UI / 3X-UI inbound. Run: xray run -c xray.json",
+  "log": {
+    "loglevel": "warning"
+  },
   "inbounds": [
     {
       "tag": "xistance-in",
       "port": 10808,
       "protocol": "dokodemo-door",
-      "settings": { "network": "tcp,udp", "followRedirect": false },
-      "sniffing": { "enabled": true, "destOverride": ["http", "tls"] }
+      "settings": {
+        "network": "tcp,udp",
+        "followRedirect": true
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls"
+        ]
+      }
     }
   ],
   "outbounds": [
@@ -19,19 +30,39 @@
           {
             "address": "vpn.example.com",
             "port": 443,
-            "users": [{ "id": "PASTE-UUID-FROM-3X-UI", "encryption": "none" }]
+            "users": [
+              {
+                "id": "PASTE-UUID-FROM-3X-UI",
+                "encryption": "none"
+              }
+            ]
           }
         ]
       },
       "streamSettings": {
         "network": "tcp",
         "security": "tls",
-        "tlsSettings": { "serverName": "vpn.example.com", "allowInsecure": false }
+        "tlsSettings": {
+          "serverName": "vpn.example.com",
+          "allowInsecure": false
+        }
       }
     },
-    { "tag": "direct", "protocol": "freedom" }
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    }
   ],
   "routing": {
-    "rules": [{ "type": "field", "inboundTag": ["xistance-in"], "outboundTag": "xistance-out" }]
-  }
+    "rules": [
+      {
+        "type": "field",
+        "inboundTag": [
+          "xistance-in"
+        ],
+        "outboundTag": "xistance-out"
+      }
+    ]
+  },
+  "_how_traffic_reaches_this_inbound": "The inbound is dokodemo-door with NO address, so it cannot know a destination on its own: a local app connecting to port 10808 makes it dial port 10808. Traffic must therefore be REDIRECTED into the inbound, and followRedirect:true is what lets xray recover the original destination with SO_ORIGINAL_DST. Add this on the node (replace <listenPort> and <originPort> for your setup):\n\n  iptables -t nat -A OUTPUT -p tcp --dport <originPort> \\\n    -m owner ! --uid-owner xistance -j REDIRECT --to-port 10808\n\nThe `-m owner ! --uid-owner xistance` clause is REQUIRED, not a refinement: without it the rule also captures xray's OWN outbound connection to the origin, so the far end's response is redirected straight back into the tunnel and it deadlocks. If xray runs as a different user, use that user instead.\n\nVerify it before trusting it: curl http://<originPort> should return the origin's body, and `journalctl -u <xray-unit>` should show the destination recovered rather than the inbound's own port."
 }

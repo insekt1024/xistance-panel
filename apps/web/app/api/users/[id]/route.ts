@@ -2,6 +2,7 @@ import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { hashPassword } from "@xistance/tunnel-core";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
+import { rateLimit } from "@/lib/rate-limit";
 
 const userUpdateSchema = z.object({
   name: z.string().min(1).max(80).optional(),
@@ -14,6 +15,10 @@ const userUpdateSchema = z.object({
 export async function PUT(request: Request, ctx: { params: Promise<{ id: string }> }) {
   const auth = await requireSession(request, "ADMIN");
   if (!auth.ok) return auth.response;
+  // Abuse bound: one authenticated session had no ceiling on this write, and
+  // the cost is real server work, not just a database row.
+  const rl = rateLimit(`users-update:${auth.user.id}`, 20, 60000);
+  if (!rl.ok) return apiError("Too many requests, slow down", 429);
   const { id } = await ctx.params;
   const existing = await prisma.user.findUnique({ where: { id }, select: { role: true, email: true } });
   if (!existing) return apiError("User not found", 404);

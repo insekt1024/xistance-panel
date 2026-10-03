@@ -3,7 +3,7 @@ import { z } from "zod";
 import { LocalRunner } from "@xistance/tunnel-core";
 import { apiError, json, parseBody, requireSession } from "@/lib/api";
 import { rateLimit } from "@/lib/rate-limit";
-import { isBlockedTarget } from "@/lib/ssrf";
+import { isBlockedTarget, looksLikeFlag } from "@/lib/ssrf";
 
 const toolSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("tcp"), host: z.string().min(1), port: z.number().int().min(1).max(65535) }),
@@ -43,6 +43,19 @@ async function tcpProbe(host: string, port: number, timeoutMs = 8000): Promise<{
 
 const runner = new LocalRunner();
 
+/**
+ * Reject a target a subprocess would read as an option rather than an operand.
+ *
+ * `ping -c 4 -W 3 <host>` takes the host as a bare argv element, so a host of
+ * `-f127.0.0.1` becomes the flood-ping flag aimed at loopback. It slips past
+ * `isBlockedTarget`, which only classifies addresses and names.
+ */
+function rejectProbeOperand(host: string): string | null {
+  if (looksLikeFlag(host)) return "Probe target is not a valid host or address";
+  if (host.length === 0) return "Probe target is not a valid host or address";
+  return null;
+}
+
 export async function POST(request: Request) {
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
@@ -55,6 +68,8 @@ export async function POST(request: Request) {
 
   switch (data.type) {
     case "tcp": {
+      const bad = rejectProbeOperand(data.host);
+      if (bad) return apiError(bad, 400);
       if (await isBlockedTarget(data.host)) {
         return apiError("Probing internal or private addresses is not allowed", 400);
       }
@@ -93,6 +108,8 @@ export async function POST(request: Request) {
       }
     }
     case "latency": {
+      const bad = rejectProbeOperand(data.host);
+      if (bad) return apiError(bad, 400);
       if (await isBlockedTarget(data.host)) {
         return apiError("Probing internal or private addresses is not allowed", 400);
       }

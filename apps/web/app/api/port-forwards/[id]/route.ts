@@ -2,6 +2,8 @@ import { z } from "zod";
 import { prisma } from "@xistance/db";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 import { reconcilePortForwardsSoon } from "@/lib/forward-supervisor";
+import { rateLimit } from "@/lib/rate-limit";
+import { rejectForwardHost } from "@/lib/forward-host";
 
 const updateSchema = z.object({
   name: z.string().min(1).max(80).optional(),
@@ -17,6 +19,10 @@ const updateSchema = z.object({
 export async function PUT(request: Request, ctx: { params: Promise<{ id: string }> }) {
   const auth = await requireSession(request);
   if (!auth.ok) return auth.response;
+  // Abuse bound: one authenticated session had no ceiling on this write, and
+  // the cost is real server work, not just a database row.
+  const rl = rateLimit(`pf-update:${auth.user.id}`, 30, 60000);
+  if (!rl.ok) return apiError("Too many requests, slow down", 429);
   const { id } = await ctx.params;
   const existing = await prisma.portForward.findUnique({ where: { id }, select: { userId: true, name: true } });
   if (!existing) return apiError("Rule not found", 404);
@@ -25,6 +31,14 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id: string 
   }
   const body = await parseBody(request, updateSchema);
   if (!body.ok) return body.response;
+
+  // Editing destHost is a create-shaped change: it re-points an existing
+  // forward at a new target, so it needs the same guard POST does. Without
+  // this, a rule created legitimately could be edited into an SSRF relay.
+  if (body.data.destHost !== undefined) {
+    const hostProblem = await rejectForwardHost(body.data.destHost);
+    if (hostProblem) return apiError(hostProblem, 400);
+  }
 
   if (body.data.nodeId) {
     const node = await prisma.node.findUnique({

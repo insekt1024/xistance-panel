@@ -63,6 +63,8 @@ interface Props {
   tunnels: DashboardTunnel[];
   samples: Array<{ ts: string; bytesIn: number; bytesOut: number }>;
   recentActivity: Array<{ action: string; target: string; actor: string; at: string }>;
+  /** The server's clock at render time, so relative times hydrate identically. */
+  nowMs: number;
 }
 
 export interface StatCardsProps {
@@ -114,13 +116,20 @@ export function TrafficPanel(props: {
     <Card interactive className="animate-fade-in-up lg:col-span-2" style={{ "--stagger": 4 } as React.CSSProperties}>
       <CardHeader>
         <CardTitle>{t("traffic")}</CardTitle>
-        <CardDescription className="flex items-center gap-4">
-          <span className="flex items-center gap-1">
-            <TrendingDown className="h-4 w-4 text-primary" />
+        {/* `flex-wrap` so a byte figure that does not fit MOVES TO THE NEXT LINE
+            instead of wrapping inside its own 20px-tall box. Measured at 40-42px
+            wide: "0 B" broke after the space and needed two lines in a box that
+            allowed one, in BOTH locales and at every width down to 320px. The
+            icons are `shrink-0` so they never compress either, and each figure is
+            `whitespace-nowrap` so a value is never split across lines.
+            Found by test-dashboard-legibility.ts. */}
+        <CardDescription className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <span className="flex shrink-0 items-center gap-1 whitespace-nowrap">
+            <TrendingDown className="h-4 w-4 shrink-0 text-primary" />
             {formatBytes(totalIn)}
           </span>
-          <span className="flex items-center gap-1">
-            <TrendingUp className="h-4 w-4 text-success" />
+          <span className="flex shrink-0 items-center gap-1 whitespace-nowrap">
+            <TrendingUp className="h-4 w-4 shrink-0 text-success" />
             {formatBytes(totalOut)}
           </span>
         </CardDescription>
@@ -134,16 +143,22 @@ export function TrafficPanel(props: {
 
 export function ActivityPanel(props: {
   recentActivity: Array<{ action: string; target: string; actor: string; at: string }>;
+  /** The server's clock, so the first client render formats the same number. */
+  nowMs: number;
 }) {
   const t = useTranslations("dashboard");
   const locale = useLocale();
+  const labels = useElapsedLabels(props.recentActivity, locale, props.nowMs);
 
   return (
     <Card interactive className="animate-fade-in-up" style={{ "--stagger": 5 } as React.CSSProperties}>
       <CardHeader>
         <CardTitle>{t("recentActivity")}</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      {/* Stable hook: the smoke suite must be able to find this panel without
+          inferring it from a class or a translated string, both of which have
+          changed and silently emptied the assertion before. */}
+      <CardContent className="space-y-3" data-testid="activity-panel">
         {props.recentActivity.length === 0 && (
           <p className="text-sm text-muted-foreground">{t("empty")}</p>
         )}
@@ -153,6 +168,14 @@ export function ActivityPanel(props: {
             className="animate-fade-in-up flex items-center justify-between rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted/50"
             style={{ "--stagger": i } as React.CSSProperties}
           >
+            {/* `min-w-0` lets `truncate` engage: a flex item's default
+                `min-width:auto` refuses to shrink below its content, so the
+                ellipsis never applied. Mutation-tested: reverting `min-w-0`
+                here leaves this suite GREEN, so it is NOT load-bearing on its
+                own -- the parent no longer needs the help. Kept because it is
+                correct in principle and harmless, and because the comment
+                records that the change was tested rather than assumed.
+                Found by test-dashboard-legibility.ts. */}
             <div className="min-w-0">
               <p className="truncate font-medium">{a.action}</p>
               <p className="truncate text-xs text-muted-foreground">
@@ -160,7 +183,7 @@ export function ActivityPanel(props: {
               </p>
             </div>
             <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-              {timeAgo(a.at, locale)}
+              {labels[i]}
             </span>
           </div>
         ))}
@@ -249,7 +272,7 @@ export function TunnelsTable(props: { tunnels: DashboardTunnel[] }) {
                   <TableCell>
                     <StatusBadge status={x.status} />
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-left rtl:text-right">
                     <Button
                       variant="ghost"
                       size="sm"
@@ -282,7 +305,7 @@ export function DashboardStats(props: Props) {
 
       <div className="grid gap-6 lg:grid-cols-3">
         <TrafficPanel samples={props.samples} />
-        <ActivityPanel recentActivity={props.recentActivity} />
+        <ActivityPanel recentActivity={props.recentActivity} nowMs={props.nowMs} />
       </div>
 
       <TunnelsTable tunnels={props.tunnels} />
@@ -297,11 +320,45 @@ function formatBytes(n: number): string {
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
-function timeAgo(iso: string, locale: string): string {
-  const secs = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+function formatElapsed(secs: number, locale: string): string {
   const rtf = new Intl.RelativeTimeFormat(locale, { numeric: "auto", style: "narrow" });
   if (secs < 60) return rtf.format(-secs, "second");
   if (secs < 3600) return rtf.format(-Math.floor(secs / 60), "minute");
   if (secs < 86400) return rtf.format(-Math.floor(secs / 3600), "hour");
   return rtf.format(-Math.floor(secs / 86400), "day");
+}
+
+/**
+ * "x minutes ago" computed from `Date.now()` inside render is a hydration
+ * mismatch by construction: the server stamps the string at render time and the
+ * client recomputes it a moment later, so any activity old enough to sit near a
+ * unit boundary renders two different text nodes (React error #418).
+ *
+ * The elapsed value is therefore computed ONCE per activity entry and passed
+ * down, so the server and the client format the SAME number. The countdown then
+ * refreshes from an effect, after hydration has finished, where re-rendering is
+ * legal and correct.
+ */
+function useElapsedLabels(entries: Array<{ at: string }>, locale: string, nowMs: number): string[] {
+  // A lazy initialiser is NOT a fix: React runs it on the server during SSR and
+  // again on the client during hydration, so both sides still call Date.now()
+  // and still disagree. The first render must be a pure function of props, so it
+  // is seeded from the server's own clock -- passed in as a prop, therefore
+  // identical on both sides. Only the effect re-reads the real clock, and that
+  // runs after hydration has finished.
+  const [labels, setLabels] = React.useState<string[]>(() =>
+    entries.map((e) => formatElapsed(Math.max(0, Math.floor((nowMs - new Date(e.at).getTime()) / 1000)), locale)),
+  );
+  React.useEffect(() => {
+    const tick = () =>
+      setLabels(
+        entries.map((e) =>
+          formatElapsed(Math.max(0, Math.floor((Date.now() - new Date(e.at).getTime()) / 1000)), locale),
+        ),
+      );
+    tick();
+    const id = setInterval(tick, 30_000);
+    return () => clearInterval(id);
+  }, [entries, locale]);
+  return labels;
 }

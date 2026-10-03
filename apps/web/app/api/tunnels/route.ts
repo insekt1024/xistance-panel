@@ -157,15 +157,38 @@ export async function POST(request: Request) {
     return failCreate("Failed to decrypt node credentials");
   }
 
+  const engine = getEngine();
   try {
-    await getEngine().deploy(spec);
+    await engine.deploy(spec);
   } catch (err) {
     return failCreate(`Deploy failed: ${(err as Error).message}`);
   }
 
+  // A deploy that completes is not the same as a tunnel that came up. XUI is
+  // metadata-only: its "deploy" is a panel sync, which can fail and be recorded
+  // as a classified diagnostic, and REVERSE can be alive yet unreachable. This
+  // route hardcoded `state: "running"`, which republished a success straight over
+  // that failure -- the row said running while the engine held the real reason,
+  // and the diagnostic reason was lost. Ask the supervisor what it actually is.
+  let actualState: string = "running";
+  try {
+    actualState = await engine.status(id);
+  } catch {
+    // The probe itself failed: the truth is unknown, so record that rather than
+    // claiming a clean success.
+    actualState = "unknown";
+  }
+  const actualError = actualState === "error" || actualState === "unknown" || actualState === "degraded"
+    ? engine.getDiagnostic(id)?.summary ?? null
+    : null;
+
   const created = await prisma.tunnel.update({
     where: { id },
-    data: { status: "running", state: "running", errorMessage: null },
+    data: {
+      status: actualState === "error" || actualState === "unknown" ? "stopped" : "running",
+      state: actualState,
+      errorMessage: actualError,
+    },
   });
   await auditLog(auth.user.id, "tunnel.create", created.id, created.name, getClientIp(request));
   invalidateCache(CACHE_METRICS);

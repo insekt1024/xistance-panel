@@ -5,6 +5,23 @@ import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+/**
+ * Marker consumed by FormSelect to tell Radix children (`<SelectItem>`) apart
+ * from native `<option>` children.
+ *
+ * Detecting by element name is unsafe: these components set
+ * `displayName = SelectPrimitive.Item.displayName`, and minification rewrites
+ * function names, so a name check silently took the native branch and threw
+ * "`SelectItem` must be used within `Select`" on every /nodes load. An explicit
+ * property survives both.
+ */
+export const RADIX_SELECT_CHILD = Symbol.for("xt.radixSelectChild");
+
+/** Tag a component as a Radix select child so FormSelect can detect it. */
+export function asRadixSelectChild<T extends object>(C: T): T {
+  return Object.assign(C, { [RADIX_SELECT_CHILD]: true as const });
+}
+
 const Select = SelectPrimitive.Root;
 const SelectGroup = SelectPrimitive.Group;
 const SelectValue = SelectPrimitive.Value;
@@ -107,12 +124,12 @@ const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-8 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 ps-2 pe-8 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
     {...props}
   >
-    <span className="absolute right-2 flex h-3.5 w-3.5 items-center justify-center">
+    <span className="absolute end-2 flex h-3.5 w-3.5 items-center justify-center">
       <SelectPrimitive.ItemIndicator>
         <Check className="h-4 w-4" />
       </SelectPrimitive.ItemIndicator>
@@ -134,15 +151,28 @@ const SelectSeparator = React.forwardRef<
 ));
 SelectSeparator.displayName = SelectPrimitive.Separator.displayName;
 
+
+/**
+ * Marked aliases, exported under the same public names.
+ *
+ * FormSelect branches on this marker to choose a Radix <Select> root over a
+ * native <select>. An `export { X: f(X) }` alias is a syntax error, so the
+ * marked component is bound to a new const first.
+ */
+const RadixSelectGroup = asRadixSelectChild(SelectGroup);
+const RadixSelectLabel = asRadixSelectChild(SelectLabel);
+const RadixSelectItem = asRadixSelectChild(SelectItem);
+const RadixSelectSeparator = asRadixSelectChild(SelectSeparator);
+
 export {
   Select,
-  SelectGroup,
   SelectValue,
   SelectTrigger,
   SelectContent,
-  SelectLabel,
-  SelectItem,
-  SelectSeparator,
   SelectScrollUpButton,
   SelectScrollDownButton,
+  RadixSelectGroup as SelectGroup,
+  RadixSelectLabel as SelectLabel,
+  RadixSelectItem as SelectItem,
+  RadixSelectSeparator as SelectSeparator,
 };

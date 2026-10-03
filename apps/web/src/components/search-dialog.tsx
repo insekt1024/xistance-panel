@@ -8,6 +8,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -117,9 +118,45 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
   const debouncedQuery = useDebouncedValue(query, 300);
   const searchState = useSearchResults(debouncedQuery);
 
+  // This dialog has NO DialogTrigger. It is opened by the navbar button through
+  // a window CustomEvent and by the Ctrl+K shortcut, neither of which Radix can
+  // see, so Radix restores focus to whatever it recorded -- <body> -- and a
+  // keyboard user loses their place at the top of the page. Remember the active
+  // element on open and hand it back from onCloseAutoFocus, which is the
+  // documented override and runs AFTER Radix's own restore rather than racing
+  // it in a rAF.
+  const returnFocusRef = React.useRef<HTMLElement | null>(null);
+
+  // Radix moves focus into the dialog BEFORE onOpenChange(nextOpen=true) runs,
+  // so document.activeElement is already the dialog by then and nothing worth
+  // restoring is left. Track the last focused element in the page instead --
+  // a capturing focusin listener sees the real opener before the scope takes it.
+  // Deliberately NOT gated on `open`. The opener is focused BEFORE the dialog
+  // is asked to open, so a listener registered on open would never see it. With
+  // the dialog permanently mounted this tracks the last real focus target on
+  // the page, which is precisely the element to return to.
+  React.useEffect(() => {
+    const remember = (event: FocusEvent) => {
+      const el = event.target;
+      if (el instanceof HTMLElement && el !== document.body && !el.closest('[role="dialog"]')) {
+        returnFocusRef.current = el;
+      }
+    };
+    document.addEventListener("focusin", remember, true);
+    return () => document.removeEventListener("focusin", remember, true);
+  }, []);
+
   const handleOpenChange = React.useCallback(
     (nextOpen: boolean) => {
       if (nextOpen) {
+        // The opener was captured by the focusin listener above; fall back to
+        // activeElement only if that found nothing.
+        if (!returnFocusRef.current) {
+          const active = document.activeElement;
+          if (active instanceof HTMLElement && active !== document.body) {
+            returnFocusRef.current = active;
+          }
+        }
         setQuery("");
         setActiveIndex(0);
         setTimeout(() => inputRef.current?.focus(), 0);
@@ -203,7 +240,20 @@ export function SearchDialog({ open, onOpenChange }: SearchDialogProps) {
       <DialogContent
         className="gap-0 p-0 sm:max-w-xl"
         onKeyDown={handleKeyDown}
+        onCloseAutoFocus={(event) => {
+          // Take over from Radix: prevent its restore-to-<body>, then focus the
+          // element that was focused when the dialog opened.
+          event.preventDefault();
+          const target = returnFocusRef.current;
+          returnFocusRef.current = null;
+          if (target && document.contains(target)) target.focus();
+        }}
       >
+        {/* A dialog needs an accessible name. Without a title the whole
+            component is announced as an unlabelled "dialog", and Radix warns
+            about it at runtime. Visually hidden: the input placeholder and the
+            shortcut hint already carry the visual affordance. */}
+        <DialogTitle className="sr-only">{t("search.title")}</DialogTitle>
         <DialogDescription className="sr-only">
           {t("search.description")}
         </DialogDescription>

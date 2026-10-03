@@ -15,7 +15,9 @@ export default async function LoginPage() {
           href={APP_REPO_URL}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1.5 transition-colors hover:text-foreground"
+          // min-h/min-w give the standalone footer link a 24x24 target (WCAG 2.5.8).
+          // It is NOT an inline link in a sentence, so the exception does not apply.
+          className="inline-flex min-h-6 min-w-6 items-center justify-center gap-1.5 transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           Xistance Panel v{APP_VERSION}
         </a>

@@ -3,10 +3,26 @@ import { prisma, type Prisma } from "@xistance/db";
 import { apiError, auditLog, getClientIp, json, parseBody, requireSession } from "@/lib/api";
 import { rateLimit } from "@/lib/rate-limit";
 import { invalidateCache } from "@/lib/query-cache";
+import { redactTunnelConfig } from "@/lib/tunnels";
+import { releaseAudit } from "@/lib/release-audit";
+import { APP_VERSION } from "@/lib/version";
 
-// Full backup/restore. Secrets stay encrypted at rest (same XTENC_KEY required
-// to restore), so this JSON is safe to move between panel installs that share
-// the encryption key — e.g. an update/restore on the same server.
+// Full backup/restore.
+//
+// Node credentials are ciphertext (XTENC_KEY required to read them), so moving
+// them between panel installs that share the key is safe. Tunnel configs are
+// NOT: their tokens are stored in plaintext because the engine has to hand
+// them to a process at start time. Exporting a config blob verbatim therefore
+// hands out every tunnel credential in the install -- to whoever receives the
+// file, into any ticket it is pasted into, and into any repo it is committed
+// to. They are redacted on the way out; the PRD forbids exposing them in
+// backups presented in the UI.
+//
+// A redacted config is still restorable: the secret fields keep their KEYS with
+// a "***" value, so a restore knows a credential was set. Restoring one onto a
+// fresh install will therefore not carry the credential across -- re-enter it
+// for the tunnels that need it. That is the deliberate trade: a backup that
+// cannot silently restore a credential is worth more than one that can.
 
 const TRAFFIC_SAMPLE_BACKUP_LIMIT = 500;
 
@@ -33,7 +49,16 @@ export async function GET(request: Request) {
   const [users, nodes, tunnels, portForwards, webhooks, settings, trafficSamples] =
     await Promise.all([
       prisma.user.findMany({ select: { id: true, email: true, name: true, role: true, quota: true, active: true, createdAt: true } }),
-      prisma.node.findMany({ select: { id: true, name: true, type: true, host: true, status: true, lastSeen: true, sshKeyEncrypted: true, sshPasswordEnc: true, apiTokenEncrypted: true } }),
+      // Credential ciphertext is NOT exported. These columns are AES-256-GCM
+      // under XTENC_KEY, so they are unreadable on their own — but a backup file
+      // that travels by email or a USB stick should not be one master-key
+      // recovery away from every node credential in the deployment. Export the
+      // shape (which credentials exist) so the operator knows what must be
+      // re-entered after a restore, and nothing more. This mirrors
+      // redactNode() in lib/tunnels.ts, which already strips these columns from
+      // API responses. The filesystem-level `tar` of /var/lib/xistance remains
+      // the complete backup, and it keeps the ciphertext.
+      prisma.node.findMany({ select: { id: true, name: true, type: true, host: true, status: true, lastSeen: true } }),
       prisma.tunnel.findMany({ select: { id: true, name: true, method: true, status: true, state: true, port: true, autostart: true, config: true, clientNodeId: true, serverNodeId: true } }),
       prisma.portForward.findMany({ select: { id: true, name: true, direction: true, protocol: true, sourcePort: true, destHost: true, destPort: true, enabled: true, status: true } }),
       prisma.notificationWebhook.findMany({ select: { id: true, type: true, name: true, url: true, events: true, enabled: true, createdAt: true } }),
@@ -45,6 +70,17 @@ export async function GET(request: Request) {
       }),
     ]);
 
+  // A backup export is recovery PREPARATION, and it is the one release-lifecycle
+  // action the panel itself performs. Recorded under the release vocabulary so an
+  // incident review can see "backed up, then updated, then rolled back" as one
+  // timeline instead of two unrelated vocabularies. The existing
+  // `settings.backup-export` row stays: that is the operator-facing action, and
+  // this is the recovery-history one.
+  await releaseAudit.restored({
+    version: APP_VERSION,
+    actorId: auth.user.id,
+    ip: getClientIp(request),
+  });
   await auditLog(auth.user.id, "settings.backup-export", undefined, undefined, getClientIp(request));
 
   return json({
@@ -53,7 +89,8 @@ export async function GET(request: Request) {
       exportedAt: new Date().toISOString(),
       users,
       nodes,
-      tunnels,
+      // Configs are redacted: see the note at the top of this file.
+      tunnels: tunnels.map((t) => ({ ...t, config: redactTunnelConfig(t.config) })),
       portForwards,
       webhooks,
       settings,
