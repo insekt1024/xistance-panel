@@ -22,6 +22,17 @@ jobs:
     name: Lint · Typecheck · Version · Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The arm64 payload is uploaded by the native arm64 job, because an x64
+    # runner cannot produce one -- Prisma's query engine is generated on the
+    # target architecture. Two suites verify a real arm64 ARCHIVE (its
+    # checksum, and the embedded manifest digest against the tree it extracts
+    # to), and on an x64 runner there is no arm64 archive for them to read.
+    #
+    # So the artifact is downloaded here rather than skipped. Before this, both
+    # suites failed on a fresh CI checkout and passed locally, where an earlier
+    # run had left an archive behind -- the same defect shape as the CI steps
+    # that never cut an archive at all.
+    needs: arm64
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -61,6 +72,16 @@ jobs:
         run: npm run build
         env:
           TURBO_DISABLE: "true"
+
+      # Unpack the arm64 payload next to the amd64 one so the archive suites
+      # have both. `merge-multiple: true` would flatten the directories; each
+      # suite expects dist/arm64/ to hold the archive, its .sha256 and the
+      # manifest beside it, so download the way the arm64 job uploaded it.
+      - name: Download the arm64 payload
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: arm64-payload-${{ github.sha }}
+          path: dist/arm64
 
       - name: Stage the release artifact
         run: npx tsx scripts/stage-release-artifact.ts . dist/artifact --architecture amd64
