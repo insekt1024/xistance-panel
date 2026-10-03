@@ -702,6 +702,24 @@ else
 fi
 
 if [[ "$ready" != "true" ]]; then
+  # Say WHY. Found on arm64: the install reached migrations, admin bootstrap and
+  # a installed systemd unit, then reported only "Readiness check failed" with
+  # no cause -- so the first native-arm64 install failure had to be diagnosed by
+  # re-running it. On a cold start the panel answers in ~1s locally, so a
+  # timeout this early is a real failure, not slowness, and the operator is
+  # left with nothing to act on.
+  #
+  # Best-effort: never let diagnostics mask the original failure.
+  if command -v systemctl >/dev/null 2>&1; then
+    echo "--- xistance.service status ---" >&2
+    systemctl status xistance.service --no-pager --lines 20 >&2 2>/dev/null || true
+    echo "--- recent journal ---" >&2
+    journalctl -u xistance.service --no-pager --lines 40 >&2 2>/dev/null || true
+  fi
+  echo "--- was the service even asked to start? ---" >&2
+  echo "pid 1 is: $(ps -p 1 -o comm= 2>/dev/null || echo unknown)" >&2
+  echo "systemctl: $(command -v systemctl || echo 'not present')" >&2
+  echo "release dir: $CANDIDATE_DIR" >&2
   info "Readiness check failed; rolling back."
   xt_mark_release_failed "$CANDIDATE_DIR" 2>/dev/null || true
   if [[ -n "$PREVIOUS_ACTIVE" && -d "$PREVIOUS_ACTIVE" ]]; then
