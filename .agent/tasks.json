@@ -1,0 +1,531 @@
+[
+  {
+    "id": "TASK-1",
+    "title": "Verify project prerequisites and access",
+    "category": "setup",
+    "specFilePath": ".agent/tasks/TASK-1.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-2",
+    "title": "Record baseline verification and repository state",
+    "category": "setup",
+    "specFilePath": ".agent/tasks/TASK-2.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-3",
+    "title": "Define supported release architecture and runtime contract",
+    "category": "setup",
+    "specFilePath": ".agent/tasks/TASK-3.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-4",
+    "title": "Inventory environment variables and placeholder requirements",
+    "category": "setup",
+    "specFilePath": ".agent/tasks/TASK-4.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-5",
+    "title": "Add release artifact layout and inspection script",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-5.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-6",
+    "title": "Embed public and Next static assets in release artifact",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-6.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-7",
+    "title": "Generate release manifest and checksums",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-7.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-8",
+    "title": "Build architecture-specific release artifacts in CI",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-8.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-9",
+    "title": "Add GitHub artifact attestations when supported",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-9.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-10",
+    "title": "Implement immutable versioned deployment directories",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-10.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-11",
+    "title": "Implement atomic active-release cutover",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-11.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-12",
+    "title": "Implement artifact verification before extraction",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-12.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-13",
+    "title": "Implement one-line version-pinned installer",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-13.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-14",
+    "title": "Implement update migration readiness and rollback flow",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-14.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-15",
+    "title": "Add systemd service and migration contract tests",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-15.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-16",
+    "title": "Add artifact smoke test for protected static routes",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-16.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-17",
+    "title": "Add install and update CLI regression tests",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-17.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-18",
+    "title": "Add release installer documentation contract",
+    "category": "documentation",
+    "specFilePath": ".agent/tasks/TASK-18.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-19",
+    "title": "Harden shared tunnel process state transitions",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-19.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-20",
+    "title": "Bound retries and reconnect loops",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-20.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-21",
+    "title": "Ensure process cleanup on stop update and restart",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-21.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-22",
+    "title": "Add lifecycle state and recovery diagnostics",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-22.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-23",
+    "title": "Make cache and reconciliation behavior bounded",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-23.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-24",
+    "title": "Harden port allocation and conflict reporting",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-24.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-25",
+    "title": "Harden port-forward reconcile and coalescing",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-25.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-26",
+    "title": "Complete BACKHAUL lifecycle coverage",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-26.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-27",
+    "title": "Complete FRP lifecycle coverage",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-27.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-28",
+    "title": "Complete GOST lifecycle coverage",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-28.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-29",
+    "title": "Complete SSH lifecycle and option security",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-29.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-30",
+    "title": "Complete PORT_FORWARD method coverage",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-30.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-31",
+    "title": "Complete DIRECT method coverage",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-31.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-32",
+    "title": "Complete REVERSE method coverage",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-32.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-33",
+    "title": "Complete XRAY method coverage",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-33.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-34",
+    "title": "Complete XUI method coverage and controlled exception",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-34.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-35",
+    "title": "Add all-method shared regression matrix",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-35.json",
+    "passes": true,
+    "notes": "Shared all-method contract (scripts/lib/method-contract.ts) + matrix (scripts/test-method-matrix.ts), 50/50. Found and fixed an unbounded isRunning() probe in engine stop() and computeStatus() (IS_RUNNING_TIMEOUT_MS=5000). 6/6 mutants killed. realBinary=false for all nine: no tunnel binary executed, no traffic crossed a tunnel; releaseComplete=false for all nine."
+  },
+  {
+    "id": "TASK-36",
+    "title": "Add tunnel diagnostic and recovery user flow",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-36.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-37",
+    "title": "Add health and resource telemetry",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-37.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-38",
+    "title": "Add backup and restore verification path",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-38.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-39",
+    "title": "Add update and recovery audit records",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-39.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-40",
+    "title": "Complete authentication and session security checks",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-40.json",
+    "passes": true,
+    "notes": "Found a user-enumeration TIMING oracle in api/auth/login: `user?.active ? verifyPassword(...) : false` short-circuits, so an unknown email AND a deactivated account skipped scrypt entirely despite DUMMY_HASH existing to prevent exactly that. Measured 32.6ms vs 0.0007ms (33000x). Fixed by verifying unconditionally and ANDing `active` separately. Live HTTP proof against the production build: 145ms vs 149ms (0.98x). Also made the 401 message name neither field. scripts/test-auth-security.ts 30/30, 4/4 mutants killed. Preserved XT_TRUST_PROXY opt-in, login CSRF exemption, refresh rotation and TTLs."
+  },
+  {
+    "id": "TASK-41",
+    "title": "Complete origin and CSRF negative tests",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-41.json",
+    "passes": true,
+    "evidence": ".agent/evidence/task-41.md"
+  },
+  {
+    "id": "TASK-42",
+    "title": "Complete SSRF and private-network tests",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-42.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-43",
+    "title": "Complete rate-limit and abuse controls",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-43.json",
+    "passes": true,
+    "notes": "9 state-changing routes had NO rate limit: users, users/[id], nodes, nodes/[id], port-forwards, port-forwards/[id], tunnels/[id] DELETE, tunnels/[id]/logs POST, webhooks, webhooks/[id]. POST /api/users runs scrypt hashPassword (~100ms) per call, so an authenticated ADMIN could saturate a 1 vCPU core. All buckets keyed on auth.user.id and placed AFTER requireSession. scripts/test-rate-limit.ts 30/30 incl. live 429 (statuses 201,429) and a build-staleness guard. 4/4 mutants killed with a rebuild each -- the first run's 1/4 was stale-build methodology, not a suite gap. Not a distributed limiter: buckets are per-process and in-memory, as documented."
+  },
+  {
+    "id": "TASK-44",
+    "title": "Audit secret redaction across APIs logs metrics and audit",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-44.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-45",
+    "title": "Audit dependency and release supply chain",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-45.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-46",
+    "title": "Add accessibility baseline for shared UI controls",
+    "category": "ui-ux",
+    "specFilePath": ".agent/tasks/TASK-46.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-47",
+    "title": "Add keyboard focus and dialog accessibility",
+    "category": "ui-ux",
+    "specFilePath": ".agent/tasks/TASK-47.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-48",
+    "title": "Add contrast target-size and reflow checks",
+    "category": "ui-ux",
+    "specFilePath": ".agent/tasks/TASK-48.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-49",
+    "title": "Add English Persian direction and catalog parity",
+    "category": "ui-ux",
+    "specFilePath": ".agent/tasks/TASK-49.json",
+    "passes": true,
+    "notes": "Catalog parity already held (501/501). Real defect: 16 hard `text-right` on actions columns across 8 views, while the shared Table primitive already used `text-left rtl:text-right` -- in fa the buttons were stranded on the opposite edge. Also converted 31 physical spacing utilities to logical and 6 absolute icons to start/end. Fixed a conversion bug I introduced (logical property under rtl: in navbar). test-locale-parity 15/15; test-rtl-browser 27/27 against a real production build in real Chromium with a disposable admin and a seeded node. Mutation: reverting the fix fails on the EN assertion, since `right` is the start edge in fa -- the bug was only visible in English."
+  },
+  {
+    "id": "TASK-50",
+    "title": "Add accessible loading empty and error states",
+    "category": "ui-ux",
+    "specFilePath": ".agent/tasks/TASK-50.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-51",
+    "title": "Add browser smoke suite for login and dashboard",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-51.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-52",
+    "title": "Add browser smoke suite for nodes and tunnels",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-52.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-53",
+    "title": "Add browser smoke suite for port forwards users audit and settings",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-53.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-54",
+    "title": "Add browser smoke suite for Persian UI",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-54.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-55",
+    "title": "Add browser smoke suite for static assets and localization",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-55.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-56",
+    "title": "Add browser evidence to CI or documented manual gate",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-56.json",
+    "passes": true
+  },
+  {
+    "id": "TASK-57",
+    "title": "Add low-RAM baseline benchmark harness",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-57.json",
+    "passes": false
+  },
+  {
+    "id": "TASK-58",
+    "title": "Add startup idle and peak resource measurement",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-58.json",
+    "passes": false
+  },
+  {
+    "id": "TASK-59",
+    "title": "Add control-plane latency and reconnect measurement",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-59.json",
+    "passes": false
+  },
+  {
+    "id": "TASK-60",
+    "title": "Set and record numeric low-resource budgets",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-60.json",
+    "passes": false
+  },
+  {
+    "id": "TASK-61",
+    "title": "Add one-vCPU and low-RAM CI simulation",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-61.json",
+    "passes": false
+  },
+  {
+    "id": "TASK-62",
+    "title": "Test installer on real Ubuntu 22.04 VPS",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-62.json",
+    "passes": false,
+    "dependencies": [
+      "TASK-73"
+    ]
+  },
+  {
+    "id": "TASK-63",
+    "title": "Test startup health and static assets on Ubuntu 24.04 VPS",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-63.json",
+    "passes": false,
+    "dependencies": [
+      "TASK-73"
+    ]
+  },
+  {
+    "id": "TASK-64",
+    "title": "Test update migration and rollback on VPS",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-64.json",
+    "passes": false,
+    "dependencies": [
+      "TASK-73"
+    ]
+  },
+  {
+    "id": "TASK-65",
+    "title": "Test representative tunnel load and reconnect on VPS",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-65.json",
+    "passes": false,
+    "dependencies": [
+      "TASK-73"
+    ]
+  },
+  {
+    "id": "TASK-66",
+    "title": "Run full security and dependency review",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-66.json",
+    "passes": false
+  },
+  {
+    "id": "TASK-67",
+    "title": "Update English README for final release",
+    "category": "documentation",
+    "specFilePath": ".agent/tasks/TASK-67.json",
+    "passes": false
+  },
+  {
+    "id": "TASK-68",
+    "title": "Update Persian README for final release",
+    "category": "documentation",
+    "specFilePath": ".agent/tasks/TASK-68.json",
+    "passes": false
+  },
+  {
+    "id": "TASK-69",
+    "title": "Add README command and version consistency check",
+    "category": "documentation",
+    "specFilePath": ".agent/tasks/TASK-69.json",
+    "passes": false
+  },
+  {
+    "id": "TASK-70",
+    "title": "Run final build typecheck lint and test suite",
+    "category": "documentation",
+    "specFilePath": ".agent/tasks/TASK-70.json",
+    "passes": false
+  },
+  {
+    "id": "TASK-71",
+    "title": "Run final browser and accessibility verification",
+    "category": "functional",
+    "specFilePath": ".agent/tasks/TASK-71.json",
+    "passes": false
+  },
+  {
+    "id": "TASK-72",
+    "title": "Perform final release review and gate decision",
+    "category": "security",
+    "specFilePath": ".agent/tasks/TASK-72.json",
+    "passes": false
+  },
+  {
+    "id": "TASK-73",
+    "title": "Package the Prisma client and native engine for Linux in the release artifact",
+    "category": "functional",
+    "description": "Fix the release artifact so the staged standalone tree contains a complete, runnable Prisma client with the correct Linux native engine for each target architecture, instead of only a Windows engine and schema.prisma.",
+    "specFilePath": ".agent/tasks/TASK-73.json",
+    "passes": true
+  }
+]
