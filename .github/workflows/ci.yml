@@ -24,10 +24,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -50,9 +50,117 @@ jobs:
       - name: Optimization tests (temp SQLite DB)
         run: npx tsx scripts/test-optimizations.ts
 
-      - name: Dependency audit (high+, non-blocking)
-        run: npm audit --omit=dev --audit-level=high
-        continue-on-error: true
+      # The two Linux suites exercise the STAGED RELEASE PAYLOAD, not the source
+      # tree. `verify` runs on ubuntu-latest, so they take their local path here
+      # (no WSL) and need dist/artifact to exist. Before this step was added the
+      # job had no build, so the aggregate died on every runner with
+      # "cp: cannot stat .../dist/artifact" and 0/1 suites passed. The build and
+      # staging therefore have to precede the suite, not live only in the
+      # browser job.
+      - name: Build (for the Linux payload suites)
+        run: npm run build
+        env:
+          TURBO_DISABLE: "true"
+
+      - name: Build release manifest
+        run: >-
+          npx tsx scripts/release-manifest.ts build
+          release-manifest.json
+          "$(node -p "require('./package.json').version")"
+          "${{ github.sha }}"
+          amd64
+          xistance-panel-${{ github.sha }}-amd64.tar.gz
+          apps/web/.next/standalone
+          "$(node -p "require('./prisma/package.json').version" 2>/dev/null || echo 'unknown')"
+
+      - name: Stage the release artifact
+        run: npx tsx scripts/stage-release-artifact.ts . dist/artifact --architecture amd64
+
+      # The full local suite list. Before this step existed, this job ran
+      # test-optimizations.ts and nothing else: 62 of 63 suites on disk were
+      # never executed by CI, including every security suite. A critical SSH
+      # option-injection finding shipped because the suite that catches it
+      # passed locally and no one had put it in CI.
+      #
+      # `run-all-tests.ts` fails if a test-* file on disk is not registered in
+      # it or in the browser gate, so a new suite cannot be added without
+      # deciding where it runs.
+      - name: Full local test suite
+        run: npx tsx scripts/run-all-tests.ts
+
+      - name: Dependency audit (high+ blocks)
+        # Was `continue-on-error: true`, which meant a high advisory could never
+        # fail the build while the task required no unresolved high/critical.
+        # The tree audits clean (0 high, 0 critical, prod and all), so the gate
+        # can afford to be real. Keep --omit=dev OFF here: dev advisories matter
+        # too, and the js-yaml one this now catches was dev-only.
+        run: npm audit --audit-level=high
+
+  # The browser gate (TASK-56). Runs the real suites against a real production
+  # build, and against the STAGED artifact rather than the source tree, because
+  # Next's standalone output excludes public/ and .next/static -- a source-tree
+  # server would pass while the release payload 404s every stylesheet.
+  #
+  # `npm run test:browser` exits 77 when a suite cannot run here, which CI treats
+  # as a FAILURE. That is deliberate: on ubuntu-latest Chromium is available, so
+  # a skip means something is actually missing, and a silently skipped browser
+  # gate is how "browser coverage" gets claimed when nothing ran.
+  browser:
+    name: Browser gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: verify
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Build
+        run: npm run build
+
+      # The release manifest must exist before staging: stageReleaseArtifact
+      # refuses without it, because a payload with no manifest cannot be
+      # verified by the installer before extraction.
+      - name: Build release manifest
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          PRISMA_VERSION=$(node -p "require('./node_modules/prisma/package.json').version")
+          npx tsx scripts/release-manifest.ts build \
+            release-manifest.json \
+            "$VERSION" \
+            "$(git rev-parse HEAD)" \
+            "amd64" \
+            "xistance-panel-v$VERSION-amd64.tar.gz" \
+            apps/web/.next/standalone \
+            "$PRISMA_VERSION"
+
+      - name: Stage the release artifact
+        run: npx tsx scripts/stage-release-artifact.ts . dist/artifact --architecture amd64
+
+      # Ubuntu is a release target, so the artifact is booted directly -- no
+      # host-engine fixture is needed and the results are about the real payload.
+      - name: Browser gate (staged artifact)
+        run: npm run test:browser
+
+      - name: Upload browser gate evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: browser-gate-evidence
+          path: .agent/tmp-smoke/gate-*/
+          if-no-files-found: warn
+          retention-days: 30
 
   build:
     name: Build + Docker
@@ -61,10 +169,10 @@ jobs:
     needs: verify
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Setup Node 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -80,7 +188,7 @@ jobs:
 
       - name: Upload standalone build
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: xistance-standalone
           path: apps/web/.next/standalone

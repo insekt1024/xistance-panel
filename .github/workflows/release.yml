@@ -19,21 +19,25 @@ on:
         type: boolean
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 env:
   # Turbopack chokes on tunnels/bin/gost (os error 22); always build without it.
   TURBO_DISABLE: "true"
 
 jobs:
-  release:
-    name: Release ${{ github.event.inputs.version }}${{ inputs.dry-run && ' (dry run)' || '' }}
+  version:
+    name: Bump and verify version
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release-tag: ${{ steps.version.outputs.release_tag }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -44,7 +48,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Setup Node 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -57,13 +61,15 @@ jobs:
 
       - name: Read new version
         id: version
-        run: echo "version=$(node scripts/version.mjs --show)" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=$(node scripts/version.mjs --show)" >> "$GITHUB_OUTPUT"
+          echo "release_tag=v$(node scripts/version.mjs --show)" >> "$GITHUB_OUTPUT"
 
       - name: Stop here on dry run
         if: ${{ inputs.dry-run }}
         run: |
           git show --stat HEAD
-          git tag --list "v${{ steps.version.outputs.version }}"
+          git tag --list "v$(node scripts/version.mjs --show)"
           echo "Dry run: version bump looks good, nothing pushed."
 
       - name: Verify (typecheck + lint + tests + build)
@@ -81,24 +87,307 @@ jobs:
         run: |
           BRANCH="${GITHUB_REF#refs/heads/}"
           git push origin "HEAD:${BRANCH}"
-          git push origin "tag v${{ steps.version.outputs.version }}"
+          git push origin "tag v$(node scripts/version.mjs --show)"
 
-      - name: Package standalone artifact
-        if: ${{ !inputs.dry-run }}
+  artifact:
+    name: Artifact ${{ matrix.architecture }}
+    needs: version
+    if: ${{ !inputs.dry-run }}
+    # The architecture is the runner's real architecture, not a staging flag.
+    # Prisma's query engine is a native binary selected for the machine that
+    # generated the client, so a cross-staged arm64 payload on an x64 runner
+    # can only ever contain the x64 engine and will fail inspection
+    # ("Prisma payload has no native query engine for arm64"). runner_arch was
+    # declared in the matrix but never referenced, so both cells ran on
+    # ubuntu-latest/x64 and the arm64 cell was guaranteed to fail.
+    runs-on: ${{ matrix.runner_arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner_arch: x64
+          - architecture: arm64
+            runner_arch: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build standalone output
+        run: npm run build
+
+      - name: Stage public and static assets
+        run: npx tsx scripts/stage-release-assets.ts
+
+      # ORDER MATTERS: stage FIRST, then build the manifest from the STAGED tree.
+      #
+      # The manifest records a payload digest, and a payload digest is only
+      # provenance if it covers the tree that actually ships. `dist/artifact` is
+      # the staged release root and differs from `apps/web/.next/standalone` by
+      # the manifest, the service template, the migrations, the migration
+      # applier and the admin creator. Hashing the standalone tree recorded a
+      # digest of a tree that is never published, so a verifier recomputing the
+      # digest against the extracted release would reject the artifact (TASK-96).
+      #
+      # The manifest must therefore be written into the staged tree, which means
+      # staging has to happen first. `stagedPayloadDigest` excludes
+      # release-manifest.json, because a file cannot contain its own hash.
+      - name: Stage release artifact
+        run: npx tsx scripts/stage-release-artifact.ts . dist/artifact --architecture "${{ matrix.architecture }}"
+
+      - name: Build release manifest
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          ARCHITECTURE: ${{ matrix.architecture }}
+          ARTIFACT_NAME: xistance-panel-v${{ needs.version.outputs.version }}-${{ matrix.architecture }}.tar.gz
         run: |
-          mkdir -p dist
-          cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static 2>/dev/null || true
-          tar -czf dist/xistance-panel-v${{ steps.version.outputs.version }}.tar.gz \
-            -C apps/web/.next standalone
-          tar -czf dist/xistance-panel-v${{ steps.version.outputs.version }}-static.tar.gz \
-            -C apps/web/.next static
+          PRISMA_VERSION=$(node -p "require('./node_modules/prisma/package.json').version")
+          npx tsx scripts/release-manifest.ts build \
+            dist/artifact/release-manifest.json \
+            "$VERSION" \
+            "$(git rev-parse HEAD)" \
+            "$ARCHITECTURE" \
+            "$ARTIFACT_NAME" \
+            dist/artifact \
+            "$PRISMA_VERSION"
+          # The root copy is what `verify-artifact.ts` is pointed at locally and
+          # what the archive contains; keep the two identical.
+          cp dist/artifact/release-manifest.json release-manifest.json
+
+      - name: Inspect release artifact
+        run: npx tsx scripts/inspect-release-artifact.ts dist/artifact --architecture "${{ matrix.architecture }}"
+
+      # Browser gate on the STAGED payload, before the archive exists and
+      # therefore before anything is published (TASK-56 AC2). amd64 only: it is
+      # the architecture the browser suites can boot, and a gate that cannot run
+      # must not be recorded as having run.
+      - name: Browser gate (staged artifact, amd64)
+        if: ${{ matrix.architecture == 'amd64' }}
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:browser
+
+      - name: Upload browser gate evidence
+        if: ${{ always() && matrix.architecture == 'amd64' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: browser-gate-${{ needs.version.outputs.version }}
+          path: .agent/tmp-smoke/gate-*/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Create archive
+        run: |
+          tar -czf "dist/${{ matrix.architecture }}/xistance-panel-v${{ needs.version.outputs.version }}-${{ matrix.architecture }}.tar.gz" \
+            -C dist/artifact .
+
+      - name: Generate checksum
+        run: |
+          archive="dist/${{ matrix.architecture }}/xistance-panel-v${{ needs.version.outputs.version }}-${{ matrix.architecture }}.tar.gz"
+          npx tsx scripts/release-manifest.ts sha256 "$archive" > "$archive.sha256"
+
+      - name: Verify checksum
+        run: |
+          archive="dist/${{ matrix.architecture }}/xistance-panel-v${{ needs.version.outputs.version }}-${{ matrix.architecture }}.tar.gz"
+          npx tsx scripts/release-manifest.ts verify "$archive" "$archive.sha256"
+
+      # The checksum proves the ARCHIVE is intact. It says nothing about whether
+      # the manifest inside it describes that archive. Recompute the payload
+      # digest from the EXTRACTED archive and compare, so a release whose
+      # manifest points at some other tree is rejected before it is uploaded
+      # (TASK-96/TASK-101). Nothing else in this workflow compares the two.
+      # The arm64 cell built and archived a payload but never INSTALLED it, so
+      # anything that stages cleanly, passes inspection and carries a correct
+      # manifest could still be uninstallable on real arm64 hardware -- and it
+      # would be published. This is the ONLY place in CI where the installer runs
+      # on arm64; locally the amd64 targets prove it for amd64 only.
+      #
+      # Done before the upload so an uninstallable payload fails the job rather
+      # than becoming a release asset. Uses the artifact that was just verified,
+      # not the staged tree, so the thing exercised is the thing published.
+      - name: Install the archive on this architecture (fail closed)
+        run: |
+          set -euo pipefail
+          # Passwordless sudo is available on GitHub-hosted runners; -n fails fast
+          # rather than hanging a release on an interactive prompt.
+          sudo -n true
+          # The tag comes from the version job, so the install proves the release
+          # under its real name rather than a hardcoded one.
+          RELEASE_TAG="${{ needs.version.outputs.release-tag }}"
+          echo "installing as $RELEASE_TAG"
+          ARCHIVE=$(ls dist/*.tar.gz | head -1)
+          # The archive is already checksum-verified; re-verify here so the
+          # installer is given a payload proven identical to the one published.
+          sha256sum -c "$ARCHIVE.sha256"
+          # Stage the libraries BESIDE the installer, as `$SCRIPT_DIR/lib`.
+          #
+          # Putting them in `$WORK/scripts/lib` does NOT work: the installer
+          # resolves `release-layout.sh` relative to the SCRIPT's own directory
+          # and dies with
+          #   "Could not find release-layout.sh and service-unit.sh."
+          # exit 7 -- found by running this step for real against a target.
+          WORK="$(mktemp -d)"
+          cp scripts/release-install.sh "$WORK/release-install.sh"
+          mkdir -p "$WORK/lib"
+          cp scripts/lib/release-layout.sh scripts/lib/service-unit.sh "$WORK/lib/"
+          # The installer requires uid 0 for a real install:
+          #   if [[ "$(id -u)" -ne 0 && "$FIXTURE_MODE" != "1" ]]; then
+          #     die "Run as root (sudo bash release-install.sh ...)" 4
+          # A `run:` step executes as the unprivileged `runner` user, so without
+          # sudo this step exited 4 before extracting anything -- on both legs.
+          sudo bash "$WORK/release-install.sh" \
+            --version "$RELEASE_TAG" \
+            --archive "$ARCHIVE"
+          # Prove it is actually serving, not merely installed.
+          for _ in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' \
+              http://127.0.0.1:8080/api/health || true)
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          [ "${code:-}" = "200" ] || {
+            echo "::error::the installed release does not answer /api/health (got ${code:-no response})" >&2
+            exit 1
+          }
+          echo "installed and healthy on $(uname -m)"
+
+      - name: Verify manifest provenance against the archive
+        run: |
+          version="${{ needs.version.outputs.version }}"
+          arch="${{ matrix.architecture }}"
+          archive="dist/$arch/xistance-panel-v$version-$arch.tar.gz"
+          scratch="$(mktemp -d)"
+          trap 'rm -rf "$scratch"' EXIT
+          tar -xzf "$archive" -C "$scratch"
+          npx tsx scripts/test-embedded-manifest-provenance.ts \
+            --extract-dir "$scratch" --manifest "dist/$arch/release-manifest.json" \
+            --expect-version "$version" --expect-arch "$arch"
+          # Put the manifest CI actually built BESIDE the archive it describes.
+          #
+          # This used to be `cp dist/$arch/release-manifest.json
+          # dist/$arch/release-manifest.json 2>/dev/null || true` -- a file copied
+          # onto itself, with every failure discarded. So in CI this path never
+          # existed, and `test-embedded-manifest-provenance.ts` was pointed at a
+          # manifest that had not been written: the one step that proves the
+          # published archive's embedded digest describes its own contents could
+          # not have run. Found because the local copy was dated Oct 1 while the
+          # archive it described was newer.
+          cp dist/artifact/release-manifest.json "dist/$arch/release-manifest.json"
+          npx tsx scripts/verify-artifact.ts verify \
+            --artifact "$archive" \
+            --checksum "$archive.sha256" \
+            --manifest "dist/$arch/release-manifest.json" \
+            --version "$version" --arch "$arch"
+
+      - name: Upload inspected artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: xistance-panel-${{ needs.version.outputs.version }}-${{ matrix.architecture }}
+          path: |
+            dist/${{ matrix.architecture }}/*.tar.gz
+            dist/${{ matrix.architecture }}/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish release
+    needs: [version, artifact]
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      packages: write
+      # Provenance attestation (TASK-9). A short-lived OIDC token is exchanged for
+      # a Sigstore certificate; no signing key or long-lived secret is added.
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download all architecture artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      # PRD section 9 requires a ONE-LINE install command. That command curls
+      # `release-install.sh` from the release tag, and the installer in turn
+      # SOURCES `lib/release-layout.sh` and `lib/service-unit.sh` -- it dies with
+      # exit 7 if either is missing, and it fetches both from the tag when they
+      # are not staged beside it.
+      #
+      # So the tarballs alone are NOT a working release: without these assets the
+      # documented install either 404s, or dies at exit 7 having fetched an
+      # installer it cannot source. Publish them, and FAIL CLOSED here rather
+      # than shipping a release nobody can install.
+      - name: Stage the one-line installer assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist/lib
+          for f in scripts/release-install.sh scripts/lib/release-layout.sh scripts/lib/service-unit.sh; do
+            if [ ! -f "$f" ]; then
+              echo "::error::missing installer asset $f -- required by the one-line install command; it MUST be committed and tagged" >&2
+              exit 1
+            fi
+          done
+          cp -f scripts/release-install.sh dist/release-install.sh
+          cp -f scripts/lib/release-layout.sh scripts/lib/service-unit.sh dist/lib/
+          chmod +x dist/release-install.sh
+          ( cd dist && sha256sum release-install.sh lib/release-layout.sh lib/service-unit.sh > INSTALLER_ASSETS.sha256 )
+
+      - name: Verify the staged installer assets match the commit
+        run: |
+          set -euo pipefail
+          ( cd dist && sha256sum -c INSTALLER_ASSETS.sha256 )
+          # The library the installer will source MUST be the one this release
+          # was verified against -- not a stale copy from a previous run.
+          for f in lib/release-layout.sh lib/service-unit.sh; do
+            diff -q "dist/$f" "scripts/$f" || {
+              echo "::error::dist/$f differs from the committed scripts/$f" >&2
+              exit 1
+            }
+          done
+
+      - name: Re-verify downloaded checksums before publishing
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          checksums=(dist/*.tar.gz.sha256)
+          if [ ${#checksums[@]} -eq 0 ]; then
+            echo "No checksum files were downloaded; refusing to publish." >&2
+            exit 1
+          fi
+          for checksum in "${checksums[@]}"; do
+            archive="$(dirname "$checksum")/$(awk '{print $2}' "$checksum")"
+            npx tsx scripts/release-manifest.ts verify "$archive" "$checksum"
+          done
 
       - name: Generate release notes
-        if: ${{ !inputs.dry-run }}
-        id: notes
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
           {
-            echo "## Xistance Panel v${{ steps.version.outputs.version }}"
+            echo "## Xistance Panel v${VERSION}"
             echo
             PRETAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
             if [ -n "$PRETAG" ]; then
@@ -111,40 +400,82 @@ jobs:
           } > RELEASE_NOTES.txt
           cat RELEASE_NOTES.txt
 
-      - name: Create GitHub Release
-        if: ${{ !inputs.dry-run }}
-        uses: softprops/action-gh-release@v2
+      - name: Attest build provenance
+        # subject-checksums attests every artifact named in the sidecar files we
+        # already publish, so provenance is bound to the same digests the
+        # installer verifies. A failure here blocks release creation on purpose.
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: Xistance Panel v${{ steps.version.outputs.version }}
+          subject-checksums: dist/*.tar.gz.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: ${{ needs.version.outputs.release-tag }}
+          name: Xistance Panel ${{ needs.version.outputs.release-tag }}
           body_path: RELEASE_NOTES.txt
           generate_release_notes: true
           files: |
             dist/*.tar.gz
+            dist/*.tar.gz.sha256
+            dist/release-install.sh
+            dist/lib/release-layout.sh
+            dist/lib/service-unit.sh
+            dist/release-install.sh.sha256
+            dist/lib/release-layout.sh.sha256
+            dist/lib/service-unit.sh.sha256
+
+  docker:
+    name: Build and push image
+    needs: [version, artifact]
+    if: ${{ !inputs.dry-run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Login to GHCR
-        if: ${{ !inputs.dry-run }}
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Docker metadata
-        if: ${{ !inputs.dry-run }}
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}},value=v${{ steps.version.outputs.version }}
+            type=semver,pattern={{version}},value=${{ needs.version.outputs.release-tag }}
             type=raw,value=latest
 
       - name: Build + push Docker image
-        if: ${{ !inputs.dry-run }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           push: true
+          # BOTH architectures, because the release publishes both. Without this,
+          # build-push-action builds for the RUNNER's architecture only
+          # (ubuntu-latest = x64), and the image is then tagged with the release
+          # semver and with `latest` -- so `ghcr.io/...:1.2.0` and `:latest` are
+          # amd64-only images advertised for a release that ships an arm64
+          # archive too. An arm64 host pulling the tag gets no matching image,
+          # and the job goes green while publishing something narrower than the
+          # release (TASK-103).
+          #
+          # This is the same class of defect the artifact job already guards
+          # against: there, `runner_arch` was declared in the matrix and never
+          # referenced, so the arm64 cell silently ran on x64. An image cannot be
+          # made multi-arch from a single-arch runner by inference, so the
+          # architectures have to be stated.
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
