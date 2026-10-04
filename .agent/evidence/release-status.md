@@ -562,3 +562,43 @@ amd64 was genuinely stale and was rebuilt from the current build
 (`TURBO_DISABLE=true npm run build`, BUILD_ID `ZbV-4xyDlgNi_SiVFehXz`); its
 `.sha256` verifies and `release-manifest.json` was regenerated to match
 (commit `31fd99b`).
+
+## The stale-target trap: a harness defect, now closed
+
+Rebuilding `dist/amd64` invalidates the Docker targets, and it had already
+produced three separate misleading runs (`agg95`, `agg97`, `agg101`) — each
+reporting `installed <digest> vs shipped <digest>` in three suites
+(`test-target-runs-shipped-payload`, `test-rollback-drill`,
+`test-backup-restore`) with no indication of the actual cause. I fixed it each
+time by recreating the containers, which treated the symptom.
+
+The cause was in `scripts/create-target-os.sh`. `create_target()` reuses any
+container that responds, and `verify_target()` checked only the OS *shape*:
+Ubuntu version, systemd as PID 1, curl present, `/etc/systemd/system` writable,
+cgroups available. A container built from an older archive satisfied all of
+those and was reused silently.
+
+`verify_target()` now compares the digest the container actually serves
+(`/opt/xistance/current/release-manifest.json` → `artifact.sha256`) against the
+one we ship, and returns non-zero on mismatch so `create_target()` falls through
+to a rebuild. Two things that were wrong on the first attempt and are worth
+recording:
+
+- It must compare `artifact.sha256`, **not** the `.sha256` sidecar. Those are
+  different values — the sidecar digests the `.tar.gz` file, the manifest field
+  digests the payload tree. The first attempt compared the sidecar and so could
+  never have matched even a perfectly current target.
+- The post-create call passes `preinstall`. On the fresh path the release is
+  installed only *afterwards*, so demanding a digest there recursed into
+  rebuilding a container that had nothing installed yet.
+
+Proven non-vacuous in both directions:
+
+| condition | observed |
+| --- | --- |
+| digests match | `xtinst/xt24: serves the archive we ship (0b1d000e7764)` — reused, no rebuild |
+| shipped digest altered to `ffff…` | `serves archive 0b1d000e7764 but we ship ffffffffffff -- recreating` — both rebuilt |
+
+Against the recreated targets: `test-target-runs-shipped-payload` **5/5**,
+`test-rollback-drill` **22/22**, `create-target-os.sh` `RESULT: PASS`,
+low-RAM gate `RESULT: PASS`.
