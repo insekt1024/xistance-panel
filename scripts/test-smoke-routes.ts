@@ -128,7 +128,22 @@ async function main(): Promise<void> {
   const pw = findPlaywright();
   const exe = findChromium();
   if (!pw || !exe) {
-    console.log("SKIP: playwright/chromium unavailable");
+    // Say WHICH half is missing, and what was actually on disk. A bare
+    // "playwright/chromium unavailable" cost several CI cycles guessing,
+    // because it cannot distinguish "library missing" from "browser missing".
+    const cache = playwrightCacheDir();
+    let listing: string;
+    try {
+      listing = fs.readdirSync(cache).join(", ") || "(empty)";
+    } catch {
+      listing = `(no such directory: ${cache})`;
+    }
+    console.log(`SKIP: playwright/chromium unavailable`);
+    console.log(`  playwright-core : ${pw ? "resolved" : "NOT RESOLVED"}`);
+    console.log(`  chromium        : ${exe ?? "NOT FOUND"}`);
+    console.log(`  cache dir       : ${cache} ${fs.existsSync(cache) ? "" : "(missing)"}`);
+    console.log(`  cache contents  : ${listing}`);
+    console.log(`  platform        : ${process.platform} ${process.arch}`);
     process.exit(EXIT_SKIP);
   }
 
