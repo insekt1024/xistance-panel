@@ -43,7 +43,20 @@ trap 'drop_root' EXIT
 run_install() {
   INSTALL_OUT="$(bash "$INSTALL_SH" "$@" 2>&1)"
   INSTALL_STATUS=$?
+  # Remember the argv too: a failure report is unreadable without knowing which
+  # invocation produced the output.
+  INSTALL_ARGS="$*"
   return 0
+}
+
+# Print the installer output for a case that failed. The assertion names alone
+# ("a mismatched checksum is refused") say nothing about WHY, and the reason is
+# only in the captured output -- which used to be discarded, making these
+# failures undiagnosable from CI.
+explain_failure() {
+  [[ -n "${INSTALL_OUT:-}" ]] || return 0
+  printf '       why: %s\n' "$INSTALL_ARGS"
+  printf '%s\n' "$INSTALL_OUT" | tail -12 | sed 's/^/       | /'
 }
 run_update() {
   UPDATE_OUT="$(bash "$UPDATE_SH" "$@" 2>&1)"
@@ -195,11 +208,13 @@ if [[ "$INSTALL_STATUS" -ne 0 ]]; then
   ok "an artifact with no checksum is refused"
 else
   bad "an artifact with no checksum is refused"
+  explain_failure
 fi
 if [[ ! -e "$XT_CURRENT_POINTER" ]]; then
   ok "an unverified artifact activates nothing"
 else
   bad "an unverified artifact activates nothing"
+  explain_failure
 fi
 drop_root
 
@@ -219,6 +234,7 @@ if [[ "$INSTALL_STATUS" -ne 0 ]]; then
   ok "a mismatched checksum is refused"
 else
   bad "a mismatched checksum is refused"
+  explain_failure
 fi
 if printf '%s' "$INSTALL_OUT" | grep -qi "checksum\|digest\|mismatch"; then
   ok "the checksum failure is explained"
@@ -240,6 +256,7 @@ if [[ "$INSTALL_STATUS" -ne 0 ]]; then
   ok "a malformed archive is refused"
 else
   bad "a malformed archive is refused"
+  explain_failure
 fi
 drop_root
 
