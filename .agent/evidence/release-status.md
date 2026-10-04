@@ -355,7 +355,61 @@ The PRD §9 install path is verified working **end to end**, not in pieces:
 | systemd unit + `xt-rollback` installed; health 200, `/api/nodes` 401 | pass |
 | `previous` recorded a **distinct** release (TASK-108 fix surviving install) | pass |
 | update/rollback drill on both target OSes | 22/22, and 3/3 under CPU load |
-| aggregate | 72/72, `RESULT: PASS` |
+| aggregate | 77/77, `RESULT: PASS`, 0 skips |
 
 The remaining blockers are **commit-decision and infrastructure** items, not
 untested product behaviour.
+
+## Browser gate: the CI-only defect chain
+
+Four independent defects, each hidden behind the last. Every one is now fixed and
+each has a test or a diagnostic that fails without its fix.
+
+1. **`playwright-core` was not a dependency.** No manifest listed it. Local runs
+   resolved it out of an incidental `~/.npm/_npx` cache, so nothing failed until
+   CI. Now pinned as an exact root devDependency.
+2. **`os.tmpdir()` fallbacks.** Nine suites read `process.env.TMPDIR ||
+   TEMP || TMP` and called `path.join(undefined, ...)`. GitHub-hosted Linux
+   runners do not guarantee any of the three. One suite hardcoded
+   `C:\Windows\Temp` and handed it to Linux `mkdtemp`.
+3. **Browser lookup guessed one path per platform.** Seven copies of `findChromium`
+   had drifted apart.
+4. **Playwright 1.63 moved the Linux binary.** `npx playwright install
+   --dry-run` reports *Chrome for Testing 153.0.8010.12 (playwright chromium
+   v1243)*: the binary is `chrome-linux64/chrome`, and the shell is
+   `chrome-linux64/headless_shell`. The resolver probed only the pre-1.63
+   `chrome-linux/*`, so on a clean Linux runner every probe missed, the resolver
+   returned null, and the suite reported `SKIP: playwright/chromium unavailable`
+   (exit 77) while Chromium sat installed and usable in the cache. It never
+   appeared locally because the Windows list happened to hold a working entry
+   (`chrome-win64/chrome.exe`).
+
+`scripts/lib/chromium-path.ts` now walks the cache instead of guessing: it
+honours `PLAYWRIGHT_BROWSERS_PATH`, tries every known layout per directory
+(newest naming first, so a stale name is skipped rather than fatal), and returns
+the first executable that actually exists. All seven call sites delegate to it.
+
+**Why the regression test missed it.** Every case in `test-chromium-path` built
+`chrome-linux/*`, so the suite passed against the same wrong assumption it was
+meant to guard. It now builds `chrome-linux64` in three cases, including the
+exact runner shape (both `chromium-<rev>` and `chromium_headless_shell-<rev>`
+present). Two defects in the test itself surfaced there: the FAIL line printed
+`c.want` rather than `c.wantDir`, so it always reported `want=undefined`; and the
+both-present case asserted the full browser when the resolver documents
+preferring the headless shell at equal revision.
+
+**The diagnostic that ended the guessing.** The bare SKIP message could not
+distinguish a missing library from a missing browser. The SKIP path now prints
+resolution status, the cache directory and whether it exists, its listing, and
+the platform — which is what identified the `chrome-linux64` move in one run.
+
+| browser suite | local | CI |
+| --- | --- | --- |
+| smoke-routes | 80 passed, rc=0 | run before the `chrome-linux64` fix: exit 77 SKIP |
+| state-a11y | 50 passed | green in CI |
+| a11y-browser | 13 passed | 13/13 |
+| artifact-assets | green | 23/23 |
+
+Locally, with `TMPDIR`/`TEMP`/`TMP` unset: smoke-routes 80, smoke-auth 35,
+state-a11y 50, rtl-browser 33, dialog-keyboard 34, a11y-browser 13, smoke-fa 105,
+dashboard-legibility 648. Typecheck 0 errors. Lint 0 errors / 28 warnings.
