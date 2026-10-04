@@ -502,3 +502,63 @@ naming that file; restoring returns rc=0. **22/22 clean.**
 
 This class of bug is invisible to CI by construction, because CI's build host is
 the release target.
+
+## XUI: resolved against the PRD, not treated as an open question
+
+Earlier status reports framed XUI as a product decision for the owner: does its
+lack of real-binary evidence block the release? That was the wrong question, and
+the PRD answers it. `PRD.md:112` is the only line that specifies what XUI must
+demonstrate:
+
+> `XUI`: verify controlled private-network exception, credential-free sync
+> payload, API failure behavior, and bounded retries.
+
+Nothing there is a tunnel binary. XUI supervises a **third-party 3x-ui panel**
+over its HTTP API; it runs no Xistance engine on our nodes, so real-binary
+evidence is not merely waived, it is inapplicable to what the PRD asks for.
+
+`scripts/test-xui.ts` asserts all four, against the real implementations
+(`buildXuiSyncPayload`, `normalizePanelUrl`, `syncXui`, `classifyXuiSync`) rather
+than stubs. **61 passed, 0 failed.**
+
+| PRD requirement | Assertion |
+| --- | --- |
+| controlled private-network exception | `172.16/12` exact at all four edges; loopback, link-local, `169.254.169.254`, `metadata.google.internal`, `*.internal`, `*.local` all refused; unresolvable host fails closed |
+| credential-free sync payload | panel URL refuses `file:`, `gopher:`, `javascript:`, `data:`, and any URL carrying `user:pass@` |
+| API failure behavior | all 7 sync outcomes map to an honest status; a failing sync returns failure, never a false success |
+| bounded retries | max 3 attempts; backoff capped at 5000ms and starting positive; cancellation stops retries in 13ms / 2 attempts |
+
+So the real-binary ledger's 8/9 partition is not a gap in XUI's PRD coverage. It
+records *which methods run an Xistance engine*, which is a different question
+from *which methods meet their PRD requirements*, and all nine meet theirs.
+
+## arm64 provenance: the local copy was stale, CI's is authoritative
+
+The BUILD_ID freshness check in `test-release-version-commit-parity` flagged the
+local arm64 archive as built from a different build than the on-disk one. That
+finding is correct and was not suppressible:
+
+- `scripts/stage-arm64-artifact.ts:19` stages from `dist/arm64-stage`, a tree
+  copied out of a real `linux/arm64` image — deliberately *not* from
+  `apps/web/.next/standalone`, which is a Windows build (`:4-8`). Re-running the
+  stager therefore cannot change its BUILD_ID; the input tree itself is stale.
+- That tree's mtime was **2026-10-01**, three days behind, carrying
+  `e8DG6UyhN3KW_U_Qhkplq`.
+- This host is x64 with no arm64 builder and no binfmt-QEMU — `ci.yml:226` states
+  this explicitly, and is the stated reason the native `ubuntu-24.04-arm` job
+  exists.
+
+So the arm64 artifact of record was taken from the green run's uploaded
+`arm64-payload-8fb9a48f…` rather than rebuilt here. It verifies against its own
+checksum, carries `architecture: arm64`, `runtime.node: 22`, includes
+`libquery_engine-linux-arm64`, and records `commit: 8fb9a48` — exactly HEAD.
+
+Its BUILD_ID (`96h-lvyXcZcObDu52t0uB`) differs from this machine's
+(`ZbV-4xyDlgNi_SiVFehXz`) **by design**: arm64 is compiled on the native arm64
+runner, so a matching ID was never possible. Only the amd64 archive is expected
+to match the local build.
+
+amd64 was genuinely stale and was rebuilt from the current build
+(`TURBO_DISABLE=true npm run build`, BUILD_ID `ZbV-4xyDlgNi_SiVFehXz`); its
+`.sha256` verifies and `release-manifest.json` was regenerated to match
+(commit `31fd99b`).

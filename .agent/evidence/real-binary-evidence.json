@@ -150,7 +150,7 @@
   "methodsWithoutRealBinaryEvidence": [
     {
       "method": "XUI",
-      "reason": "Metadata-only by design: X-UI records the status of a third-party 3x-ui panel and runs no tunnel binary on our nodes, so there is no binary to execute. Status is established by a real panel verification instead. This gap is by design, not an environment shortfall, and no credential would close it."
+      "reason": "Metadata-only by design: X-UI records the status of a third-party 3x-ui panel and runs no tunnel binary on our nodes, so there is no binary to execute. Status is established by a real panel verification instead. Not a coverage gap: PRD.md:112 specifies XUI's requirements as private-network exception, credential-free sync payload, API failure behavior and bounded retries -- none of which is a tunnel binary. Those four are asserted in scripts/test-xui.ts (61 passed, 0 failed). This field records which methods run an Xistance engine, which is a different question from which methods meet their PRD requirements."
     }
   ],
   "note": "Real-binary coverage is 8/9. Only XUI is listed without real-binary evidence, and it is metadata-only by design rather than blocked by the environment. Validated by scripts/test-real-binary-evidence.ts, which requires the two lists to be an exact partition of the nine methods and requires an explicit reason for every unproved entry."
