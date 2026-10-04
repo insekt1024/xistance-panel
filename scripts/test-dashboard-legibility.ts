@@ -34,6 +34,7 @@
  * scan finds nothing to measure, the suite says so and fails.
  */
 
+import { findChromiumExecutable } from "./lib/chromium-path";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import { readFileSync } from "node:fs";
@@ -238,30 +239,11 @@ function resolvePlaywright(): unknown | null {
  * download -- and if none is present, say UNVERIFIED rather than quietly pass.
  */
 function findChromium(): string | null {
-  // Playwright puts browsers in a different place per platform. On Linux that
-  // is ~/.cache/ms-playwright, which the old Windows-only path never found --
-  // so even with playwright-core resolved, no browser binary existed to launch.
-  const home = os.homedir();
-  const cache = [
-    path.join(home, ".cache/ms-playwright"),
-    path.join(home, "AppData/Local/ms-playwright"),
-    path.join(home, "Library/Caches/ms-playwright"),
-  ].find((c) => fs.existsSync(c));
-  if (!cache) return null;
-  const dirs = fs.readdirSync(cache).filter((d) => d.startsWith("chromium")).sort().reverse();
-  const rel =
-    process.platform === "win32"
-      ? ["chrome-win64/chrome.exe"]
-      : process.platform === "darwin"
-        ? ["chrome-mac/Chromium.app/Contents/MacOS/Chromium"]
-        : ["chrome-linux/chrome"];
-  for (const d of dirs) {
-    for (const r of rel) {
-      const p = path.join(cache, d, r);
-      if (fs.existsSync(p)) return p;
-    }
-  }
-  return null;
+  // One shared resolver, so seven copies cannot drift again. It SEARCHES the
+  // cache instead of guessing a per-platform path, which is what missed a modern
+  // Linux Playwright install (chromium-<rev>/ AND chromium_headless_shell-<rev>/).
+  // See scripts/lib/chromium-path.ts and scripts/test-chromium-path.ts.
+  return findChromiumExecutable();
 }
 
 /**

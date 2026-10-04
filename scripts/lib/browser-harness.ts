@@ -8,6 +8,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { pickPort } from "./pick-port";
+import { findChromiumExecutable } from "./chromium-path";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -67,35 +68,11 @@ export function findPlaywright(): PW | null {
 }
 
 export function findChromium(): string | null {
-  // The cache lives somewhere different on every platform. Hardcoding the
-  // Windows path meant this returned null on a Linux runner -- so `startApp`
-  // silently fell back to a mode without a browser, and the suites that boot an
-  // app and log in over HTTP failed against a half-started server.
-  //
-  // Playwright's own locations, in order of likelihood:
-  //   win32  %LOCALAPPDATA%\ms-playwright
-  //   darwin ~/Library/Caches/ms-playwright
-  //   linux  ~/.cache/ms-playwright   (and XDG_CACHE_HOME when set)
-  const cache =
-    process.platform === "win32"
-      ? path.join(os.homedir(), "AppData", "Local", "ms-playwright")
-      : process.platform === "darwin"
-        ? path.join(os.homedir(), "Library", "Caches", "ms-playwright")
-        : path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "ms-playwright");
-  if (!fs.existsSync(cache)) return null;
-  const dirs = fs.readdirSync(cache).filter((d) => d.startsWith("chromium")).sort().reverse();
-  const rel = process.platform === "win32"
-    ? ["chrome-win64/chrome.exe"]
-    : process.platform === "darwin"
-      ? ["chrome-mac/Chromium.app/Contents/MacOS/Chromium"]
-      : ["chrome-linux/chrome"];
-  for (const d of dirs) {
-    for (const r of rel) {
-      const p = path.join(cache, d, r);
-      if (fs.existsSync(p)) return p;
-    }
-  }
-  return null;
+  // Delegated to one shared resolver. Seven copies of this platform-path guess
+  // had drifted apart, and all of them missed a modern Linux Playwright install
+  // (which writes chromium-<rev>/ AND chromium_headless_shell-<rev>/). See
+  // scripts/lib/chromium-path.ts for the full failure.
+  return findChromiumExecutable();
 }
 
 /* -------------------------------------------------------------------- util */

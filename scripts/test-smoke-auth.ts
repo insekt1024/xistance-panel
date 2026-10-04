@@ -26,6 +26,7 @@
  * Exit 77 = could not run here (distinct from pass and fail).
  */
 
+import { findChromiumExecutable } from "./lib/chromium-path";
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
@@ -93,29 +94,11 @@ function findPlaywright(): PW | null {
 }
 
 function findChromium(): string | null {
-  // Playwright's browser cache is per-platform. The Windows-only path never
-  // matches on a Linux runner, so the suite reported "no browser" and fell back
-  // to source guards alone while still exiting green.
-  const home = os.homedir();
-  const cache = [
-    path.join(home, ".cache/ms-playwright"),
-    path.join(home, "AppData/Local/ms-playwright"),
-    path.join(home, "Library/Caches/ms-playwright"),
-  ].find((c) => fs.existsSync(c));
-  if (!cache) return null;
-  const dirs = fs.readdirSync(cache).filter((d) => d.startsWith("chromium")).sort().reverse();
-  const rel = process.platform === "win32"
-    ? ["chrome-win64/chrome.exe"]
-    : process.platform === "darwin"
-      ? ["chrome-mac/Chromium.app/Contents/MacOS/Chromium"]
-      : ["chrome-linux/chrome"];
-  for (const d of dirs) {
-    for (const r of rel) {
-      const p = path.join(cache, d, r);
-      if (fs.existsSync(p)) return p;
-    }
-  }
-  return null;
+  // One shared resolver, so seven copies cannot drift again. It SEARCHES the
+  // cache instead of guessing a per-platform path, which is what missed a modern
+  // Linux Playwright install (chromium-<rev>/ AND chromium_headless_shell-<rev>/).
+  // See scripts/lib/chromium-path.ts and scripts/test-chromium-path.ts.
+  return findChromiumExecutable();
 }
 
 /* -------------------------------------------------------------------- util */
