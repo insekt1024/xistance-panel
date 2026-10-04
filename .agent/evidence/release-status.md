@@ -122,6 +122,64 @@ No `v1.2.0` tag, no commit, no push. The worktree is intentionally dirty
    serving, `test-rollback-drill` 22/22, `test-target-runs-shipped-payload` 5/5,
    and the low-RAM gate `RESULT: PASS` at 75 MiB peak under a 256 MiB cap.
 
+
+7. **The Browser gate ran for the first time, and three defects were hiding in it.**
+   Unblocking the audit gate let this gate execute for the first time ever. It
+   failed at once, and every failure was real:
+
+   - `playwright-core` was in **no `package.json`**. The browser suites hunted the
+     npx cache for it because `npx playwright install` fetches it transiently, so
+     Chromium downloaded while the library the suites import never existed. The
+     hunt succeeded on a developer machine and failed on a clean runner, so the
+     gate reported *"playwright-core is not installed — keyboard/focus is
+     UNVERIFIED"* — **a browser gate that never ran while still reporting success**.
+     Now pinned as an exact root devDependency (1.63.0) and resolved normally,
+     with the cache hunt kept only as a fallback.
+   - `staged-app.ts` shipped the literal `C:\Windows\Temp` to a Linux runner:
+     `ENOENT mkdtemp 'C:\Windows\Temp/xistance-artifact-assets-XXXXXX'`.
+   - `test-smoke-routes.ts` did `path.join(undefined, ...)`: `ERR_INVALID_ARG_TYPE`.
+
+   Eight suites in total derived a temp dir from `TMPDIR`/`TEMP`/`TMP` with no
+   `os.tmpdir()` fallback, and GitHub runners set **none** of those three. All
+   eight are fixed and verified with all three unset — `test-smoke-routes` 80,
+   `test-smoke-auth` 35, `test-state-a11y` 50, `test-dialog-keyboard` 34,
+   `test-rtl-browser` 33, `test-smoke-fa` 105 passing.
+
+   Worth noting how these were found: `test-protected-routes.ts` had already fixed
+   this exact bug and left a comment naming it. The fix was simply never applied
+   to its siblings, so the knowledge existed in the tree and was not shared.
+
+
+
+   **The first fix was incomplete, and CI said so.** Run `37198687425` came back
+   with `artifact-assets` 23/23 and `a11y-browser` 13/13 passing — those fixes
+   worked — but `smoke-routes` still skipped with *"SKIP: playwright/chromium
+   unavailable"*. Cause: the same npx-cache-first resolution also existed in
+   `scripts/lib/browser-harness.ts`, which is **the shared helper every gate suite
+   imports**. My sweep had searched the suite files and never looked in `lib/`.
+   A partial sweep that misses the shared helper is worse than none, because it
+   reads as coverage.
+
+   Re-verified under the exact CI condition — `TMPDIR`/`TEMP`/`TMP` unset **and**
+   the npx cache renamed away so no fallback could rescue it:
+
+   | suite | assertions |
+   |---|---|
+   | test-smoke-routes | 80 |
+   | test-smoke-auth | 35 |
+   | test-state-a11y | 50 |
+   | test-rtl-browser | 33 |
+   | test-dialog-keyboard | 34 |
+   | test-a11y-browser | 13 |
+   | test-smoke-fa | 105 |
+   | test-dashboard-legibility | 648 |
+
+   998 assertions, every suite `rc=0`, with no cache to fall back on.
+   The gate itself earned its keep here. It distinguishes a real FAIL from
+   *"exit 1 with no result summary"*, and treats exit 0 with no summary as a
+   failure rather than a pass. Those refusals are why a crash at 0.2s was
+   reported as a crash instead of a green browser gate.
+
    **Current: local aggregate 75/75, `RESULT: PASS`, 0 failures** (the count is
    75 rather than 76 because the low-RAM cgroup gate moved out of the portable
    aggregate into `create-target-os.sh`, where it runs inside a target — it is
