@@ -20,6 +20,7 @@ import fs from "node:fs";
 import assert from "node:assert";
 import os from "node:os";
 import path from "node:path";
+import { playwrightCacheDir } from "./lib/chromium-path";
 
 import type { Browser, Context, Page } from "playwright-core";
 
