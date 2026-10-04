@@ -23,7 +23,7 @@
     "test:all": "tsx scripts/run-browser-gate.ts --all"
   },
   "devDependencies": {
-    "@types/node": "^20",
+    "@types/node": "^26",
     "eslint": "^9",
     "playwright-core": "1.63.0",
     "smol-toml": "1.9.0",
