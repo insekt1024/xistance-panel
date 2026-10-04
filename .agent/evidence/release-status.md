@@ -122,6 +122,17 @@ No `v1.2.0` tag, no commit, no push. The worktree is intentionally dirty
    serving, `test-rollback-drill` 22/22, `test-target-runs-shipped-payload` 5/5,
    and the low-RAM gate `RESULT: PASS` at 75 MiB peak under a 256 MiB cap.
 
+   **Current: local aggregate 75/75, `RESULT: PASS`, 0 failures** (the count is
+   75 rather than 76 because the low-RAM cgroup gate moved out of the portable
+   aggregate into `create-target-os.sh`, where it runs inside a target — it is
+   still executed, and still fails the build when it fails).
+
+   The aggregate log is also greppable again. WSL intermittently returns UTF-16
+   and `encoding: "utf8"` decoded it as UTF-8, NUL-interleaving every character;
+   a NUL-bearing log is a **binary file** to grep/tail/diff, so the output meant
+   to explain a failure could not be read. Output is now decoded by detecting
+   BOM-led UTF-16LE/BE, BOM-less UTF-16LE and UTF-8.
+
 ## Two id namespaces: PRD tasks and agent-loop findings
 
 `reconcile-task-ledger.py --check` reports `task files: 73 / evidence-backed: 73`
