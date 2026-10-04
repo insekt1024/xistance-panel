@@ -202,7 +202,7 @@ mkdir -p "$XT_DOWNLOAD_DIR/fake/apps/web"
 printf 'not a real artifact\n' > "$XT_DOWNLOAD_DIR/fake/apps/web/server.js"
 tar -czf "$archive" -C "$XT_DOWNLOAD_DIR/fake" .
 rm -rf "$XT_DOWNLOAD_DIR/fake"
-run_install --version v1.2.0 --arch amd64 \
+run_install --version v1.2.0 --arch amd64 --archive "$archive" \
   --install-dir "$XT_INSTALL_ROOT" --data-dir "$XT_DATA_DIR" --etc-dir "$XT_ETC_DIR"
 if [[ "$INSTALL_STATUS" -ne 0 ]]; then
   ok "an artifact with no checksum is refused"
@@ -228,7 +228,7 @@ printf 'not a real artifact\n' > "$XT_DOWNLOAD_DIR/fake/apps/web/server.js"
 tar -czf "$archive" -C "$XT_DOWNLOAD_DIR/fake" .
 rm -rf "$XT_DOWNLOAD_DIR/fake"
 printf '%s  %s\n' "0000000000000000000000000000000000000000000000000000000000000000" "$(basename "$archive")" > "${archive}.sha256"
-run_install --version v1.2.0 --arch amd64 \
+run_install --version v1.2.0 --arch amd64 --archive "$archive" \
   --install-dir "$XT_INSTALL_ROOT" --data-dir "$XT_DATA_DIR" --etc-dir "$XT_ETC_DIR"
 if [[ "$INSTALL_STATUS" -ne 0 ]]; then
   ok "a mismatched checksum is refused"
@@ -250,7 +250,7 @@ new_root
 archive="$XT_DOWNLOAD_DIR/xistance-panel-v1.2.0-amd64.tar.gz"
 printf 'this is not a tar archive at all' > "$archive"
 sha256sum "$archive" | cut -d' ' -f1 > "${archive}.sha256"
-run_install --version v1.2.0 --arch amd64 \
+run_install --version v1.2.0 --arch amd64 --archive "$archive" \
   --install-dir "$XT_INSTALL_ROOT" --data-dir "$XT_DATA_DIR" --etc-dir "$XT_ETC_DIR"
 if [[ "$INSTALL_STATUS" -ne 0 ]]; then
   ok "a malformed archive is refused"
@@ -283,7 +283,7 @@ rm -rf "$XT_DOWNLOAD_DIR/fake"
 sha256sum "$archive" | cut -d' ' -f1 > "${archive}.sha256"
 
 export XT_TEST_HEALTH_CMD="false"
-run_install --version v1.2.0 --arch amd64 \
+run_install --version v1.2.0 --arch amd64 --archive "$archive" \
   --install-dir "$XT_INSTALL_ROOT" --data-dir "$XT_DATA_DIR" --etc-dir "$XT_ETC_DIR" \
   --repo "example/anything"
 # The artifact is a stub, so it will fail verification before readiness; either
