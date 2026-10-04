@@ -269,7 +269,10 @@ MANIFEST_TOOL_URL="${GH_BASE}/${REPO_SLUG}/raw/${VERSION}/scripts/release-manife
 # the libraries beside it.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-WORK_DIR="$(mktemp -d /tmp/xistance-release.XXXXXX)"
+# Honour TMPDIR so a runner (or user) with a relocated temp directory does not
+# silently write to /tmp, and so a read-only or full /tmp fails here rather than
+# mid-install. ${TMPDIR:-/tmp} is the same fallback the rest of the scripts use.
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/xistance-release.XXXXXX")"
 cleanup() {
   if [[ "$KEEP_DOWNLOAD" -eq 0 ]]; then
     rm -rf -- "$WORK_DIR"
