@@ -85,7 +85,7 @@ function decodeMaybeUtf16(buf: Buffer | string | null | undefined): string {
     if (buf[0] === 0xff && buf[1] === 0xfe) return buf.subarray(2).toString("utf16le");
     if (buf[0] === 0xfe && buf[1] === 0xff) return buf.subarray(2).swap16().toString("utf16le");
     // BOM-less UTF-16LE: ASCII text carries a NUL in every odd byte.
-    let probe = Math.min(buf.length, 256);
+    const probe = Math.min(buf.length, 256);
     let nulOdd = 0;
     for (let i = 1; i < probe; i += 2) if (buf[i] === 0) nulOdd++;
     if (nulOdd > probe / 4) return buf.toString("utf16le");

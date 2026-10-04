@@ -102,11 +102,6 @@ async function main(): Promise<void> {
   console.log("✅ Release assets: public/static layout and JS/CSS/media HTTP smoke passed");
 }
 
-function requireTempDir(): string {
-  const tempDir = process.env.TEMP ?? process.env.TMP;
-  if (!tempDir) throw new Error("A temporary directory is required for the release fixture");
-  return tempDir;
-}
 
 main().catch((error: unknown) => {
   console.error(error instanceof Error ? error.stack : error);
