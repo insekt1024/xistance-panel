@@ -640,3 +640,74 @@ downloaded from the release and re-checked against their **published** sidecars.
 XUI's release-note wording states the position plainly: it supervises a
 third-party 3x-ui panel, runs no Xistance engine, and its PRD requirements are
 covered by `scripts/test-xui.ts` (61 passed / 0 failed).
+
+## The CLI suite was asserting against an artifact it never passed
+
+Post-release CI (`37227188560` on `41d41b3`, then reproduced on `37234324837`
+and `37235467010`) failed exactly four `scripts/test-cli-regression.sh`
+assertions, all of them verification refusals:
+
+- an artifact with no checksum is refused
+- an unverified artifact activates nothing
+- a mismatched checksum is refused
+- a malformed archive is refused
+
+### Cause
+
+Each of those cases built a deliberately bad archive in `$XT_DOWNLOAD_DIR` and
+then invoked `scripts/release-install.sh` **without `--archive`**. The installer
+has no download-directory concept. It resolves `${XT_MIRROR:-github.com}/…/releases/download/${VERSION}`
+and downloads into its own `$WORK_DIR`, so `$XT_DOWNLOAD_DIR` is the *test's*
+scratch directory, not an installer input.
+
+The four cases therefore downloaded the **real published v1.2.0 artifact**,
+verified its checksum successfully, created a super admin, wrote
+`etc/xistance/xistance.env`, and exited 0 — while the assertions demanded a
+non-zero exit and a refusal. The installer output captured in `INSTALL_OUT`
+proved it: the failing case's log showed `created super admin: admin@xistance.local`
+and `→ Creating …/etc/xistance/xistance.env`, i.e. a *successful* install.
+
+So the assertions were correct and the harness was wrong: the suite asserted
+against a fixture it never passed to the code under test.
+
+### Why local runs hid it
+
+`release-install.sh` does not honour `$XT_DOWNLOAD_DIR`, so locally the same
+download happened — but the run still reported `46 passed`. An earlier attempt to
+"fix" this by adding `--archive` was reverted as unproven, because the
+Linux reproduction also passed. It was only correct to re-test once the captured
+installer output showed the success path.
+
+### Fix (`d0c0ef9`)
+
+The four fixture cases now pass `--archive "$archive"`, the installer's own
+documented air-gapped path, which keeps every integrity check: a missing
+sidecar is fatal, the digest must match, and `MANIFEST_FROM_ARCHIVE=1` makes the
+manifest come from the archive under test instead of a download. The three cases
+that legitimately exercise the real download path are untouched.
+
+### Non-vacuity, both directions on one archive
+
+| fixture | installer result |
+| --- | --- |
+| good archive + correct basename sidecar | `rc=7`, `Checksum verified (sha256sum)`, proceeds to extract |
+| same archive, sidecar deleted | `rc=6`, `No checksum sidecar for … must never be installed` |
+
+`rc=7` in the accepted case is only because the minimal stub archive lacks
+`apps/web/server.js`; the refusal path (`rc=6`) is what the assertions demand.
+The suite is `46 passed, 0 failed`, and in CI it dropped from 15.8s to
+6.9s — four large downloads per run are gone.
+
+Note for future edits: writing this file through a Python helper on Windows
+re-emits CRLF into `.sh` files, and `scripts/test-line-endings.sh` catches it
+locally (80 passed / 0 failed once `tr -d '\r'` is applied). Git normalises on
+commit, so the pushed bytes were always correct — but the local aggregate is
+not, so run `tr -d '\r'` after ANY scripted edit to a shell script.
+
+### Diagnostics that got us here
+
+`7186ca7` printed only the last case's `INSTALL_OUT`, which belongs to a passing
+case, so it emitted nothing — proven by 0 occurrences across 12 forced failures.
+`7f021a3` moved `explain_failure` into each `bad` branch so a failure reports the
+invocation that produced it and that case's own output; that is what exposed the
+successful install.
