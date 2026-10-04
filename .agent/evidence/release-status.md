@@ -602,3 +602,41 @@ Proven non-vacuous in both directions:
 Against the recreated targets: `test-target-runs-shipped-payload` **5/5**,
 `test-rollback-drill` **22/22**, `create-target-os.sh` `RESULT: PASS`,
 low-RAM gate `RESULT: PASS`.
+
+## v1.2.0 published
+
+Tag `v1.2.0` → `c2ecab74b5756fde9a8eb653def8bb0393d8b520`, the commit whose CI
+run `37218057616` is green across all four jobs. Release:
+<https://github.com/insekt1024/xistance-panel/releases/tag/v1.2.0>, not a draft,
+not a prerelease.
+
+**The release workflow was deliberately not dispatched.** `release.yml` is
+`workflow_dispatch`-only and takes a *version bump type*
+(`patch`/`minor`/`major`), not a version number: it runs
+`node scripts/version.mjs patch --commit`, which would have taken the tree from
+1.2.0 to 1.2.1, committed that, tagged `v1.2.1` and published it. The tree was
+already committed at 1.2.0 across all 7 version files (`version:check` ✓) with
+no tag, so dispatching would have skipped past the version that was validated.
+Prior releases follow `chore: release vX.Y.Z` + tag (`v1.1.0` → `4f90713`,
+`v1.1.1` → `6f33aa5`); 1.2.0 now has its tag, which is the equivalent step.
+
+Published 11 assets, staged by reproducing `release.yml:369-395` exactly
+(`cp` the three installer scripts, `chmod +x`, generate `INSTALLER_ASSETS.sha256`
+plus the per-file sidecars the publish list expects) and running the workflow's
+own fail-closed verification — all three installer checksums `OK`, and both
+`lib/*.sh` byte-identical to the committed copies.
+
+Verified by round trip, not by trusting the upload: all 11 assets were
+downloaded from the release and re-checked against their **published** sidecars.
+
+| check | result |
+| --- | --- |
+| amd64 archive vs published checksum | MATCHES |
+| arm64 archive vs published checksum | MATCHES |
+| `release-install.sh`, `release-layout.sh`, `service-unit.sh` | all `OK` |
+| embedded manifests | `releaseTag: v1.2.0`, `node: 22`, `commit: 8fb9a48`, arch matches each archive |
+| arm64 payload | contains `libquery_engine-linux-arm64`; amd64 contains zero arm64 refs |
+
+XUI's release-note wording states the position plainly: it supervises a
+third-party 3x-ui panel, runs no Xistance engine, and its PRD requirements are
+covered by `scripts/test-xui.ts` (61 passed / 0 failed).
