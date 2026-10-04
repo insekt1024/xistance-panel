@@ -36,6 +36,16 @@ export interface Page {
 }
 export interface PW { chromium: { launch(opts: Record<string, unknown>): Promise<Browser> } }
 export function findPlaywright(): PW | null {
+  // Resolve the REAL installed dependency first. `playwright-core` is a pinned
+  // devDependency (1.63.0), so a normal require always succeeds on any host.
+  //
+  // The npx-cache hunt below was the ONLY resolution path until recently, and
+  // that is why suites importing THIS harness skipped on CI while passing on a
+  // developer machine: `npx playwright install` caches under a transient hash,
+  // so a clean Linux runner has a different cache layout -- or none. This is
+  // the shared helper, so the bug affected every gate suite at once.
+  try { return require_("playwright-core") as PW; } catch { /* fall through */ }
+
   const candidates = [
     path.join(os.homedir(), "AppData/Local/npm-cache/_npx"),
     path.join(os.homedir(), "node_modules"),

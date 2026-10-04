@@ -197,6 +197,10 @@ function resolvePlaywright(): unknown | null {
   // while exiting green. Chromium was installed on that runner and still went
   // unused, because nothing looked where Linux puts playwright.
   const home = os.homedir();
+  // `playwright-core` is a pinned devDependency, so a normal require works on
+  // every host. The directory scan below is a fallback for an install that has
+  // not been run.
+  try { return createRequire(import.meta.url ?? __filename)("playwright-core") as PW; } catch { /* fall through */ }
   const candidates = [
     // This repository's own dependency tree -- the normal case on any platform.
     path.join(process.cwd(), "node_modules"),

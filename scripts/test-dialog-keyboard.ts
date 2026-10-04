@@ -66,6 +66,8 @@ function findPlaywright(): PW | null {
   // are keyed by a transient hash, so their layout differs between a developer
   // machine and a clean runner, which is how a browser gate silently SKIPPED in
   // CI while passing locally.
+  try { return createRequire(import.meta.url ?? __filename)("playwright-core") as PW; } catch { /* fall through */ }
+
   const candidates = [
     path.join(os.homedir(), "AppData/Local/npm-cache/_npx"),
     path.join(os.homedir(), "node_modules"),
