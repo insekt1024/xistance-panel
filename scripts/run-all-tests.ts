@@ -68,6 +68,31 @@ const PY = (name: string, ...extra: string[]): Suite => ({
  * Grouped by what they protect, because "run the tests" is not a reviewable
  * statement — a reviewer needs to know WHICH claim each suite is evidence for.
  */
+/**
+ * Decode a child-process buffer that may be UTF-8 or UTF-16.
+ *
+ * WSL on a Windows host intermittently emits UTF-16LE. Decoding that as UTF-8
+ * yields NUL-interleaved text, and a log full of NULs is a BINARY file to grep,
+ * tail and diff -- which destroys the very output used to diagnose a failure.
+ * A UTF-16LE buffer has a BOM, and even without one the NUL pattern is
+ * unambiguous, so detect rather than assume.
+ */
+function decodeMaybeUtf16(buf: Buffer | string | null | undefined): string {
+  if (buf === null || buf === undefined) return "";
+  if (typeof buf === "string") return buf;
+  if (buf.length >= 2) {
+    // BOM-led UTF-16 (LE or BE).
+    if (buf[0] === 0xff && buf[1] === 0xfe) return buf.subarray(2).toString("utf16le");
+    if (buf[0] === 0xfe && buf[1] === 0xff) return buf.subarray(2).swap16().toString("utf16le");
+    // BOM-less UTF-16LE: ASCII text carries a NUL in every odd byte.
+    let probe = Math.min(buf.length, 256);
+    let nulOdd = 0;
+    for (let i = 1; i < probe; i += 2) if (buf[i] === 0) nulOdd++;
+    if (nulOdd > probe / 4) return buf.toString("utf16le");
+  }
+  return buf.toString("utf8");
+}
+
 const SUITES: Suite[] = [
   // --- release integrity: what actually ships ---------------------------
   TS("test-release-manifest.ts"),
@@ -576,10 +601,16 @@ function runUnderWsl(suite: string, distroName: string): { code: number; output:
 
   const scriptFile = path.join(wslTmp, `xt-linux-run.sh`);
   writeFileSync(scriptFile, wslScript, "utf8");
-  const run = spawnSync("wsl", ["-d", distroName, "--", "bash", `${wslTmpPath}/${path.basename(scriptFile)}`], {
-    encoding: "utf8",
-  });
-  return { code: run.status ?? -1, output: `${run.stdout ?? ""}${run.stderr ?? ""}` };
+  // Do NOT pass `encoding: "utf8"`. WSL on this host can hand back UTF-16LE, and
+  // Node then decodes it as UTF-8, so every character arrives NUL-interleaved
+  // ("w\0s\0l\0:"). That does not merely look wrong: it makes the aggregate log
+  // a BINARY file, so grep, tail and every other log tool stop working on the
+  // output meant to explain a failure.
+  //
+  // So take raw Buffers and decode explicitly, detecting UTF-16 rather than
+  // assuming it.
+  const run = spawnSync("wsl", ["-d", distroName, "--", "bash", `${wslTmpPath}/${path.basename(scriptFile)}`]);
+  return { code: run.status ?? -1, output: `${decodeMaybeUtf16(run.stdout)}${decodeMaybeUtf16(run.stderr)}` };
 }
 
 // A Linux suite needs the STAGED PAYLOAD. Failing 30 seconds in with
