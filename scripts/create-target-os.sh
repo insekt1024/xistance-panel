@@ -52,6 +52,19 @@ DIST_DIR="${REPO_ROOT}/dist/amd64"
 say() { printf '\033[36m→ %s\033[0m\n' "$*"; }
 die() { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
+# The digest the installed release reports: artifact.sha256 from the archive's own
+# release-manifest.json. This is what test-target-runs-shipped-payload.ts compares,
+# and it is NOT the same value as the .sha256 sidecar (which digests the .tar.gz
+# file itself) -- comparing the two would never match. Empty when no archive has
+# been built here (CI builds its own).
+_archive_payload_digest() {
+  local mf
+  mf="${DIST_DIR}/release-manifest.json"
+  [[ -f "$mf" ]] || return 0
+  grep -o '"sha256"[[:space:]]*:[[:space:]]*"[0-9a-f]\{64\}"' "$mf" \
+    | head -1 | grep -o '[0-9a-f]\{64\}'
+}
+
 command -v docker >/dev/null 2>&1 || die "docker is not installed"
 docker info >/dev/null 2>&1 || die "the docker daemon is not reachable"
 
@@ -113,8 +126,14 @@ create_target() {
 
   if docker exec "$name" true >/dev/null 2>&1; then
     say "$name already exists and responds; reusing it"
-    verify_target "$name" "$expect"
-    return 0
+    # verify_target returns non-zero when the container is healthy in shape but
+    # serves a DIFFERENT archive than the one we ship. Reuse is only safe when
+    # the payload provably matches, so a mismatch falls through to a rebuild
+    # instead of quietly testing the previous release.
+    if verify_target "$name" "$expect"; then
+      return 0
+    fi
+    say "$name does not serve the archive we ship -- recreating it"
   fi
 
   build_image "$base" "$tag"
@@ -156,7 +175,7 @@ create_target() {
     fi
   ' >/dev/null
 
-  verify_target "$name" "$expect"
+  verify_target "$name" "$expect" preinstall
 }
 
 verify_target() {
@@ -172,6 +191,38 @@ verify_target() {
   docker exec "$name" bash -lc 'test -d /run/systemd/system' >/dev/null 2>&1 \
     || die "$name is not running systemd as PID 1"
   say "$name: systemd is PID 1"
+
+  # A responding container is NOT necessarily one built from the CURRENT archive.
+  # create_target() below reuses a live container to save a rebuild, and an earlier
+  # version of this script verified only the OS shape -- so a container built from
+  # an old archive was reused silently and the payload suites failed much later
+  # with a bare "installed <digest> vs shipped <digest>". Compare the archive the
+  # container actually serves against the one we are about to ship, and recreate on
+  # mismatch so the failure is attributable here rather than three suites away.
+  #
+  # $3 is "reuse" when checking a container that already runs a release, and
+  # "preinstall" on the fresh path where the release is installed only afterwards --
+  # there is nothing to compare yet, and demanding a digest there would recurse.
+  local mode="${3:-reuse}"
+  local shipped installed
+  shipped="$(_archive_payload_digest)"
+  if [[ "$mode" == "reuse" && -n "$shipped" ]]; then
+    installed="$(docker exec "$name" bash -lc \
+      'cat /opt/xistance/current/release-manifest.json 2>/dev/null' 2>/dev/null \
+      | grep -o '"sha256"[[:space:]]*:[[:space:]]*"[0-9a-f]\{64\}"' \
+      | head -1 | grep -o '[0-9a-f]\{64\}' || true)"
+    if [[ -n "$installed" && "$installed" != "$shipped" ]]; then
+      say "$name: serves archive ${installed:0:12} but we ship ${shipped:0:12} -- recreating"
+      return 1
+    fi
+    if [[ -z "$installed" ]]; then
+      say "$name: no readable payload digest -- recreating so the payload is provable"
+      return 1
+    fi
+    say "$name: serves the archive we ship (${shipped:0:12})"
+  elif [[ "$mode" == "reuse" ]]; then
+    say "$name: WARNING no archive checksum to compare against -- cannot prove payload identity"
+  fi
 
   docker exec "$name" bash -lc 'command -v curl >/dev/null' \
     || die "$name has no curl, so the health probe cannot run"
