@@ -29,6 +29,7 @@
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
+import assert from "node:assert";
 import fs from "node:fs";
 import path from "node:path";
 import { readJson } from "./lib/browser-harness";
@@ -63,6 +64,12 @@ interface Page {
 interface PW { chromium: { launch(opts: Record<string, unknown>): Promise<Browser> } }
 
 function findPlaywright(): PW | null {
+  // Resolve the REAL installed dependency first: `playwright-core` is a pinned
+  // devDependency (1.63.0), so plain resolution works on any host including a
+  // fresh CI runner. The npx-cache hunt below is a fallback only -- npx caches
+  // are keyed by a transient hash, so their layout differs between a developer
+  // machine and a clean runner, which is how a browser gate silently SKIPPED in
+  // CI while passing locally.
   const candidates = [
     path.join(os.homedir(), "AppData/Local/npm-cache/_npx"),
     path.join(os.homedir(), "node_modules"),
@@ -144,7 +151,8 @@ function labels(loc: string, group: string, key: string): string {
 // main() rather than at module scope. Getting this wrong is a TS/esbuild
 // transform error, not a runtime one.
 async function main(): Promise<void> {
-  const baseTmp = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP;
+  const baseTmp = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? os.tmpdir();
+  assert.ok(baseTmp, "a temporary directory is required");
   const TMP = path.join(baseTmp, `xistance-smoke-${Date.now().toString(36)}-${process.pid}`);
   const DB = path.join(TMP, "smoke.db");
   const PORT = await freePort();

@@ -17,6 +17,8 @@
  */
 
 import fs from "node:fs";
+import assert from "node:assert";
+import os from "node:os";
 import path from "node:path";
 
 import type { Browser, Context, Page } from "playwright-core";
@@ -112,7 +114,12 @@ async function clearToasts(page: Page): Promise<void> {
 
 async function main(): Promise<void> {
   const check = new Checks();
-  const baseTmp = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP;
+  // os.tmpdir() is ALWAYS defined; TMPDIR/TEMP/TMP are conventions that GitHub's
+  // runners do not set. Without the fallback this was `path.join(undefined, ...)`
+  // and the suite died before its first assertion, which the gate correctly
+  // reported as "exit 1 with no result summary".
+  const baseTmp = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? os.tmpdir();
+  assert.ok(baseTmp, "a temporary directory is required");
   const TMP = path.join(baseTmp, `xistance-routes-${Date.now().toString(36)}`);
   const DB = path.join(TMP, "routes.db");
   const PORT = await freePort();

@@ -3,13 +3,16 @@
  * real server-side exception. Used to diagnose TASK-52; kept because the same
  * failure mode (a Server Component throwing) recurs.
  */
+import os from "node:os";
+import assert from "node:assert";
 import fs from "node:fs";
 import path from "node:path";
 
 import { REPO, WEB, findChromium, findPlaywright, freePort, sleep, startApp } from "./lib/browser-harness";
 
 async function main(): Promise<void> {
-  const baseTmp = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP;
+  const baseTmp = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? os.tmpdir();
+  assert.ok(baseTmp, "a temporary directory is required");
   const TMP = path.join(baseTmp, `xistance-diag-${Date.now().toString(36)}`);
   const DB = path.join(TMP, "diag.db");
   const PORT = await freePort();

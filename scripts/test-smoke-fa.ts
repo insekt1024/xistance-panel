@@ -19,6 +19,8 @@
  * Run: TURBO_DISABLE=true npm run build && npx tsx scripts/test-smoke-fa.ts
  */
 
+import os from "node:os";
+import assert from "node:assert";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -178,7 +180,8 @@ const OVERFLOW = `
 
 async function main(): Promise<void> {
   const check = new Checks();
-  const baseTmp = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP;
+  const baseTmp = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? os.tmpdir();
+  assert.ok(baseTmp, "a temporary directory is required");
   const TMP = path.join(baseTmp, `xistance-fa-${Date.now().toString(36)}`);
   const DB = path.join(TMP, "fa.db");
   const PORT = await freePort();

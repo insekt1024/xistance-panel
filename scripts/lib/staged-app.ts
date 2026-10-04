@@ -25,6 +25,8 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
+import assert from "node:assert";
+import os from "node:os";
 import path from "node:path";
 import { REPO } from "./browser-harness";
 import { pickPort } from "./pick-port";
@@ -68,7 +70,15 @@ export interface StagedAppHandle {
 }
 
 function tempRoot(): string {
-  return process.env.TMPDIR || process.env.TEMP || process.env.TMP || "C:\\Windows\\Temp";
+  // os.tmpdir() is the POSIX answer and is ALWAYS defined. TMPDIR/TEMP/TMP are
+  // conventions, not guarantees: GitHub's runners set none of them, so
+  // requiring one fails there while passing on any developer machine that
+  // exports it. This exact bug shipped the Windows literal
+  // C:\Windows\Temp to a Linux runner, and the browser gate died with
+  // ENOENT: mkdtemp 'C:\Windows\Temp/xistance-artifact-assets-XXXXXX'.
+  const base = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? os.tmpdir();
+  assert.ok(base, "a temporary directory is required");
+  return base;
 }
 
 export async function freePort(): Promise<number> {

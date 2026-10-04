@@ -22,6 +22,7 @@
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
+import assert from "node:assert";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -57,6 +58,12 @@ interface Page {
 
 /** Locate playwright-core without adding a dependency to the project. */
 function findPlaywright(): PW | null {
+  // Resolve the REAL installed dependency first: `playwright-core` is a pinned
+  // devDependency (1.63.0), so plain resolution works on any host including a
+  // fresh CI runner. The npx-cache hunt below is a fallback only -- npx caches
+  // are keyed by a transient hash, so their layout differs between a developer
+  // machine and a clean runner, which is how a browser gate silently SKIPPED in
+  // CI while passing locally.
   const candidates = [
     // The npx cache the browser download was registered against.
     path.join(os.homedir(), "AppData/Local/npm-cache/_npx"),
@@ -115,7 +122,8 @@ function findChromium(): string | null {
 const freePort = (): Promise<number> => pickPort("127.0.0.1");
 
 function tempRoot(): string {
-  const base = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP;
+  const base = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? os.tmpdir();
+  assert.ok(base, "a temporary directory is required");
   if (!base) skip("no temporary directory");
   return fs.mkdtempSync(path.join(base, "xistance-rtl-"));
 }

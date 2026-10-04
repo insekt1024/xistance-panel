@@ -31,11 +31,22 @@ const freePort = (): Promise<number> => pickPort("127.0.0.1");
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Locate playwright-core without adding a dependency to the project.
- * Mirrors test-rtl-browser.ts: the browser download registered against the npx
- * cache, so that is where the package lives.
+ * Locate playwright-core. It is a pinned devDependency, so the normal
+ * resolution path is tried first; the npx cache is a fallback for hosts where
+ * the install has not been run.
  */
 function findPlaywright(): PW | null {
+  // Resolve the REAL installed dependency first. `playwright-core` is a pinned
+  // devDependency (1.63.0), so a plain require("playwright-core") always works
+  // on any host, including a fresh CI runner.
+  //
+  // The npx-cache hunt below is retained only as a fallback. Relying on it was a
+  // genuine defect: `npx playwright install` downloads browsers into a cache
+  // keyed by an npx hash, so the cache layout on a clean Linux runner differs
+  // from a developer's machine. That made the suite SKIP locally-verified work
+  // in CI -- a browser gate that never ran while still reporting success.
+  try { return createRequire(import.meta.url ?? __filename)("playwright-core") as PW; } catch { /* fall through */ }
+
   const candidates = [
     path.join(os.homedir(), "AppData/Local/npm-cache/_npx"),
     path.join(os.homedir(), "node_modules"),

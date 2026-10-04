@@ -25,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^20",
     "eslint": "^9",
+    "playwright-core": "1.63.0",
     "smol-toml": "1.9.0",
     "typescript": "^5"
   },
