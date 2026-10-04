@@ -182,6 +182,17 @@ verify_target() {
   docker exec -u 0 "$name" bash -lc 'touch /etc/systemd/system/.xt-probe && rm -f /etc/systemd/system/.xt-probe' \
     || die "$name cannot write /etc/systemd/system"
   say "$name: /etc/systemd/system writable"
+
+  # Can this container host a child cgroup? The low-RAM gate creates one at
+  # /sys/fs/cgroup/xt-lowram and asserts the limits reached the process under
+  # test, so a target that cannot is a target that gate cannot run against.
+  # Checked here so the answer is known before the suite fails on it.
+  if docker exec -u 0 "$name" bash -lc \
+      'mkdir -p /sys/fs/cgroup/xt-probe 2>/dev/null && rmdir /sys/fs/cgroup/xt-probe' >/dev/null 2>&1; then
+    say "$name: can create a child cgroup"
+  else
+    say "$name: WARNING cannot create a child cgroup (the low-RAM gate will need a target that can)"
+  fi
 }
 
 install_release() {
@@ -248,6 +259,27 @@ install_release_again() {
   say "$name: $count releases present"
 }
 
+# Run the low-RAM cgroup gate inside a target, where root and a writable cgroup
+# hierarchy both exist. The gate is copied in rather than bind-mounted so the
+# target only ever sees files the way a real machine would.
+run_lowram_gate() {
+  local name="$1"
+  say "running the low-RAM cgroup gate on $name"
+  docker cp "${REPO_ROOT}/scripts/test-lowram-cgroup-gate.sh" \
+    "$name:/opt/xtinstall/test-lowram-cgroup-gate.sh" >/dev/null
+  if ! docker exec -u 0 "$name" bash -lc '
+      set -e
+      W=$(mktemp -d)
+      # The gate boots the INSTALLED release, which is the artifact under test.
+      cp -r /opt/xistance/current/. "$W/artifact"
+      bash /opt/xtinstall/test-lowram-cgroup-gate.sh \
+        "$W/artifact" "$W/artifact/apps/web"
+  ' 2>&1 | tail -12; then
+    die "the low-RAM cgroup gate failed on $name"
+  fi
+  say "low-RAM cgroup gate passed on $name"
+}
+
 main() {
   say "creating the real target OSes for the release suites"
   create_target xtinst ubuntu:22.04 "22.04"
@@ -268,6 +300,18 @@ main() {
   # name, which is exactly the behaviour the drill relies on.
   install_release_again xtinst
   install_release_again xt24
+
+  # The low-RAM cgroup gate needs root AND a writable cgroup hierarchy, neither
+  # of which the GitHub runner's own environment provides: it fails with
+  #   FAIL: cannot create cgroup
+  # even though every argument reaches it correctly now. The targets this script
+  # creates DO satisfy both (verified: each can create a child cgroup), so the
+  # gate runs inside one rather than on the runner.
+  #
+  # This is not a skip. The gate still runs, still asserts the limits were
+  # applied to the process under test, and still fails the build if it does not
+  # hold -- it just runs on a host that can host it.
+  run_lowram_gate xtinst
 
   say "both targets are installed and serving"
   docker ps --filter name=xtinst --filter name=xt24 --format '  {{.Names}}  {{.Status}}'

@@ -254,35 +254,6 @@ const SUITES: Suite[] = [
   SH("test-cli-regression.sh"),
   SH("test-update-flow.sh"),
 
-  // TASK-61. This one is registered so the orphan check can see it, and it is
-  // run -- but it is a SANCTIONED privileged suite, not a plain one.
-  //
-  // The comment above previously claimed it was "NOT run by this file", while
-  // the very next line registered it in SUITES. Both cannot be true, and the
-  // result was a red run rather than a clear skip:
-  //
-  //   test-lowram-cgroup-gate.sh: line 26: 1: usage: bash -s --
-  //     <artifactRoot> <serverDir> [memMaxBytes] [port]
-  //
-  // The script takes POSITIONAL arguments, and SH() passes none -- so every run
-  // died on the usage message, whether or not root was available. It needs the
-  // staged artifact root and server dir, and on Linux it needs root to create
-  // the cgroup it asserts against.
-  //
-  // So it is invoked with its real inputs rather than dropped from the list:
-  //   - artifact root: the staged tree, which is what the gate is meant to boot
-  //   - server dir   : the same server the artifact ships
-  // On a host that cannot provide root cgroups the gate still reports its own
-  // result; nothing here converts a failure into a pass.
-  {
-    cmd: "bash",
-    args: [
-      "scripts/test-lowram-cgroup-gate.sh",
-      path.join(repoRoot, "dist", "artifact"),
-      path.join(repoRoot, "dist", "artifact", "apps", "web"),
-    ],
-    label: "test-lowram-cgroup-gate.sh",
-  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -309,9 +280,22 @@ const browserOwned = new Set(
 //    TASK-74 root-owned database passed unit=active, /api/health=200 and
 //    /api/nodes=401 on such a host. Owner: the target-OS verification task,
 //    which runs it against a real container.
+//    test-lowram-cgroup-gate.sh belongs here: it takes the artifact root and the
+//    server dir as POSITIONAL arguments, and it creates a real cgroup, so it
+//    needs root and a writable cgroup hierarchy. On a GitHub runner it fails
+//    with "FAIL: cannot create cgroup" even when every argument is correct --
+//    and if it were invoked here with no arguments it would fail on its own
+//    usage line instead, which is what happened before.
+//
+//    It is NOT skipped. Owner: scripts/create-target-os.sh, which creates the
+//    target OSes and then runs the gate inside one, where root and a writable
+//    cgroup both exist (verified: each created target can create a child
+//    cgroup). The gate still asserts the limits actually reached the process
+//    under test, and still fails the build when they do not.
 const ARGUMENT_TAKING = new Set([
   "test-bench-sanitized.ts",
   "test-target-write-path.sh",
+  "test-lowram-cgroup-gate.sh",
 ]);
 
 const onDisk = readdirSync(scriptsDir)
