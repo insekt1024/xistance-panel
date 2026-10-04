@@ -393,5 +393,15 @@ else
 fi
 drop_root
 
+# When anything failed, the assertion names alone do not say WHY -- each one is a
+# bare "expected non-zero exit". The installer's own explanation lives in
+# INSTALL_OUT, which is captured per case and never printed, so a failure here was
+# undiagnosable from CI (the aggregate only keeps a 14-line tail). Print the last
+# failing case's installer output so the cause travels with the report.
+if [[ "$FAIL" -ne 0 && -n "${INSTALL_OUT:-}" ]]; then
+  printf '\n--- last installer output (for the failures above) ---\n'
+  printf '%s\n' "$INSTALL_OUT" | tail -30
+fi
+
 printf '\n--- %d passed, %d failed ---\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]]

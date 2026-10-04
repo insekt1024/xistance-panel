@@ -704,6 +704,11 @@ for (const s of toRun) {
       if (errLine) badLines.push(errLine.trim());
     }
     failures.push(`${s.label} (exit ${code})`);
+    // Keep MORE than the tail. A suite that captures a subprocess's output and
+    // only prints it on failure (test-cli-regression.sh does exactly this with
+    // INSTALL_OUT) puts the actual reason far from the end of its output, so a
+    // 14-line tail shows the summary and drops the cause -- which is what makes
+    // such a failure undiagnosable from CI.
     failureDetail.push({ suite: s.label, exit: code, lines: badLines.slice(0, 12) });
     if (detail) {
       // A suite prints every assertion; the FAILING one can be far above the
@@ -712,6 +717,16 @@ for (const s of toRun) {
       for (const line of badLines) console.log(`        > ${line}`);
       const tail = lines.slice(-14);
       for (const line of tail) console.log(`        | ${line}`);
+      // Then the lines immediately AFTER each failing assertion, which is where
+      // a suite that explains itself puts the reason.
+      for (const line of badLines) {
+        const idx = lines.indexOf(line);
+        if (idx < 0) continue;
+        for (const after of lines.slice(idx + 1, idx + 9)) {
+          if (/^\s*(ok|FAIL)/.test(after)) break;
+          if (after.trim()) console.log(`        : ${after}`);
+        }
+      }
     }
   }
 }
