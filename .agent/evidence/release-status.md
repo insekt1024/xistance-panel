@@ -711,3 +711,38 @@ case, so it emitted nothing — proven by 0 occurrences across 12 forced failure
 `7f021a3` moved `explain_failure` into each `bad` branch so a failure reports the
 invocation that produced it and that case's own output; that is what exposed the
 successful install.
+
+## v1.2.0 asset refresh: the installer now honours TMPDIR
+
+`9075a8f` changed `release-install.sh` so its work directory resolves
+`${TMPDIR:-/tmp}` instead of hardcoding `/tmp`. The published `v1.2.0` asset was
+staged before that commit, so the release still shipped the hardcoded form.
+
+`release-manifest.json` records only `artifact.sha256` (the payload); it does not
+cover the installer. That makes a single-asset replacement self-contained — no
+archive rebuild, no manifest regeneration, no checksum cascade. The tag itself was
+not moved.
+
+Before/after digests for `release-install.sh`:
+
+| | sha256 (first 16) |
+| --- | --- |
+| published before | `5fa72a6347532a75` |
+| published now | `a0ac1b65f39c1ad3` |
+
+Only `release-install.sh` and `release-install.sh.sha256` were re-uploaded
+(updatedAt 22:29); the other nine assets retain their original 19:05–19:07
+timestamps, and both archive digests are unchanged (`dbbe9f4e…` amd64,
+`d766cde0…` arm64).
+
+Verified after republishing:
+
+- all 11 assets re-downloaded from the release; all 5 sidecars verify OK
+- the fetched installer is byte-identical to `scripts/release-install.sh`
+- `bash -n` clean; zero occurrences of `mktemp -d /tmp` remain
+- fetched over HTTP and executed: `--dry-run` exits 0 with the fix present
+- `TMPDIR` pointed at a relocated directory: the suite is `46 passed, 0 failed`
+  and leaves zero `xistance-release.*` directories behind, so cleanup still fires
+
+The release remains non-draft, non-prerelease, 11 assets, at
+`https://github.com/insekt1024/xistance-panel/releases/tag/v1.2.0`.
