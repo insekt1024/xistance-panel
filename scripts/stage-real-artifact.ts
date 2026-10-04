@@ -47,7 +47,8 @@ async function main(): Promise<void> {
   const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { version?: string };
   const version = typeof pkg.version === "string" && pkg.version !== "" ? pkg.version : "0.0.0";
-  const { buildReleaseManifest, inspectReleaseManifest, stagedPayloadDigest } = await import("./release-manifest.ts");
+  const { buildReleaseManifest, inspectReleaseManifest, stagedPayloadDigest, RELEASE_NODE_MIN_MAJOR } =
+  await import("./release-manifest.ts");
 
   // The name must match what release.yml produces:
   //   ARTIFACT_NAME: xistance-panel-v<version>-<arch>.tar.gz
@@ -78,7 +79,7 @@ async function main(): Promise<void> {
     artifactName,
     artifactSha256: "0".repeat(64),
     runtime: {
-      node: process.versions.node,
+      node: RELEASE_NODE_MIN_MAJOR,
       next: dependencyVersion("next"),
       prisma: dependencyVersion("@prisma/client"),
     },
@@ -100,8 +101,18 @@ async function main(): Promise<void> {
     // Read the runtime versions from the installed tree rather than pinning
     // literals: a manifest that claims a Next or Prisma version the artifact
     // does not contain is exactly the kind of metadata a verifier cannot trust.
+    //
+    // `node` is the one exception and must NOT be `process.versions.node`. The
+    // manifest describes the runtime the RELEASE supports, and both installers
+    // (release-install.sh, install.sh) gate on NODE_MIN_MAJOR=22. Recording the
+    // build host's version instead makes the manifest depend on WHO ran staging:
+    // correct on CI (Node 22), so the mistake never surfaced there, but on a
+    // Node 26 workstation it wrote "26.7.0" into a tracked, release-significant
+    // file and test-manifest-runtime-node failed with 'expected the bare major
+    // "22". RELEASE_NODE_MIN_MAJOR is the single authority, and a test asserts
+    // it still equals the installers' own value.
     runtime: {
-      node: process.versions.node,
+      node: RELEASE_NODE_MIN_MAJOR,
       next: dependencyVersion("next"),
       prisma: dependencyVersion("@prisma/client"),
     },
