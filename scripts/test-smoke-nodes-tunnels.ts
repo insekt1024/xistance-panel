@@ -17,6 +17,8 @@
  *
  * Run: TURBO_DISABLE=true npm run build && npx tsx scripts/test-smoke-nodes-tunnels.ts
  */
+import os from "node:os";
+import assert from "node:assert";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -135,7 +137,8 @@ function bail(why: string): never {
 }
 
 const check = new Checks();
-  const baseTmp = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP;
+  const baseTmp = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP ?? os.tmpdir();
+  assert.ok(baseTmp, "a temporary directory is required");
   const TMP = path.join(baseTmp, `xistance-nodes-${Date.now().toString(36)}-${process.pid}`);
   const DB = path.join(TMP, "nodes.db");
   const PORT = await freePort();
