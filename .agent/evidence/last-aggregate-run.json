@@ -1,10 +1,10 @@
 {
   "verdict": "PASS",
-  "passed": 76,
-  "total": 76,
-  "seconds": 868,
-  "recordedAt": "2026-10-03T17:49:24.356Z",
-  "head": "8e366d808321c9f3ad41e255cc0eb5e180e141ba",
+  "passed": 77,
+  "total": 77,
+  "seconds": 815.1,
+  "recordedAt": "2026-10-04T15:06:28.398Z",
+  "head": "ccd73f2e5fd8b99ce6e514a5482dac9b9cca68f7",
   "failures": [],
   "failureDetail": [],
   "skipped": [],
@@ -48,6 +48,14 @@
     },
     {
       "label": "test-release-attestation.ts",
+      "code": 0
+    },
+    {
+      "label": "test-audit-gate.ts",
+      "code": 0
+    },
+    {
+      "label": "test-chromium-path.ts",
       "code": 0
     },
     {
@@ -308,10 +316,6 @@
     },
     {
       "label": "test-update-flow.sh",
-      "code": 0
-    },
-    {
-      "label": "test-lowram-cgroup-gate.sh",
       "code": 0
     }
   ]

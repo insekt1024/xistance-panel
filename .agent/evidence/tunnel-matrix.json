@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-03T17:46:24.464Z",
+  "generatedAt": "2026-10-04T15:04:26.524Z",
   "contract": "all-method shared regression matrix",
   "disclaimer": "realBinary is false for every method. These results prove local command/config generation and engine lifecycle with an injected process handle. No tunnel binary was executed, no traffic crossed a tunnel, and no remote node was contacted. Release acceptance requires a separate real-binary/VPS pass per method.",
   "methods": [

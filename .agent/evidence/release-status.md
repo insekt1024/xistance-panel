@@ -413,3 +413,65 @@ the platform — which is what identified the `chrome-linux64` move in one run.
 Locally, with `TMPDIR`/`TEMP`/`TMP` unset: smoke-routes 80, smoke-auth 35,
 state-a11y 50, rtl-browser 33, dialog-keyboard 34, a11y-browser 13, smoke-fa 105,
 dashboard-legibility 648. Typecheck 0 errors. Lint 0 errors / 28 warnings.
+
+## The stale amd64 archive: a real release defect
+
+`scripts/create-target-os.sh` builds the running targets by installing the archive
+it finds in `dist/amd64`, which is exactly what it should do — the target runs
+what the release publishes. But nothing enforced that the archive be *current*.
+
+**What it cost.** `dist/amd64/xistance-panel-v1.2.0-amd64.tar.gz` had been built
+at commit `4a39051`, 31 commits behind `master`. So:
+
+| | value |
+| --- | --- |
+| archive manifest | `4a39051` / `8ff9709e…` |
+| installed on xtinst | `4a39051` / `8ff9709e…` |
+| freshly staged tree | `7c32c5e` / `875d483b…` |
+| HEAD | `7c32c5e` |
+
+Three suites failed against a target running a build from three weeks of commits
+that no longer existed on the branch:
+
+- `test-target-runs-shipped-payload` — `every installed file matches the shipped
+  tree` (`packages/db/generated/client/{edge,index,wasm}.js`) and `the embedded
+  manifest digest is the shipped digest`
+- `test-rollback-drill` — `the release that ships is present on the target`
+
+This was **not** a flaky test and **not** a stale-container artefact: removing
+and recreating both containers changed nothing, because the archive they install
+was itself stale. I only found it by reading the target's own
+`release-manifest.json` instead of inferring staleness from timestamps.
+
+**Fix.** Re-staged `dist/amd64` from the current tree
+(`npx tsx scripts/stage-release-artifact.ts . dist/amd64-staged --architecture amd64`),
+re-archived, recorded and verified the sha256
+(`xistance-panel-v1.2.0-amd64.tar.gz: OK`), and recreated both targets. The
+targets now report `7c32c5e` / `875d483b…`, matching HEAD and the staged tree.
+
+| gate after the fix | result |
+| --- | --- |
+| `test-target-runs-shipped-payload` | **5/5**, 0 skipped |
+| `test-rollback-drill` | **22/22** |
+| low-RAM cgroup gate (inside xtinst) | `RESULT: PASS`, 75 MiB peak of a 256 MiB cap |
+
+Note: `bash scripts/test-lowram-cgroup-gate.sh` on the host is a *helper* and
+exits 1 with a usage message unless given `<artifactRoot> <serverDir>`. The suite
+is driven inside the container by `create-target-os.sh`; running it bare is not a
+gate failure.
+
+## arm64 release artifact
+
+Re-staged and re-archived after the browser and manifest fixes, so it describes
+current code rather than `87ba1b5` (31 commits stale):
+
+| | value |
+| --- | --- |
+| archive | `dist/arm64/xistance-panel-v1.2.0-arm64.tar.gz`, 25 MB, 2409 entries |
+| manifest | `architecture: arm64`, `commit: 7c32c5e`, `releaseTag: v1.2.0` |
+| sha256 | `8a7b2165a48930f5c79de9f07bd76aa950b9d988eb2dc1fe205fac608e3a5003` |
+| verify | `xistance-panel-v1.2.0-arm64.tar.gz: OK` |
+| engine | `libquery_engine-linux-arm64-openssl-3.0.x.so.node` |
+
+The amd64 release archive was re-staged to match: 39 MB, 1990 files,
+`7c32c5e` / `875d483b…`, sha256 verified.
