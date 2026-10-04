@@ -70,8 +70,25 @@ async function main(): Promise<void> {
     for (const error of inspection.errors) console.error(`  - ${error}`);
     process.exit(1);
   }
+  // The repo root manifest is RELEASE-SIGNIFICANT and tracked: it names the commit
+  // and the sha256 of the artifact that will be published. Overwriting it and
+  // walking away silently corrupts it -- a later `git status` looks like harmless
+  // test residue, but the file now describes a build from whatever HEAD happened
+  // to be checked out when the aggregate ran, not the release.
+  // stage-arm64-artifact.ts already saves and restores it for exactly this reason.
   const manifestPath = path.join(repoRoot, "release-manifest.json");
-  fs.writeFileSync(manifestPath, manifestRaw, "utf8");
+  const originalManifest = fs.existsSync(manifestPath) ? fs.readFileSync(manifestPath) : null;
+  try {
+    fs.writeFileSync(manifestPath, manifestRaw, "utf8");
+    await stageLocalFixture(repoRoot, destination);
+  } finally {
+    if (originalManifest === null) fs.rmSync(manifestPath, { force: true });
+    else fs.writeFileSync(manifestPath, originalManifest);
+  }
+}
+
+/** Everything after the manifest swap, so the restore above always runs. */
+async function stageLocalFixture(repoRoot: string, destination: string): Promise<void> {
 
   const { stageReleaseArtifact } = await import("./stage-release-artifact.ts");
   fs.rmSync(destination, { recursive: true, force: true });
