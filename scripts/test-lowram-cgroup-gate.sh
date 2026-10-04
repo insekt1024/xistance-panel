@@ -68,8 +68,39 @@ if [ -d $CG ]; then
   rmdir $CG 2>/dev/null || true
 fi
 mkdir -p $CG || { echo "FAIL: cannot create cgroup"; exit 1; }
-echo $MEM_MAX > $CG/memory.max
-echo "$CPU_QUOTA 100000" > $CG/cpu.max
+
+# Enable the controllers in the PARENT before writing the limits.
+#
+# In cgroup v2 a child cannot use a controller the parent has not delegated:
+#   echo "100000 100000" > $CG/cpu.max
+#     -> /sys/fs/cgroup/xt-lowram/cpu.max: Permission denied
+# while memory.max in the same child succeeds, because its controller happens to
+# be enabled already. So a single "Permission denied" on one limit means the
+# controller is missing, not that the process lacks privilege.
+#
+# cgroup.subtree_control is written in the PARENT, and adding a controller to
+# the parent's subtree_control requires the parent itself to have no processes
+# in it (the "no internal processes" rule). So: move this shell out, delegate,
+# then create the child.
+echo "+cpu +memory" > $LIKE/cgroup.subtree_control 2>/dev/null || true
+echo "  parent subtree_control: $(cat $LIKE/cgroup.subtree_control 2>/dev/null)"
+if ! grep -q cpu <<<"$(cat $LIKE/cgroup.subtree_control 2>/dev/null)"; then
+  # The parent still holds processes; retry from a detached shell so the rule
+  # above is satisfied.
+  setsid bash -c "echo '+cpu +memory' > $LIKE/cgroup.subtree_control" 2>/dev/null || true
+  echo "  parent subtree_control after retry: $(cat $LIKE/cgroup.subtree_control 2>/dev/null)"
+fi
+
+echo $MEM_MAX > $CG/memory.max 2>/dev/null || {
+  echo "FAIL: cannot set memory.max under $CG"; exit 1; }
+echo "$CPU_QUOTA 100000" > $CG/cpu.max 2>/dev/null || {
+  echo "FAIL: cannot set cpu.max under $CG."
+  echo "      The cpu controller is not delegated by the parent cgroup"
+  echo "      (subtree_control: $(cat $LIKE/cgroup.subtree_control 2>/dev/null))."
+  echo "      This host cannot constrain CPU for a child cgroup; the memory"
+  echo "      constraint is the one that matters for the low-RAM claim, but the"
+  echo "      CPU cap is asserted too and will not be waived silently."
+  exit 1; }
 GOT_MEM=$(cat $CG/memory.max)
 GOT_CPU=$(cat $CG/cpu.max)
 echo "readback memory.max = $GOT_MEM"

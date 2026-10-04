@@ -265,8 +265,15 @@ install_release_again() {
 run_lowram_gate() {
   local name="$1"
   say "running the low-RAM cgroup gate on $name"
-  docker cp "${REPO_ROOT}/scripts/test-lowram-cgroup-gate.sh" \
-    "$name:/opt/xtinstall/test-lowram-cgroup-gate.sh" >/dev/null
+  # docker cp takes a NATIVE path. Under MSYS/WSL ${REPO_ROOT} is /e/codes/...,
+  # which it cannot resolve:
+  #   GetFileAttributesEx E:\e\codes\...: The system cannot find the file
+  # so convert when cygpath is available.
+  local gate_src="${REPO_ROOT}/scripts/test-lowram-cgroup-gate.sh"
+  if command -v cygpath >/dev/null 2>&1; then
+    gate_src="$(cygpath -m "$gate_src")"
+  fi
+  docker cp "$gate_src" "$name:/opt/xtinstall/test-lowram-cgroup-gate.sh" >/dev/null
   if ! docker exec -u 0 "$name" bash -lc '
       set -e
       W=$(mktemp -d)
