@@ -460,18 +460,45 @@ exits 1 with a usage message unless given `<artifactRoot> <serverDir>`. The suit
 is driven inside the container by `create-target-os.sh`; running it bare is not a
 gate failure.
 
-## arm64 release artifact
+## Release artifacts (both re-verified)
 
-Re-staged and re-archived after the browser and manifest fixes, so it describes
-current code rather than `87ba1b5` (31 commits stale):
+Both architectures were re-staged and re-archived after every fix, so neither
+describes stale code, and both record `runtime.node: 22` — the release contract,
+not this workstation's Node 26.
 
-| | value |
-| --- | --- |
-| archive | `dist/arm64/xistance-panel-v1.2.0-arm64.tar.gz`, 25 MB, 2409 entries |
-| manifest | `architecture: arm64`, `commit: 7c32c5e`, `releaseTag: v1.2.0` |
-| sha256 | `8a7b2165a48930f5c79de9f07bd76aa950b9d988eb2dc1fe205fac608e3a5003` |
-| verify | `xistance-panel-v1.2.0-arm64.tar.gz: OK` |
-| engine | `libquery_engine-linux-arm64-openssl-3.0.x.so.node` |
+| | amd64 | arm64 |
+| --- | --- | --- |
+| archive | `dist/amd64/…-amd64.tar.gz`, 38 MB | `dist/arm64/…-arm64.tar.gz`, 24 MB |
+| `runtime.node` | `22` | `22` |
+| payload digest | `875d483bfdd2…` | `4e86dbe7fed0…` |
+| `releaseTag` | `v1.2.0` | `v1.2.0` |
+| archive sha256 vs recorded | **MATCH** | **MATCH** |
+| engine | `libquery_engine-linux-*` | `libquery_engine-linux-arm64-openssl-3.0.x.so.node` |
 
-The amd64 release archive was re-staged to match: 39 MB, 1990 files,
-`7c32c5e` / `875d483b…`, sha256 verified.
+A manifest necessarily records the commit it was staged *from*, which is one
+commit behind the commit that stages it. Both were re-staged after the final
+code change, and `test-release-manifest-freshness` — which compares the manifest
+digest against the payload tree actually on disk — passes.
+
+### The manifest writers were host-dependent
+
+`stage-real-artifact.ts`, `stage-arm64-artifact.ts` and
+`stage-local-test-artifact.ts` all wrote `process.versions.node` into the tracked
+release manifest. That made a release-significant file depend on **who** ran
+staging: correct on CI, which builds on Node 22, wrong on any other host. I
+committed `26.7.0` before noticing; `test-manifest-runtime-node` caught it with
+`expected the bare major "22"`.
+
+All three now use `RELEASE_NODE_MIN_MAJOR`, the constant `release-manifest.ts`
+already exported for this purpose and which a test ties to `NODE_MIN_MAJOR` in
+both installers.
+
+The test itself was the second defect: it read only `release-manifest.ts` — the
+file where the bug was *first seen* — so fixing the builder left two live
+instances. It now discovers every script that calls `buildReleaseManifest` and
+asserts none of them read the host's version (9 writers scanned). Proven
+non-vacuous: reintroducing the line in one writer yields `21 passed, 1 failed`
+naming that file; restoring returns rc=0. **22/22 clean.**
+
+This class of bug is invisible to CI by construction, because CI's build host is
+the release target.
