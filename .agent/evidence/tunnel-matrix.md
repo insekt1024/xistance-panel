@@ -1,6 +1,6 @@
 # All-method regression matrix
 
-Generated 2026-10-04T15:24:22.407Z by `scripts/test-method-matrix.ts`.
+Generated 2026-10-04T16:44:37.839Z by `scripts/test-method-matrix.ts`.
 
 > **This harness runs every method with an INJECTED process handle. Its own**
 > **`realBinary` column is therefore `false` for all nine: no tunnel binary is**
@@ -28,7 +28,7 @@ A real-binary pass has since been executed on the target OS. **8/9** methods car
 
 ### Methods without real-binary evidence
 
-- **XUI** — Metadata-only by design: X-UI records the status of a third-party 3x-ui panel and runs no tunnel binary on our nodes, so there is no binary to execute. Status is established by a real panel verification instead. This gap is by design, not an environment shortfall, and no credential would close it.
+- **XUI** — Metadata-only by design: X-UI records the status of a third-party 3x-ui panel and runs no tunnel binary on our nodes, so there is no binary to execute. Status is established by a real panel verification instead. Not a coverage gap: PRD.md:112 specifies XUI's requirements as private-network exception, credential-free sync payload, API failure behavior and bounded retries -- none of which is a tunnel binary. Those four are asserted in scripts/test-xui.ts (61 passed, 0 failed). This field records which methods run an Xistance engine, which is a different question from which methods meet their PRD requirements.
 
 ## Per-method suites
 
