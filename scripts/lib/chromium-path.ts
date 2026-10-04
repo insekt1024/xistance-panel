@@ -9,12 +9,12 @@
  *      Filtering on `startsWith("chromium")` matches BOTH, and
  *      `sort().reverse()` puts the headless shell FIRST, because `_` sorts after
  *      `-` in ASCII.
- *   2. The full browser ships `chrome-linux/chrome`, but the headless shell ships
- *      `chrome-linux/headless_shell`. A resolver that only ever probes
- *      `chrome-linux/chrome` therefore misses whichever directory it lands in,
- *      and on a clean Linux runner it returned null: the suite printed
- *      "SKIP: playwright/chromium unavailable" and exited 77 while Chromium was
- *      installed and fully usable.
+ *   2. The Linux binary moved. `chrome-linux/chrome` was the old name; Playwright
+ *      1.63 ships Chrome for Testing as `chrome-linux64/chrome`, and the
+ *      headless shell as `chrome-linux64/headless_shell`. A resolver that probes
+ *      only the old names returns null on a clean Linux runner -- the suite then
+ *      prints "SKIP: playwright/chromium unavailable" and exits 77 while Chromium
+ *      is installed and fully usable in the cache.
  *
  * So this does not GUESS a path. It walks the cache and returns the first
  * executable that actually exists, newest revision first, checking every known
@@ -42,19 +42,30 @@ export function playwrightCacheDir(): string {
   return path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "ms-playwright");
 }
 
-/** Executable layouts seen across Playwright versions, newest naming first. */
+/**
+ * Executable layouts seen across Playwright versions, newest naming first.
+ *
+ * Each entry is tried in order, so a stale name is merely skipped rather than
+ * fatal. Playwright 1.63 (Chrome for Testing) uses `chrome-linux64/chrome` on
+ * Linux -- NOT the older `chrome-linux/chrome`. Hardcoding only the old name is
+ * what made this resolver return null on a clean Linux CI runner while Chromium
+ * sat installed and usable in the cache: the Windows list happened to contain a
+ * working entry, so the bug was invisible locally.
+ */
 function layouts(dir: string): string[] {
   const base = path.basename(dir);
   // A headless-shell build is preferred: it is what `playwright install chromium`
   // is optimized for, and it is the binary Playwright itself launches headless.
   if (/chromium_headless_shell/i.test(base)) {
     return [
+      "chrome-linux64/headless_shell",
       "chrome-linux/headless_shell",
       "chrome-mac/headless_shell",
       "chrome-win/headless_shell.exe",
     ];
   }
   return [
+    "chrome-linux64/chrome",
     "chrome-linux/chrome",
     "chrome-mac/Chromium.app/Contents/MacOS/Chromium",
     "chrome-win/chrome.exe",
