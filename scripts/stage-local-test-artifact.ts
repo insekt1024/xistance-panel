@@ -50,7 +50,9 @@ async function main(): Promise<void> {
   const commit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repoRoot, encoding: "utf8" }).trim();
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { version?: string };
   const version = typeof pkg.version === "string" && pkg.version !== "" ? pkg.version : "0.0.0";
-  const { buildReleaseManifest, inspectReleaseManifest, treeDigest } = await import("./release-manifest.ts");
+  const { buildReleaseManifest, inspectReleaseManifest, treeDigest, RELEASE_NODE_MIN_MAJOR } = await import(
+  "./release-manifest.ts",
+);
 
   const manifestRaw = buildReleaseManifest({
     version,
@@ -59,7 +61,9 @@ async function main(): Promise<void> {
     artifactName: `xistance-panel-${version}-amd64.tar.gz`,
     artifactSha256: await treeDigest(path.join(repoRoot, "apps", "web", ".next", "standalone", "apps", "web")),
     runtime: {
-      node: process.versions.node,
+      // The release runtime, not the build host's. See stage-real-artifact.ts:
+      // process.versions.node made this manifest host-dependent.
+      node: RELEASE_NODE_MIN_MAJOR,
       next: dependencyVersion(repoRoot, "next"),
       prisma: dependencyVersion(repoRoot, "@prisma/client"),
     },

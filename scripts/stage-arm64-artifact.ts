@@ -70,7 +70,7 @@ async function main(): Promise<void> {
   const rootManifest = path.join(REPO, "release-manifest.json");
   const rootManifestBytes = fs.existsSync(rootManifest) ? fs.readFileSync(rootManifest) : null;
 
-  const { buildReleaseManifest, inspectReleaseManifest, stagedPayloadDigest } = await import(
+  const { buildReleaseManifest, inspectReleaseManifest, stagedPayloadDigest, RELEASE_NODE_MIN_MAJOR } = await import(
     "./release-manifest.ts"
   );
   const gitSha = (await import("node:child_process")).execFileSync("git", ["rev-parse", "HEAD"], {
@@ -79,7 +79,11 @@ async function main(): Promise<void> {
   }).trim();
   const artifactName = `xistance-panel-v${VERSION}-arm64.tar.gz`;
   const runtime = {
-    node: process.versions.node,
+    // The release runtime, NOT the build host's: both installers gate on
+    // NODE_MIN_MAJOR=22, and RELEASE_NODE_MIN_MAJOR is the constant a test ties
+    // to them. `process.versions.node` made the manifest depend on who staged it --
+    // always right on CI (Node 22), wrong on any other host.
+    node: RELEASE_NODE_MIN_MAJOR,
     next: readDependencyVersion(path.join(standaloneRoot, "apps", "web", "package.json")),
     prisma: "6.19.3",
   };

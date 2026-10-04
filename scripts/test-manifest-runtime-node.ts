@@ -36,14 +36,39 @@ function check(name: string, ok: boolean, detail = ""): void {
 
 console.log("TASK-106 runtime.node states the release contract, not the build host\n");
 
-// 1. The manifest builder must not embed the build host's own version.
-const manifestSrc = fs.readFileSync(path.join(REPO, "scripts", "release-manifest.ts"), "utf8");
-const cliBlock = manifestSrc.slice(manifestSrc.indexOf('command === "build"'));
-check(
-  "the build CLI does not use process.version for runtime.node",
-  !/node:\s*process\.version/.test(cliBlock),
-  "runtime.node is still the BUILD HOST's Node version",
-);
+// 1. NO manifest writer may embed the build host's own version.
+  //
+  // This check used to read only release-manifest.ts, which is where the bug was
+  // first seen. It missed the three stagers that actually build the shipped
+  // manifest (stage-real-artifact, stage-arm64-artifact, stage-local-test-artifact),
+  // so the defect survived a fix that only touched the builder. The value is
+  // wrong exactly when the build host differs from the release target -- only ever
+  // true locally -- so a test that does not scan the writers cannot catch a
+  // regression. Scan every file that calls buildReleaseManifest.
+  const manifestSrc = fs.readFileSync(path.join(REPO, "scripts", "release-manifest.ts"), "utf8");
+  const cliBlock = manifestSrc.slice(manifestSrc.indexOf('command === "build"'));
+  check(
+    "the build CLI does not use process.version for runtime.node",
+    !/node:\s*process\.version/.test(cliBlock),
+    "runtime.node is still the BUILD HOST's Node version",
+  );
+
+  const scriptsDir = path.join(REPO, "scripts");
+  const writers = fs
+    .readdirSync(scriptsDir)
+    .filter((f) => f.endsWith(".ts"))
+    .filter((f) => fs.readFileSync(path.join(scriptsDir, f), "utf8").includes("buildReleaseManifest"));
+  check("the manifest writers were found", writers.length > 0, `nothing to scan in ${scriptsDir}`);
+  for (const writer of writers) {
+    const src = fs.readFileSync(path.join(scriptsDir, writer), "utf8");
+    // Prose mentions are fine; an actual assignment is not.
+    const code = src.replace(/\/\/[^\n]*/g, "");
+    check(
+      `${writer} does not stamp the build host's Node into the manifest`,
+      !/node:\s*process\.versions?\.node/.test(code),
+      "runtime.node is the BUILD HOST's version, not the release's",
+    );
+  }
 
 // 2. The declared constant must equal what the installers enforce.
 const declared = /RELEASE_NODE_MIN_MAJOR\s*=\s*"(\d+)"/.exec(manifestSrc)?.[1];
