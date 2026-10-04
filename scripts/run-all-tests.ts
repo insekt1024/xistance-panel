@@ -128,6 +128,7 @@ const SUITES: Suite[] = [
   TS("test-release-manifest-freshness.ts"),
   TS("test-release-assets.ts"),
   TS("test-release-attestation.ts"),
+  TS("test-audit-gate.ts"),
   TS("test-release-audit.ts"),
   TS("test-release-workflow.ts"),
   // TASK-101: the release workflow built the manifest from apps/web/.next/standalone

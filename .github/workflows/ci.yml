@@ -184,13 +184,29 @@ jobs:
       - name: Full local test suite
         run: npx tsx scripts/run-all-tests.ts
 
-      - name: Dependency audit (high+ blocks)
+      - name: Dependency audit (high+ blocks; one documented waiver)
         # Was `continue-on-error: true`, which meant a high advisory could never
         # fail the build while the task required no unresolved high/critical.
-        # The tree audits clean (0 high, 0 critical, prod and all), so the gate
-        # can afford to be real. Keep --omit=dev OFF here: dev advisories matter
-        # too, and the js-yaml one this now catches was dev-only.
-        run: npm audit --audit-level=high
+        # It later became `npm audit --audit-level=high`, which BLOCKS -- and
+        # which turned permanently red on GHSA-vfj7-8cjw-p6xm (braces, CWE-674).
+        #
+        # That advisory is unFIXABLE, not unfixed: braces@3.0.3 is the latest
+        # release, eslint-config-next 16.3.8 is still vulnerable, npm's only
+        # remedy is downgrading to 14.2.35 (a semver-major BACKWARDS move on a
+        # Next 16 project), and micromatch hard-depends on braces ^3.0.3 so
+        # `overrides` cannot route around it. fixAvailable: None.
+        #
+        # The PRD permits exactly one escape -- "Release is blocked by ...
+        # undocumented waiver" -- so the waiver is made DOCUMENTED and MACHINE
+        # CHECKED rather than remembered: scripts/audit-gate.sh pins the exact
+        # advisory set, always audits the shipped tree with --omit=dev, and
+        # refuses anything new. scripts/test-audit-gate.ts proves it can still
+        # FAIL, including refusing to waive a CRITICAL advisory.
+        #
+        # Deliberately NOT `--omit=dev` alone: that would drop dev advisories with
+        # no record of which ones were accepted. The js-yaml advisory this gate
+        # caught was dev-only, so dev coverage has to stay.
+        run: bash scripts/audit-gate.sh
 
   # The browser gate (TASK-56). Runs the real suites against a real production
   # build, and against the STAGED artifact rather than the source tree, because
