@@ -931,3 +931,25 @@ Replaced that single asset — all 5 sidecars now verify on a clean download.
 
 Tags `v1.2.2` and `v1.2.3` both exist; `v1.2.2` remains without a release. Neither
 the tag nor any asset was mutated to make a check pass.
+
+### Final state verified after the v1.2.3 publication
+- CI `37258106669` on `83f3d85`: all four jobs success (Arm64 payload, Lint ·
+  Typecheck · Version · Tests, Browser gate, Build + Docker); aggregate
+  `77/77 suites passed`, `RESULT: PASS`.
+- `HEAD == origin/master == 83f3d85`.
+- Release `v1.2.3`: public, non-draft, non-prerelease, 11 assets. Annotated tag
+  unchanged at `d6fec72` -- no tag or archive was mutated after publication.
+- All 5 published `.sha256` sidecars verify on a clean re-download.
+- Live Ubuntu 24.04 target serves `version 1.2.3`, database and engine ok.
+- The reported command
+  (`--release/--version v1.2.3 --port 8085 --admin-email ...`) runs clean against
+  the PUBLISHED installer.
+
+Local gates on the final tree: version:check / typecheck / lint all rc=0;
+`test-release-installer` 62/62, `test-cli-regression` 46/46, line-endings 80/80,
+`test-embedded-manifest-provenance` 3/3, `test-documented-install-command` 34/34,
+`test-release-workflow` 4/4 assertions, `test-release-docs` contract satisfied.
+
+Open item, stated rather than hidden: tag `v1.2.2` exists with no release. It is a
+bump commit whose run died before publishing. Deleting it would rewrite published
+refs, so it is left in place; `v1.2.3` is the release to install.
