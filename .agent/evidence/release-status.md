@@ -823,3 +823,29 @@ Non-vacuity by mutation, each turning the suite red:
   committed blob, and all three new links return HTTP 200
 
 Docs only: no archive, manifest, tag, or release asset was touched.
+
+### CI on the docs commits
+
+| Run | Commit | Result |
+| --- | --- | --- |
+| `37247637080` | `4392ce9` | cancelled - superseded by the evidence push |
+| `37247936041` | `33f64d6` | **success**, all four jobs |
+
+Run `37247936041` is the one that counts: `Arm64 payload` success, `Lint ·
+Typecheck · Version · Tests` success, `Browser gate` success, `Build + Docker`
+success. Its log shows `test-documented-install-command.ts` passing and the
+aggregate at `77/77 suites passed` / `RESULT: PASS`.
+
+Also verified for the docs change alone:
+
+- `v1.2.0^{commit}` is still `c2ecab7`; the annotated tag object `8ca8051` did
+  not move, and the README inside the tag is still the old one (correct: an
+  immutable tag keeps its own bytes)
+- the release is still public, non-draft, non-prerelease, 11 assets, and the
+  installer asset's `updatedAt` is unchanged
+- BOTH installer sources the README now offers were executed in the live
+  Ubuntu 24.04 target: the tag copy (36,488 B, pre-TMPDIR) and the release
+  asset (36,742 B, TMPDIR-aware) each pass `bash -n` and each `--dry-run`
+  exits `0`
+- `README_FA.md` is valid UTF-8, LF-only, and structurally parallel to the
+  English (every new section present in both)
