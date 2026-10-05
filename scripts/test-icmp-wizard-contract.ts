@@ -88,5 +88,26 @@ const r5 = TunnelConfigSchema.safeParse(
 );
 check("SOCKS5-style base64 passphrase validates when paired with an algorithm", r5.success);
 
+// The import dialog is the other entry point: a user pastes a config and the
+// dialog derives the method from the config SHAPE, then the server validates it
+// against the same union. Both halves are exercised here with the exact shape
+// buildIcmpClientConfig() emits, because a paste that derives the wrong method
+// is rejected with a message about a method the user never chose.
+
+// Mirrors deriveMethod() in import-dialog.tsx.
+function deriveMethod(cfg) {
+  if (!cfg || typeof cfg !== "object") return null;
+  const c = cfg;
+  for (const k of ["backhaul", "frp", "gost", "icmp", "ssh", "direct", "reverse", "xray", "xui"]) {
+    if (c[k] !== undefined) return k.toUpperCase();
+  }
+  if (Array.isArray(c.portForwards)) return "PORT_FORWARD";
+  return null;
+}
+
+const pasted = { method: "ICMP", icmp: { ...(withTarget as any).icmp } };
+check("a pasted ICMP config derives ICMP from its shape", deriveMethod(pasted) === "ICMP");
+check("a pasted ICMP config validates against the same union", TunnelConfigSchema.safeParse(pasted).success);
+
 console.log(`--- ${pass} passed, ${fail} failed ---`);
 process.exit(fail > 0 ? 1 : 0);
