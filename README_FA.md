@@ -55,16 +55,16 @@
 
 ## نسخهٔ فعلی
 
-**v1.2.0** — <https://github.com/insekt1024/xistance-panel/releases/tag/v1.2.0>
+**v1.2.2** — <https://github.com/insekt1024/xistance-panel/releases/tag/v1.2.2>
 
-منتشرشده در ۲۰۲۶-۱۰-۰۴ با ۱۱ فایل: یک آرشیو برای هر معماری، فایل `.sha256` برای
+منتشرشده در ۲۰۲۶-۱۰-۰۵ با ۱۱ فایل: یک آرشیو برای هر معماری، فایل `.sha256` برای
 هر کدام، نصب‌کننده، دو کتابخانهٔ کمکی آن (`release-layout.sh` و `service-unit.sh`)
 همراه با sidecar، و `release-manifest.json`.
 
 پیش از نصب، مطمئن شوید همان چیزی را می‌گیرید که انتظار دارید:
 
 ```bash
-curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.2.0/release-manifest.json
+curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.2.2/release-manifest.json
 cat release-manifest.json
 ```
 
@@ -74,6 +74,18 @@ cat release-manifest.json
 
 آرتیفکت `arm64` روی یک رانر بومی `arm64` ساخته می‌شود — نه کراس‌کامپایل و نه
 شبیه‌سازی.
+
+### تغییرات v1.2.2
+
+`--port`، `--admin-email` و `--admin-password` حالا در نصب نسخهٔ انتشار کار می‌کنند.
+پیش از این، همان دستور یک‌خطی با `Unknown option` رد می‌شد و پورت در فایل
+محیطی به‌صورت ثابت روی 8080 می‌ماند — یعنی نصب release اصلاً امکان تغییر پورت
+نداشت. اکنون هر مقداری که بدهید پیش از نوشتن هر چیزی اعتبارسنجی می‌شود
+(۱ تا ۶۵۵۳۵) و در `/etc/xistance/xistance.env` ثبت می‌گردد.
+
+اگر روی `v1.2.0` هستید، این تغییر تا وقتی `v1.2.2` یا بالاتر را نصب نکنید
+برایتان کاری نمی‌کند، چون `bootstrap.sh` نصب‌کننده را از همان تگی می‌گیرد که پین
+کرده‌اید.
 
 ## نصب روی سرور (اوبونتو ۲۲.۰۴ / ۲۴.۰۴)
 
@@ -94,21 +106,21 @@ cat release-manifest.json
 ### پیشنهادی — بدون بیلد، با آرتیفکت آماده
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.2.0/scripts/release-install.sh \
+curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.2.2/scripts/release-install.sh \
   -o /tmp/xistance-release-install.sh
-curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.2.0/scripts/lib/release-layout.sh \
+curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.2.2/scripts/lib/release-layout.sh \
   -o /tmp/release-layout.sh
-curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.2.0/scripts/lib/service-unit.sh \
+curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.2.2/scripts/lib/service-unit.sh \
   -o /tmp/service-unit.sh
-sudo bash /tmp/xistance-release-install.sh --version v1.2.0
+sudo bash /tmp/xistance-release-install.sh --version v1.2.2
 ```
 
 نسخه **عمداً پین شده** — حالت `latest` وجود ندارد، پس همین دستور همیشه
 همان نسخه را نصب می‌کند. معماری `amd64` و `arm64` خودکار تشخیص داده می‌شود.
 
-> **منبع هر فایل مهم است.** دستورهای بالا از تگ **`v1.2.0`** فایل می‌گیرند و تگ
+> **منبع هر فایل مهم است.** دستورهای بالا از تگ **`v1.2.2`** فایل می‌گیرند و تگ
 > تغییرناپذیر است — یعنی نصب‌کننده‌ای که از آنجا می‌گیرید دقیقاً همان است که همراه
-> آرشیوهای `v1.2.0` منتشر شد. نصب‌کنندهٔ پیوست‌شده به [نسخهٔ انتشار](https://github.com/insekt1024/xistance-panel/releases/tag/v1.2.0)
+> آرشیوهای `v1.2.2` منتشر شد. نصب‌کنندهٔ پیوست‌شده به [نسخهٔ انتشار](https://github.com/insekt1024/xistance-panel/releases/tag/v1.2.2)
 > ممکن است اصلاحی جدیدتر روی همان تگ داشته باشد. هر دو با یک هش آرشیو راستی‌آزمایی
 > می‌شوند؛ اگر جدیدترین نصب‌کننده را می‌خواهید دانلود از نسخهٔ انتشار، و اگر
 > دقیقاً همان بایت‌های بازبینی‌شده و منتشرشده را می‌خواهید، از تگ بگیرید.
@@ -116,15 +128,15 @@ sudo bash /tmp/xistance-release-install.sh --version v1.2.0
 > برای گرفتن مستقیم فایل نسخهٔ انتشار (که معمولاً همین را می‌خواهید):
 >
 > ```bash
-> curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.2.0/release-install.sh
-> sudo bash release-install.sh --version v1.2.0
+> curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.2.2/release-install.sh
+> sudo bash release-install.sh --version v1.2.2
 > ```
 
 گزینه‌های پرکاربرد:
 
 | گزینه | کارش |
 | --- | --- |
-| `--version <TAG>` | **اجباری.** تگ دقیق نسخه، مثلاً `v1.2.0`. |
+| `--version <TAG>` | **اجباری.** تگ دقیق نسخه، مثلاً `v1.2.2`. |
 | `--arch <ARCH>` | تشخیص معماری را دستی تعیین کنید (`amd64` یا `arm64`). |
 | `--archive <FILE>` | نصب یک آرتیفکت از پیش دانلودشده به‌جای دانلود. فایل `.sha256` باید کنارش باشد. مناسب شبکه‌های بدون اینترنت. |
 | `--install-dir <DIR>` | ریشهٔ نسخه‌ها (پیش‌فرض `/opt/xistance`). |
@@ -135,7 +147,7 @@ sudo bash /tmp/xistance-release-install.sh --version v1.2.0
 برای دیدن طرح کار بدون اجرا:
 
 ```bash
-sudo bash /tmp/xistance-release-install.sh --version v1.2.0 --dry-run
+sudo bash /tmp/xistance-release-install.sh --version v1.2.2 --dry-run
 ```
 
 ### نصب‌کننده دقیقاً چه می‌کند
@@ -184,7 +196,7 @@ curl -s http://127.0.0.1:8080/api/health
 برای رفتن به نسخهٔ جدیدتر، همان نصب‌کننده را با **تگ جدید** اجرا کنید:
 
 ```bash
-sudo bash /tmp/xistance-release-install.sh --version v1.2.0
+sudo bash /tmp/xistance-release-install.sh --version v1.2.2
 ```
 
 هیچ `latest` شناوری وجود ندارد: همیشه دقیقاً همان نسخه‌ای را که می‌خواهید
@@ -241,7 +253,7 @@ sha256sum --check xistance-panel-v<version>-<arch>.tar.gz.sha256
 می‌توانید آرتیفکت را پیش از نصب، بدون استقرار آن، راستی‌آزمایی کنید:
 
 ```bash
-npx tsx scripts/verify-artifact.ts xistance-panel-v1.2.0-amd64.tar.gz
+npx tsx scripts/verify-artifact.ts xistance-panel-v1.2.2-amd64.tar.gz
 ```
 
 این دستور checksum، مانیفست و ساختار آرشیو را بررسی می‌کند و مسیرهای مطلق،

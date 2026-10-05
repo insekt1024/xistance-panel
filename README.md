@@ -63,16 +63,16 @@ tunnel for you.
 
 ## The current release
 
-**v1.2.0** — <https://github.com/insekt1024/xistance-panel/releases/tag/v1.2.0>
+**v1.2.2** — <https://github.com/insekt1024/xistance-panel/releases/tag/v1.2.2>
 
-Published 2026-10-04 with 11 assets: an archive per architecture, a `.sha256`
+Published 2026-10-05 with 11 assets: an archive per architecture, a `.sha256`
 sidecar for each, the installer, its two helper libraries (`release-layout.sh`,
 `service-unit.sh`) with sidecars, and `release-manifest.json`.
 
 Before installing, confirm you have what you expect:
 
 ```bash
-curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.2.0/release-manifest.json
+curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.2.2/release-manifest.json
 cat release-manifest.json
 ```
 
@@ -82,6 +82,18 @@ those numbers, and the installer refuses to deploy anything that does not match.
 
 The `arm64` artifact is built on a native `arm64` runner — it is not a
 cross-compiled or emulated build.
+
+### What changed in v1.2.2
+
+`--port`, `--admin-email` and `--admin-password` now work with a release
+install. Before this, the recommended one-line command rejected `--port` with
+`Unknown option`, and the port was hardcoded to 8080 in the environment file
+regardless — so a release install could not be moved to another port at all.
+Any value you pass is now validated (1–65535) before anything is written, and
+written into `/etc/xistance/xistance.env`.
+
+If you are on `v1.2.0`, this fixes nothing for you until you install `v1.2.2` or
+later, because `bootstrap.sh` fetches the installer from the tag you pin.
 
 ## Install on a server (Ubuntu 22.04 / 24.04)
 
@@ -106,7 +118,7 @@ prebuilt release — no build runs on your server:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/master/scripts/bootstrap.sh \
-  -o /tmp/xp-install.sh && sudo bash /tmp/xp-install.sh --release --version v1.2.0 \
+  -o /tmp/xp-install.sh && sudo bash /tmp/xp-install.sh --release --version v1.2.2 \
   --port 8080 --admin-email you@example.com
 ```
 
@@ -117,23 +129,23 @@ always installs the same build and every install is auditable afterwards.
 The equivalent, if you would rather see each file before it runs:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.2.0/scripts/release-install.sh \
+curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.2.2/scripts/release-install.sh \
   -o /tmp/xistance-release-install.sh
-curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.2.0/scripts/lib/release-layout.sh \
+curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.2.2/scripts/lib/release-layout.sh \
   -o /tmp/release-layout.sh
-curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.2.0/scripts/lib/service-unit.sh \
+curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.2.2/scripts/lib/service-unit.sh \
   -o /tmp/service-unit.sh
-sudo bash /tmp/xistance-release-install.sh --version v1.2.0
+sudo bash /tmp/xistance-release-install.sh --version v1.2.2
 ```
 
 The version is **pinned on purpose** — there is no `latest` default, so the
 same command always installs the same build. The installer detects `amd64` vs
 `arm64` for you.
 
-> **Where each file comes from matters.** The URLs below fetch from the `v1.2.0`
+> **Where each file comes from matters.** The URLs below fetch from the `v1.2.2`
 > **tag**, which is immutable — the installer you get there is byte-for-byte the
-> one that shipped with the `v1.2.0` archives. The installer attached to the
-> [release](https://github.com/insekt1024/xistance-panel/releases/tag/v1.2.0) may
+> one that shipped with the `v1.2.2` archives. The installer attached to the
+> [release](https://github.com/insekt1024/xistance-panel/releases/tag/v1.2.2) may
 > carry a later fix on the same tag. Both verify against the same archive digests;
 > pick the release download if you want the newest installer, or the tag if you
 > want the exact bytes that were reviewed and published together.
@@ -141,15 +153,15 @@ same command always installs the same build. The installer detects `amd64` vs
 > To take the release asset directly (usually what you want):
 >
 > ```bash
-> curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.2.0/release-install.sh
-> sudo bash release-install.sh --version v1.2.0
+> curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.2.2/release-install.sh
+> sudo bash release-install.sh --version v1.2.2
 > ```
 
 Useful options:
 
 | Option | What it does |
 | --- | --- |
-| `--version <TAG>` | **Required.** Exact release tag, e.g. `v1.2.0`. |
+| `--version <TAG>` | **Required.** Exact release tag, e.g. `v1.2.2`. |
 | `--arch <ARCH>` | Override architecture detection (`amd64` or `arm64`). |
 | `--archive <FILE>` | Install a pre-downloaded artifact instead of fetching one. The `.sha256` sidecar must sit beside it. This is the air-gapped path. |
 | `--install-dir <DIR>` | Release root (default `/opt/xistance`). |
@@ -160,7 +172,7 @@ Useful options:
 To see exactly what it would do first:
 
 ```bash
-sudo bash /tmp/xistance-release-install.sh --version v1.2.0 --dry-run
+sudo bash /tmp/xistance-release-install.sh --version v1.2.2 --dry-run
 ```
 
 ### What the installer actually does
@@ -209,7 +221,7 @@ curl -s http://127.0.0.1:8080/api/health
 To move to a newer release, run the same installer with the **new** tag:
 
 ```bash
-sudo bash /tmp/xistance-release-install.sh --version v1.2.0
+sudo bash /tmp/xistance-release-install.sh --version v1.2.2
 ```
 
 There is no floating `latest`: you always name the exact release you want, so
@@ -282,7 +294,7 @@ sha256sum --check xistance-panel-v<version>-<arch>.tar.gz.sha256
 You can also verify an artifact before installing it, without deploying it:
 
 ```bash
-npx tsx scripts/verify-artifact.ts xistance-panel-v1.2.0-amd64.tar.gz
+npx tsx scripts/verify-artifact.ts xistance-panel-v1.2.2-amd64.tar.gz
 ```
 
 That checks the checksum, the manifest, and the archive layout, and rejects
