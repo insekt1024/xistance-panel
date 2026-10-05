@@ -332,6 +332,46 @@ async function main(): Promise<void> {
   console.log("✅ Release workflow: architecture matrix, staging, inspection, manifest, checksum, and publish order verified");
   testCiVerdictRunsAgainstAStagedPayload();
 
+  /*
+   * Found the hard way: release run 37254378970 built the artifact, then ran the
+   * browser gate (`npx playwright install --with-deps chromium`, ~1.5GB), and
+   * only THEN tried to tar the artifact. The runner was out of disk and tar died
+   * with "Cannot write: Broke" / "Error is not recoverable" on both
+   * architectures -- no disk error anywhere in the log, because tar does not say
+   * ENOSPC. ci.yml already archives first; release.yml had the two steps in the
+   * opposite order, so this had never been exercised on a full release run.
+   */
+  function testArchivePrecedesTheDiskHeavyBrowserGate(): void {
+    const artifactJob = (workflow as { jobs?: Record<string, { steps?: WorkflowStep[] }> })
+      .jobs?.artifact;
+    assert.ok(artifactJob, "the workflow must have an artifact job");
+    const names: string[] = (artifactJob.steps ?? []).map((s: WorkflowStep) => String(s.name ?? ""));
+
+    const archive = names.findIndex((n) => /create archive/i.test(n));
+    const browser = names.findIndex((n) => /browser gate/i.test(n));
+
+    assert.ok(archive >= 0, "the artifact job must create an archive");
+    assert.ok(browser >= 0, "the artifact job must run a browser gate");
+
+    assert.ok(
+      archive < browser,
+      `the archive must be created before the browser gate (archive step ${archive + 1}, browser gate step ${browser + 1}); ` +
+        "playwright install --with-deps pulls ~1.5GB and tar then fails with ENOSPC reported as 'Cannot write: Broke'",
+    );
+
+    // A guard must exist so the failure names disk space rather than surfacing
+    // three steps later inside tar.
+    const hasDiskGuard = (artifactJob.steps ?? []).some((s: WorkflowStep) =>
+      /(reclaim|free space|df -k)/i.test(String(s.run ?? "")),
+    );
+    assert.ok(
+      hasDiskGuard,
+      "no disk-space check before the browser gate; an exhausted runner fails as 'Cannot write: Broke'",
+    );
+
+    console.log("\u2705 Release workflow: the archive is created before the disk-heavy browser gate");
+  }
+
   function testTagPushUsesAValidRefspec(): void {
     const versionJob = workflow.jobs?.version;
     assert.ok(versionJob, "the workflow must have a version job");
@@ -369,6 +409,7 @@ async function main(): Promise<void> {
     console.log("\u2705 Release workflow: the tag push uses a valid git refspec");
   }
   testTagPushUsesAValidRefspec();
+  testArchivePrecedesTheDiskHeavyBrowserGate();
 }
 
 /**

@@ -203,21 +203,6 @@ jobs:
       # therefore before anything is published (TASK-56 AC2). amd64 only: it is
       # the architecture the browser suites can boot, and a gate that cannot run
       # must not be recorded as having run.
-      - name: Browser gate (staged artifact, amd64)
-        if: ${{ matrix.architecture == 'amd64' }}
-        run: |
-          npx playwright install --with-deps chromium
-          npm run test:browser
-
-      - name: Upload browser gate evidence
-        if: ${{ always() && matrix.architecture == 'amd64' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: browser-gate-${{ needs.version.outputs.version }}
-          path: .agent/tmp-smoke/gate-*/
-          if-no-files-found: warn
-          retention-days: 30
-
       - name: Create archive
         run: |
           tar -czf "dist/${{ matrix.architecture }}/xistance-panel-v${{ needs.version.outputs.version }}-${{ matrix.architecture }}.tar.gz" \
@@ -232,6 +217,41 @@ jobs:
         run: |
           archive="dist/${{ matrix.architecture }}/xistance-panel-v${{ needs.version.outputs.version }}-${{ matrix.architecture }}.tar.gz"
           npx tsx scripts/release-manifest.ts verify "$archive" "$archive.sha256"
+
+      # `tar` above has already produced the archive, so the staged artifact and
+      # the standalone build tree are dead weight for the rest of this job. Drop
+      # them before the browser gate pulls ~1.5GB of Chromium + OS deps: on run
+      # 37254378970 that ordering exhausted the runner and tar died with the
+      # unhelpful "Cannot write: Broke" instead of naming the real cause.
+      - name: Reclaim disk before the browser gate
+        run: |
+          set -euo pipefail
+          avail_kb="$(df -k . | awk 'NR==2 {print $4}')"
+          echo "  free space before prune: $((avail_kb / 1024)) MiB"
+          rm -rf dist/artifact node_modules/.cache .next/cache 2>/dev/null || true
+          after_kb="$(df -k . | awk 'NR==2 {print $4}')"
+          echo "  free space after prune:  $((after_kb / 1024)) MiB"
+          # Fail loudly here rather than three steps later inside tar.
+          need_kb=4096
+          if [[ "$after_kb" -lt "$need_kb" ]]; then
+            echo "::error::only $((after_kb / 1024)) MiB free; the browser gate needs ~4 GiB"
+            exit 1
+          fi
+
+      - name: Browser gate (staged artifact, amd64)
+        if: ${{ matrix.architecture == 'amd64' }}
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:browser
+
+      - name: Upload browser gate evidence
+        if: ${{ always() && matrix.architecture == 'amd64' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: browser-gate-${{ needs.version.outputs.version }}
+          path: .agent/tmp-smoke/gate-*/
+          if-no-files-found: warn
+          retention-days: 30
 
       # The checksum proves the ARCHIVE is intact. It says nothing about whether
       # the manifest inside it describes that archive. Recompute the payload
