@@ -746,3 +746,80 @@ Verified after republishing:
 
 The release remains non-draft, non-prerelease, 11 assets, at
 `https://github.com/insekt1024/xistance-panel/releases/tag/v1.2.0`.
+
+## README updated: the tag and the release asset are different installers
+
+`4392ce9`, pushed to `master`.
+
+The README documented the install path but never said where the bytes come
+from, and that distinction is now load-bearing:
+
+| Source | SHA-256 | `mktemp` work dir |
+| --- | --- | --- |
+| `raw.githubusercontent.com/.../v1.2.0/scripts/release-install.sh` (immutable tag) | `5fa72a6347532a75` | hardcoded `/tmp` |
+| `releases/download/v1.2.0/release-install.sh` (release asset) | `a0ac1b65f39c1ad3` | `${TMPDIR:-/tmp}` |
+
+The only difference between them is that one line. The tag copy is not wrong:
+an immutable tag must keep the exact bytes that shipped with its archives, and
+both installers verify against the same archive digests. But it is no longer
+the newest installer, so the README now states this and gives the release-asset
+command for users who want it, instead of leaving a silent discrepancy.
+
+### The README now claims the enforced gate, not just the old measurement
+
+- The 256 MiB cgroup cap with a 75 MiB peak is not prose: it is
+  `scripts/test-lowram-cgroup-gate.sh`, registered in `run-all-tests.ts`, and it
+  passes inside the `77/77 RESULT: PASS` aggregate.
+- The performance table keeps the original 1 vCPU / 961 MB figures
+  (traced to `.agent/evidence/task-1.md`) ALONGSIDE a second measurement on
+  16 vCPU / 7.8 GB, rather than overwriting one with the other. The two are not
+  comparable hardware.
+- A `## The current release` section states the 11 published assets and points
+  at `release-manifest.json` as the pre-install check. Both languages updated.
+
+### The doc contract had to change, and it was wrong in two ways
+
+`scripts/test-documented-install-command.ts` asserted every documented URL
+contains `/v1.2.0/`, which only matched the `raw.githubusercontent` spelling.
+The correctly-pinned `releases/download/v1.2.0/` URL was therefore reported as
+unpinned. It now accepts either immutable shape and still rejects `latest` and
+any unpinned ref.
+
+Two genuine parser defects surfaced while fixing that, both in the test itself:
+
+1. `curl\s+-fsSL?\s+(\S+)` captured the literal `-O` from `curl -fsSL -O <url>`,
+   so the release-asset command never produced a URL.
+2. The first token-walk replacement `break`ed at the URL, losing the trailing
+   `-o <dest>` and failing three `-o destination` assertions.
+
+Both are gone: one token walk reads `-o` from the stream, accepts only `http(s)`
+URLs, and pin-asserts repo artifacts only -- a documented localhost health check
+(`http://127.0.0.1:8080/api/health`) is not a versioned artifact.
+
+### Verified
+
+| Gate | Result |
+| --- | --- |
+| `test-documented-install-command.ts` | `34 passed, 0 failed` |
+| `test-release-docs.ts` | contract clean, both languages agree |
+| `version:check` / `lint` / `typecheck` | clean, lint `0 errors` (28 warnings) |
+| `test-line-endings.sh` | `80 passed, 0 failed` |
+| aggregate the low-RAM gate belongs to | `77/77`, `RESULT: PASS`, `AGG_RC=0` |
+
+Non-vacuity by mutation, each turning the suite red:
+
+- unpinning the tag URL to `master` -> 2 failing assertions
+- swapping in a floating `releases/latest/download/...` -> 3 failing assertions
+- deleting a documented `-o /tmp/...` continuation line -> the 3 `-o` assertions
+
+### The documented command was executed, not just read
+
+- `curl -fsSL -O <release-asset URL>` -> 36,742 B, digest `a0ac1b65f39c1ad3`,
+  identical to what the release serves
+- run in the live Ubuntu 24.04 target: `bash -n` clean, `--dry-run` exits `0` and
+  resolves `/opt/xistance`, the `v1.2.0` release dir, and the real
+  `xistance-panel-v1.2.0-amd64.tar.gz` asset URL
+- the raw `README.md` GitHub serves for `master` is byte-identical to the
+  committed blob, and all three new links return HTTP 200
+
+Docs only: no archive, manifest, tag, or release asset was touched.
