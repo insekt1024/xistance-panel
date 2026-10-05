@@ -18,7 +18,7 @@
  *   2. HONESTY    -- a method may only be listed if it is one of the nine, and
  *                   anything NOT listed must appear in
  *                   `methodsWithoutRealBinaryEvidence`. The two lists must be
- *                   an exact partition of the nine methods, so no method can be
+ *                   an exact partition of every method, so no method can be
  *                   silently dropped from both.
  *   3. NO OVERCLAIM -- `trafficCrossed` and `reconnect` require specific,
  *                   checkable statements, and each entry must point at a real
@@ -227,7 +227,7 @@ for (const run of doc.runs ?? []) {
   }
 }
 
-// ---- 2. honesty: an exact partition of the nine methods --------------------
+// ---- 2. honesty: an exact partition of every method --------------------
 const listed = new Set((doc.runs ?? []).map((r) => r.method));
 // `methodsWithoutRealBinaryEvidence` entries are objects carrying a `reason`.
 // A bare string would record THAT a method is unproved but not WHY, and a
@@ -258,8 +258,8 @@ if (dupes.length === 0) ok("no method is listed twice in the ledger");
 else bad("no method is listed twice in the ledger", dupes.join(", "));
 
 for (const m of listed) {
-  if ((ALL as string[]).includes(m)) ok(`${m} is one of the nine release methods`);
-  else bad(`${m} is one of the nine release methods`, `not in ${ALL.join(", ")}`);
+  if ((ALL as string[]).includes(m)) ok(`${m} is one of the ${ALL.length} release methods`);
+  else bad(`${m} is one of the ${ALL.length} release methods`, `not in ${ALL.join(", ")}`);
 }
 
 const overlap = [...listed].filter((m) => notListed.has(m));
@@ -270,10 +270,10 @@ else bad("no method appears in both lists", overlap.join(", "));
 const covered = new Set([...listed, ...notListed]);
 const missing = ALL.filter((m) => !covered.has(m));
 if (missing.length === 0)
-  ok("every one of the nine methods is accounted for in exactly one list");
+  ok(`every one of the ${ALL.length} methods is accounted for in exactly one list`);
 else
   bad(
-    "every one of the nine methods is accounted for in exactly one list",
+    `every one of the ${ALL.length} methods is accounted for in exactly one list`,
     `${missing.join(", ")} appear in NEITHER list -- a method must be either proved or recorded as unproved, never silently absent`,
   );
 
@@ -331,6 +331,24 @@ else
       ? fs.readFileSync(path.join(REPO, "scripts", "gen-traffic-fixtures.ts"), "utf8")
       : "";
     for (const m of fixtures.matchAll(/emit\(\s*"([A-Z_]{3,12})"/g)) covered.add(m[1]);
+
+    // ICMP has its own shell suite: it needs two network namespaces and a
+    // raw ICMP socket, so it cannot be a case in the single-host suite above.
+    // Detect it the same way -- from the suite's own assertions, not a
+    // hand-maintained list that would drift from the file.
+    const icmp = path.join(REPO, "scripts", "test-real-icmp-tunnel.sh");
+    if (fs.existsSync(icmp)) {
+      const icmpSrc = fs.readFileSync(icmp, "utf8");
+      if (/buildIcmpServerConfig/.test(icmpSrc)) covered.add("ICMP");
+      chk(
+        "the ICMP data path is driven by the product's builder, not a replica",
+        /buildIcmpServerConfig/.test(icmpSrc) &&
+          /buildIcmpClientConfig/.test(icmpSrc) &&
+          /ip netns/.test(icmpSrc),
+        "hand-written configs would prove a fixture, not the product's pingtunnel " +
+          "builders, and a suite without ip netns cannot prove two distinct nodes",
+      );
+    }
 
     // PORT_FORWARD execs no binary: the forwarder is in-process Node, so it has no
     // fixture file. It is credited to the suite that drives `startForwarder()`

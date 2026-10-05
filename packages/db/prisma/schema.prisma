@@ -108,7 +108,7 @@ model Node {
 model Tunnel {
   id             String    @id @default(uuid())
   name           String
-  method         String // BACKHAUL | FRP | GOST | SSH | PORT_FORWARD
+  method         String // TunnelMethod enum, stored by name (see packages/types)
   // desired state (what the user wants)
   status         String    @default("stopped") // stopped | starting | running | stopping
   // actual state reported by the process supervisor

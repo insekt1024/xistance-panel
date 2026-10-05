@@ -1,12 +1,12 @@
 # AGENTS.md, tunnel-core
 
-Tunnel engine for 9 methods: BACKHAUL, FRP, GOST, SSH, PORT_FORWARD, DIRECT, REVERSE, XRAY, XUI. 17 files under `src/`. Only dependency is `@xistance/types`.
+Tunnel engine for 10 methods: BACKHAUL, FRP, GOST, ICMP, SSH, PORT_FORWARD, DIRECT, REVERSE, XRAY, XUI. 18 files under `src/`. Only dependency is `@xistance/types`.
 
 ## Modules
 
 - `src/index.ts`, public barrel only. Export new modules here, no logic.
 - `src/engine.ts`, `TunnelEngine.deploy/status/snapshot`, plus `start/stop/restart/remove`, `recentLogs/streamLogs`. `deploy` disposes the prior runtime, builds a plan, writes files, creates processes, then starts them.
-- `src/config/*`, pure builders: `backhaul.ts`/`frp.ts` TOML, `gost.ts`/`direct.ts`/`ssh.ts` argv, `reverse.ts` maps REVERSE to SSH remote-forward, `xray.ts` JSON, `xui.ts` panel URL and sync payload. No I/O, no runner calls.
+- `src/config/*`, pure builders: `backhaul.ts`/`frp.ts` TOML, `gost.ts`/`direct.ts`/`ssh.ts` argv, `pingtunnel.ts` 0600 JSON (secrets never in argv), `reverse.ts` maps REVERSE to SSH remote-forward, `xray.ts` JSON, `xui.ts` panel URL and sync payload. No I/O, no runner calls.
 - `src/process.ts`, `ProcessManager.create` picks the backend; `buildUnit`, `sanitizeUnitText`, `SystemdProcessHandle`, `ChildProcessHandle`.
 - `src/runner.ts`, two transports: `LocalRunner` (execFile/spawn) and `RemoteRunner` (OpenSSH, sshpass for password nodes). `isLoopback` decides local vs remote.
 - `src/forwarder.ts` (in-process TCP/UDP forwarders) and `src/forwarder-runner.ts` (standalone worker spawned by PORT_FORWARD plans).
@@ -14,7 +14,7 @@ Tunnel engine for 9 methods: BACKHAUL, FRP, GOST, SSH, PORT_FORWARD, DIRECT, REV
 
 ## Lifecycle and dispatch
 
-- `buildPlan` dispatches per method: backhaul/frp write TOML and run binaries, gost/direct run `gost -L`, ssh/reverse resolve `ssh` plus optional `autossh` via `systemBin`, port-forward runs the forwarder worker locally or `gost -L` remotely, xray writes `xray.json`, xui writes `xui.json` and plans zero processes.
+- `buildPlan` dispatches per method: backhaul/frp write TOML and run binaries, gost/direct run `gost -L`, icmp writes a 0600 JSON per role and runs `pingtunnel -c`, ssh/reverse resolve `ssh` plus optional `autossh` via `systemBin`, port-forward runs the forwarder worker locally or `gost -L` remotely, xray writes `xray.json`, xui writes `xui.json` and plans zero processes.
 - Process selection: local host with systemd gives `SystemdProcessHandle`, remote nodes always get `SystemdProcessHandle`, everything else gets `ChildProcessHandle`. `XT_FORCE_NODE=true` forces the child path.
 - Units: `xt-<sanitized-id>-<role>.service`, id sanitized to `[A-Za-z0-9_-]` and capped at 200 chars. Unit files go under `<dataDir>/systemd/` and are written `0600`. Child logs go to `<dataDir>/logs/<id>.log`.
 

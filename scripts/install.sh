@@ -102,6 +102,8 @@ declare -A BIN_SHA256=(
   [gost_arm64]="3c1bf20c223f424f9a706cc4a3042f6e79084ebe3becca4899e1dc9fb86fd661"
   [xray_amd64]="23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae"
   [xray_arm64]="4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c"
+  [pingtunnel_amd64]="2a4902f62ffc2eae7fefde97a6edbc3db9f2d63a53cd17501c2dc4277b05a897"
+  [pingtunnel_arm64]="e4b4ee5e208eac377a2308883ac75a592b02cc56c45de11d331c85ee25e4e8b7"
 )
 
 STEPS=(preflight deps node swap binaries env build deploy db systemd firewall verify)
@@ -577,7 +579,7 @@ fetch_and_extract() { # url asset-name dst-dir bin-names... -- expected-sha256
 
 install_binaries() {
   mkdir -p "$BIN_DIR"
-  local bh_ver fp_ver gost_ver xray_ver x_asset fails=0
+  local bh_ver fp_ver gost_ver xray_ver x_asset pt_ver fails=0
 
   # A version and its pinned digest MUST come as a pair. If the version floats
   # (resolved from the latest release at run time) while the digest stays pinned
@@ -639,6 +641,30 @@ install_binaries() {
     ok "gost installed." "gost نصب شد."
   else
     warn "gost not installed; check GOST_VERSION=<tag> or a pinned checksum." "دانلود gost ناموفق بود."; fails=1
+  fi
+
+  # pingtunnel (esrrhs/pingtunnel, MIT) carries ICMP tunnels. Upstream ships a
+  # per-OS ZIP whose only entry is the `pingtunnel` binary, so the asset name is
+  # per-arch while the extracted binary is not. NOTE: the FOREIGN/server node
+  # additionally needs root or CAP_NET_RAW to open the raw ICMP socket; the
+  # installer deliberately does NOT grant that here.
+  case "${BIN_SHA256[pingtunnel_${GO_ARCH}]:-}" in
+    "") pt_ver="${PINGTUNNEL_VERSION:-$(latest_release esrrhs/pingtunnel)}"
+        [[ "$pt_ver" == "unknown" ]] && pt_ver="2.10";;
+    *)  pt_ver="${PINGTUNNEL_VERSION:-2.10}"
+        [[ "$pt_ver" != "2.10" ]] && \
+          warn "PINGTUNNEL_VERSION=$pt_ver does not match the pinned digest (from 2.10); it will be refused." \
+               "نسخه pingtunnel با چک‌سام پین‌شده مطابقت ندارد و رد خواهد شد.";;
+  esac
+  info "Installing pingtunnel $pt_ver…" "در حال نصب pingtunnel…"
+  local pt_asset="pingtunnel_linux_${GO_ARCH}.zip"
+  if fetch_and_extract \
+      "$MIRROR/esrrhs/pingtunnel/releases/download/$pt_ver/$pt_asset" \
+      "$pt_asset" "$BIN_DIR" pingtunnel -- "${BIN_SHA256[pingtunnel_${GO_ARCH}]:-}"; then
+    ok "pingtunnel installed." "pingtunnel نصب شد."
+  else
+    warn "pingtunnel not installed; ICMP tunnels will be unavailable on this node." \
+         "دانلود pingtunnel ناموفق بود؛ تونل ICMP روی این گره کار نخواهد کرد."; fails=1
   fi
 
   # xray-core (XTLS/Xray-core) powers XRAY tunnels and reads 3X-UI inbound

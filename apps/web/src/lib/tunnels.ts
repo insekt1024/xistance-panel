@@ -200,8 +200,8 @@ export function redactNode(node: DbNode) {
  * Matching is by NAME at any depth rather than by an exhaustive per-method
  * list, because the alternative rots: a new method with a new secret field
  * would silently be exported until someone remembered to update a switch.
- * `secretKey` lives on a FRP proxy, `password` on FRP/SSH/XUI, `key` on SSH and
- * REVERSE, `token` on BACKHAUL/FRP/XUI.
+ * `secretKey` lives on a FRP proxy, `password` on FRP/SSH/XUI, `key` on SSH,
+ * REVERSE and ICMP, `token` on BACKHAUL/FRP/XUI, `encryptionKey` on ICMP.
  */
 const CONFIG_SECRET_FIELDS = new Set([
   "token",
@@ -209,6 +209,12 @@ const CONFIG_SECRET_FIELDS = new Set([
   "password",
   "passphrase",
   "key",
+  // pingtunnel's end-to-end payload passphrase. Lowercased to
+  // "encryptionkey", so it does NOT match the `key` entry above -- an exact
+  // `Set.has("key")` never sees a prefix. Adding ICMP without this line
+  // exported the payload encryption secret verbatim in every backup.
+  "encryptionkey",
+  "encryptkey",
   "apikey",
   "apitoken",
   "privatekey",
@@ -236,6 +242,21 @@ export function redactTunnelConfig(config: unknown): unknown {
 }
 
 /**
+ * The port out of a pingtunnel `-l` listen address: ":1080", "127.0.0.1:1080"
+ * and "[::1]:1080" all carry the port in the final colon-separated field.
+ *
+ * Parsed rather than stored separately because pingtunnel takes ONE token:
+ * splitting it into host and port in the schema would let the two disagree, and
+ * the schema would then validate a pair that reassembles into something else.
+ */
+function portFromListenAddr(listenAddr: string): number | null {
+  const m = /:(\d{1,5})$/.exec(listenAddr);
+  if (!m) return null;
+  const n = Number(m[1]);
+  return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : null;
+}
+
+/**
  * Primary exposure port for a tunnel, used for display and the port-conflict
  * check. Lives here rather than in the route: it is a pure function of the
  * config with no request context, and the switch must stay exhaustive as
@@ -249,6 +270,11 @@ export function extractPort(config: TunnelConfig): number | null {
       return config.frp.bindPort;
     case "GOST":
       return config.gost.listenPort;
+    case "ICMP":
+      // SOCKS5 mode still listens locally, so the port exists either way; it
+      // parses to null only if the address is malformed, and the schema has
+      // already bounded the shape.
+      return portFromListenAddr(config.icmp.listenAddr);
     case "SSH":
       return config.ssh.localPort;
     case "PORT_FORWARD":

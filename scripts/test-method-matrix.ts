@@ -39,6 +39,7 @@ const SUITE_FOR: Record<string, string> = {
   BACKHAUL: "scripts/test-backhaul.ts",
   FRP: "scripts/test-frp.ts",
   GOST: "scripts/test-gost.ts",
+  ICMP: "scripts/test-icmp.ts",
   SSH: "scripts/test-ssh.ts",
   PORT_FORWARD: "scripts/test-port-forward.ts",
   DIRECT: "scripts/test-direct.ts",
@@ -76,6 +77,14 @@ const CONFIGS: Record<string, { config: unknown; metadataOnly?: boolean }> = {
       // TASK-131: the relay target is required; without it the builder emitted
       // `tcp://:7000/:` and gost listened while refusing every connection.
       gost: { direction: "IRAN", protocol: "tcp", listenPort: 7000, forwardHost: "203.0.113.10", forwardPort: 7001 },
+    },
+  },
+  ICMP: {
+    config: {
+      method: TunnelMethod.ICMP,
+      // TCP forward to a service behind the Foreign node. The key is required
+      // and range-checked; the target pair is required unless sock5.
+      icmp: { targetHost: "203.0.113.10", targetPort: 22, protocol: "tcp", listenAddr: ":1080", key: 123456 },
     },
   },
   SSH: {
@@ -148,7 +157,7 @@ const CONFIGS: Record<string, { config: unknown; metadataOnly?: boolean }> = {
 };
 
 const ALL_METHODS = [
-  "BACKHAUL", "FRP", "GOST", "SSH", "PORT_FORWARD", "DIRECT", "REVERSE", "XRAY", "XUI",
+  "BACKHAUL", "FRP", "GOST", "ICMP", "SSH", "PORT_FORWARD", "DIRECT", "REVERSE", "XRAY", "XUI",
 ];
 
 /**
@@ -244,8 +253,8 @@ async function main() {
   }
 
   // ---- no method may be marked complete without real binary evidence ------
-  // This is the criterion the task is really about. It MUST fail today: nine
-  // methods have local command generation and injected-process lifecycle, and
+  // This is the criterion the task is really about. It MUST fail today: every
+  // method has local command generation and injected-process lifecycle, and
   // not one has a real binary behind it.
   {
     const complete = ALL_METHODS.filter((m) => results.get(m)?.realBinary === true);
@@ -324,7 +333,7 @@ async function main() {
     // Re-read it: a matrix that is written but not parseable proves nothing.
     const back = JSON.parse(fs.readFileSync(target, "utf8")) as typeof out;
     if (back.methods.length === ALL_METHODS.length) ok("the written matrix parses and enumerates all nine methods");
-    else bad("the written matrix enumerates all nine methods", `${back.methods.length}`);
+    else bad(`the written matrix enumerates all ${ALL_METHODS.length} methods`, `${back.methods.length}`);
     if (/realBinary is false for every method/.test(back.disclaimer)) ok("the matrix carries its own disclaimer");
     else bad("the matrix carries its disclaimer", "missing");
 
@@ -387,7 +396,7 @@ async function main() {
       `# All-method regression matrix\n\n` +
       `Generated ${out.generatedAt} by \`scripts/test-method-matrix.ts\`.\n\n` +
       `> **This harness runs every method with an INJECTED process handle. Its own**\n` +
-      `> **\`realBinary\` column is therefore \`false\` for all nine: no tunnel binary is**\n` +
+      `> **\`realBinary\` column is therefore \`false\` for all methods: no tunnel binary is**\n` +
       `> **executed here. Real-binary evidence comes from a separate pass on the**\n` +
       `> **target OS and is recorded in \`real-binary-evidence.json\` (validated by**\n` +
       `> **\`scripts/test-real-binary-evidence.ts\`). Read the two columns separately.**\n\n` +

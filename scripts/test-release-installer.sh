@@ -368,7 +368,7 @@ fi
 # Scope to the arm itself: a fixed -A window spans both arms of the case, and
 # `latest_release` legitimately lives in the UNPINNED arm. Read up to the next
 # `esac` so only the `*)` arm is inspected.
-for b in backhaul frp gost; do
+for b in backhaul frp gost pingtunnel; do
   # Match the case header with index(), not a regex: the pattern contains `[`
   # and `${`, which awk would read as a bracket expression or a field reference.
   # The `*)` line ITSELF is printed (no `next`): in this code that line carries
@@ -389,7 +389,10 @@ for b in backhaul frp gost; do
     ok "$b: the pinned-digest branch does not resolve a floating version"
   fi
   # And the pinned arm must actually name the version the digest came from.
-  if grep -qE 'v[0-9]+\.[0-9]+' <<<"$pinned_arm"; then
+  # The tag prefix is optional on purpose: not every upstream prefixes it
+  # (esrrhs/pingtunnel tags 2.10, not v2.10), and the contract under test is
+  # "a concrete tag", not "a concrete v-prefixed tag".
+  if grep -qE '(^|[^a-zA-Z])v?[0-9]+\.[0-9]+' <<<"$pinned_arm"; then
     ok "$b: the pinned-digest branch names a concrete version"
   else
     bad "$b: the pinned-digest branch names a concrete version" \

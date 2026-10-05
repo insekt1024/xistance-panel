@@ -70,7 +70,7 @@ const METRICS: { metric: string; gate: string; why: string }[] = [
     why: "the aggregate IS the baseline command; a build gate is the separate concern below",
   },
   {
-    metric: "100% of the nine methods have configuration, lifecycle, error, cleanup, resource/reconnect evidence",
+    metric: "100% of every method have configuration, lifecycle, error, cleanup, resource/reconnect evidence",
     gate: "test-method-matrix.ts",
     why: "asserts a per-method suite exists for all nine and writes a machine-readable matrix",
   },

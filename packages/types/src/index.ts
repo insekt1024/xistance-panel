@@ -38,6 +38,7 @@ export const TunnelMethod = {
   BACKHAUL: "BACKHAUL",
   FRP: "FRP",
   GOST: "GOST", // Paqet / packet relay backed by gost
+  ICMP: "ICMP", // pingtunnel — carries TCP/UDP/SOCKS5 inside ICMP echo
   SSH: "SSH",
   PORT_FORWARD: "PORT_FORWARD",
   DIRECT: "DIRECT", // single-node direct forward (listen -> target, no peer dial)
@@ -51,6 +52,7 @@ export const TunnelMethodSchema = z.enum([
   TunnelMethod.BACKHAUL,
   TunnelMethod.FRP,
   TunnelMethod.GOST,
+  TunnelMethod.ICMP,
   TunnelMethod.SSH,
   TunnelMethod.PORT_FORWARD,
   TunnelMethod.DIRECT,
@@ -320,6 +322,118 @@ export const GostConfigSchema = z.object({
   udpDataBufferSize: z.number().int().min(1024).max(1048576).default(65536),
 });
 export type GostConfig = z.infer<typeof GostConfigSchema>;
+
+// ---------------------------------------------------------------------------
+// ICMP tunnel (pingtunnel)
+// ---------------------------------------------------------------------------
+
+export const IcmpEncryption = {
+  NONE: "none",
+  AES128: "aes128",
+  AES256: "aes256",
+  CHACHA20: "chacha20",
+} as const;
+export type IcmpEncryption =
+  (typeof IcmpEncryption)[keyof typeof IcmpEncryption];
+
+/**
+ * pingtunnel's shared `key`. USAGE.md: "Numeric key / authentication code
+ * (0 - 2147483647), must match client".
+ *
+ * Bounded to that exact range rather than left free: the value is written into a
+ * JSON config as a NUMBER, so a value that does not parse would be read as zero
+ * by pingtunnel, and an out-of-int32 value is rejected by the tool only after
+ * the operator has already half-deployed to two nodes.
+ */
+const icmpKey = z
+  .number()
+  .int("key must be an integer")
+  .min(0, "key must be >= 0")
+  .max(2147483647, "key must be <= 2147483647");
+
+export const IcmpConfigSchema = z
+  .object({
+    // SOCKS5 mode: `-sock5 1`. Upstream enables TCP automatically and makes
+    // `-t` optional, so the target pair is required only in the forward modes.
+    sock5: z.boolean().default(false),
+    // Upstream `-t`: destination as one "host:port" token. Omitted in SOCKS5 mode.
+    targetHost: hostLikeAddress.optional(),
+    targetPort: z.number().int().min(1).max(65535).optional(),
+    // `-tcp 1` forwards TCP; omitting it forwards UDP.
+    protocol: z.enum(["tcp", "udp"]).default("tcp"),
+    // Local listen address for the client, e.g. ":1080" or "127.0.0.1:1080".
+    // Emitted verbatim into `-l`, so it is bounded like a URL authority rather
+    // than split into two fields that could disagree.
+    listenAddr: z
+      .string()
+      .regex(
+        /^(:|\[?[0-9A-Fa-f:.]+\]?:|[A-Za-z0-9_][A-Za-z0-9._-]*:)\d{1,5}$/,
+        "listen must be :PORT, IP:PORT or HOST:PORT",
+      )
+      .default(":1080"),
+    key: icmpKey,
+    // End-to-end payload encryption. Off by default; when set, both sides must
+    // agree and the passphrase travels in the 0600 config file only.
+    encryption: z.enum(["none", "aes128", "aes256", "chacha20"]).default("none"),
+    encryptionKey: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(/^[A-Za-z0-9+/=_-]+$/, "encryption key must be base64/url-safe characters only")
+      .optional(),
+    // Server-side concurrency ceiling; 0 upstream means unlimited.
+    maxConn: z.number().int().min(0).max(100000).default(0),
+    // Server-side ICMP listen address (`-icmp_l`), default upstream 0.0.0.0.
+    icmpListen: z.string().min(1).max(64).default("0.0.0.0"),
+    // Connection idle timeout in seconds (client `-timeout`).
+    timeoutSecs: z.number().int().min(0).max(86400).default(60),
+  })
+  // The target pair must be present TOGETHER, and only SOCKS5 may omit it.
+  //
+  // GOST learned this the expensive way: a blank target produced
+  // `tcp://:9000/:` which gost starts, listens on, accepts, and then refuses
+  // every connection -- the tunnel reported running while carrying nothing.
+  // A half-pair here would be worse, because upstream would forward to ":0" and
+  // fail only per-connection. Refusing at the schema is the only place the
+  // operator sees the error before deploying to two nodes.
+  .superRefine((v, ctx) => {
+    if (v.sock5) {
+      // A target in SOCKS5 mode is contradictory: upstream ignores it, so
+      // storing it would look configured while changing nothing.
+      if (v.targetHost !== undefined || v.targetPort !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["targetHost"],
+          message:
+            "targetHost/targetPort must be omitted in SOCKS5 mode: pingtunnel ignores them",
+        });
+      }
+      return;
+    }
+    if (v.targetHost === undefined || v.targetPort === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["targetHost"],
+        message:
+          "a forward target is required unless sock5 is enabled: set targetHost and targetPort",
+      });
+    }
+  })
+  // An encryption passphrase with no algorithm selected would be written into
+  // the config and then IGNORED by pingtunnel: the tunnel would carry plaintext
+  // while the operator believed it was encrypted. Refuse the ambiguous pair in
+  // both directions rather than silently dropping either half.
+  .refine((v) => v.encryption !== "none" || v.encryptionKey === undefined, {
+    path: ["encryptionKey"],
+    message:
+      "encryptionKey is set but encryption is 'none': it would be ignored and the payload sent unencrypted",
+  })
+  .refine((v) => v.encryption === "none" || v.encryptionKey !== undefined, {
+    path: ["encryption"],
+    message:
+      "encryption is set to an algorithm but no encryptionKey was given: pingtunnel would start unencrypted",
+  });
+export type IcmpConfig = z.infer<typeof IcmpConfigSchema>;
 
 // ---------------------------------------------------------------------------
 // SSH tunnel
@@ -636,6 +750,10 @@ export const TunnelConfigSchema = z.discriminatedUnion("method", [
   z.object({
     method: z.literal(TunnelMethod.GOST),
     gost: GostConfigSchema,
+  }),
+  z.object({
+    method: z.literal(TunnelMethod.ICMP),
+    icmp: IcmpConfigSchema,
   }),
   z.object({
     method: z.literal(TunnelMethod.SSH),

@@ -242,10 +242,16 @@ const SUITES: Suite[] = [
   // the target OS. It also records the six methods that remain unproved.
   TS("test-real-traffic-target-os.ts"),
   SH("test-real-traffic-target-os.sh"),
+  // The ICMP data path needs two network namespaces and a raw ICMP socket, so
+  // it lives in its own suite rather than as a case above. It SKIPs itself
+  // with a reason on any host that lacks root/CAP_NET_RAW, iproute2, or the
+  // pingtunnel binary -- a skip is never widened into an allowlist to look green.
+  SH("test-real-icmp-tunnel.sh"),
   TS("test-real-binary-evidence.ts"),
   TS("test-backhaul.ts"),
   TS("test-frp.ts"),
   TS("test-gost.ts"),
+  TS("test-icmp.ts"),
   TS("test-ssh.ts"),
   TS("test-port-forward.ts"),
   TS("test-port-forward-datapath.ts"),

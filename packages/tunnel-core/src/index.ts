@@ -1,6 +1,7 @@
 export * from "./security.js";
 export * from "./config/ssh.js";
 export * from "./config/direct.js";
+export * from "./config/pingtunnel.js";
 export * from "./config/reverse.js";
 export * from "./reachability.js";
 export * from "./xui-sync.js";

@@ -1,7 +1,7 @@
 /**
  * Shared per-method test harness (TASK-35).
  *
- * Nine methods, one contract. Writing that contract nine times produced nine
+ * Every method, one contract. Writing that contract per method produced
  * suites of uneven depth: BACKHAUL, FRP, GOST, SSH and XRAY had config tests
  * only, while DIRECT, REVERSE and XUI had real engine lifecycle tests. The
  * matrix built on top of this could not tell "the method was verified" from
@@ -9,7 +9,9 @@
  * turns on.
  *
  * `runMethodContract` applies the SAME checks to every method, so a gap is a
- * missing result rather than a missing section nobody noticed.
+ * missing result rather than a missing section nobody noticed. Nothing here
+ * hardcodes how many methods exist: adding a tenth must not require editing a
+ * count in three places to keep the suite honest.
  *
  * The process handle is injected, so lifecycle semantics (idempotent stop,
  * cleanup after a failed deploy, bounded dispose, status truth) are provable
@@ -176,7 +178,7 @@ export async function runMethodContract(input: ContractInput): Promise<MethodRes
   fs.mkdirSync(binDir, { recursive: true });
   // Fixture binaries so a method that resolves a binary at plan time can find
   // one. These are empty files: the handle is injected, so nothing executes.
-  for (const n of ["ssh", "autossh", "xray", "gost", "frpc", "frps", "backhaul"]) {
+  for (const n of ["ssh", "autossh", "xray", "gost", "frpc", "frps", "backhaul", "pingtunnel"]) {
     const f = path.join(binDir, n);
     fs.writeFileSync(f, "#!/bin/sh\nexit 0\n");
     try { fs.chmodSync(f, 0o755); } catch { /* NTFS */ }

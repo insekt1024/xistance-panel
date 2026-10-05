@@ -101,6 +101,14 @@ export const ENGINE_BINARIES: Record<string, EngineBinary> = {
     server: "gost",
     hint: 'Run: xistance install --bin gost  (or scripts/install.sh).',
   },
+  ICMP: {
+    tool: "pingtunnel",
+    client: "pingtunnel",
+    server: "pingtunnel",
+    hint:
+      'Run: xistance install --bin pingtunnel (or scripts/install.sh). Both nodes need it; ' +
+      "the server additionally needs root or CAP_NET_RAW for raw ICMP sockets.",
+  },
   DIRECT: {
     tool: "gost",
     client: "gost",

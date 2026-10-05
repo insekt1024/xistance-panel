@@ -5,6 +5,7 @@ import {
   type DirectConfig,
   type FrpConfig,
   type GostConfig,
+  type IcmpConfig,
   type PortForwardRule,
   type ReverseConfig,
   type SshConfig,
@@ -18,6 +19,12 @@ import {
 import { buildBackhaulConfig } from "./config/backhaul.js";
 import { buildFrpPair } from "./config/frp.js";
 import { buildGostCommand } from "./config/gost.js";
+import {
+  buildIcmpClientConfig,
+  buildIcmpCommand,
+  buildIcmpServerConfig,
+  icmpConfigFileName,
+} from "./config/pingtunnel.js";
 import { buildDirectCommand } from "./config/direct.js";
 import { reverseToSshConfig } from "./config/reverse.js";
 import { classifyXuiSync, syncXui, type XuiSyncResult } from "./xui-sync.js";
@@ -1012,6 +1019,12 @@ export class TunnelEngine {
           if (buildGostCommand(cfg.gost, role)) add(node, "gost");
         }
         break;
+      case "ICMP":
+        // pingtunnel on BOTH nodes: the client encodes into ICMP echo, the
+        // server terminates it with a raw socket. There is no one-node variant.
+        add(spec.serverNode, "pingtunnel");
+        add(spec.clientNode, "pingtunnel");
+        break;
       case "PORT_FORWARD":
         for (const node of [spec.clientNode, spec.serverNode]) {
           const ctx = this.ctxFor(node);
@@ -1067,6 +1080,8 @@ export class TunnelEngine {
         return this.planFrp(spec, cfg.frp);
       case "GOST":
         return this.planGost(spec, cfg.gost);
+      case "ICMP":
+        return this.planIcmp(spec, cfg.icmp);
       case "SSH":
         return this.planSsh(spec, cfg.ssh);
       case "PORT_FORWARD":
@@ -1164,6 +1179,60 @@ export class TunnelEngine {
         ctx,
         files: [],
         spec: processSpec(spec, role.toLowerCase(), [this.binPath(ctx, "gost"), ...rest], ctx),
+      });
+    }
+    return plan;
+  }
+
+  private planIcmp(spec: TunnelDeploySpec, c: IcmpConfig): PlanEntry[] {
+    const plan: PlanEntry[] = [];
+    const server = this.ctxFor(spec.serverNode);
+    const client = this.ctxFor(spec.clientNode);
+
+    if (server) {
+      const cfgPath = path.join(
+        server.cfgDir,
+        icmpConfigFileName(spec.id, "server"),
+      );
+      plan.push({
+        ctx: server,
+        // 0600: the file embeds the shared `key` (and the encryption passphrase
+        // when set). 0644 would leave both readable by any local user.
+        files: [{ path: cfgPath, content: buildIcmpServerConfig(c), mode: 0o600 }],
+        spec: processSpec(
+          spec,
+          "server",
+          [this.binPath(server, "pingtunnel"), ...buildIcmpCommand(cfgPath).slice(1)],
+          server,
+        ),
+      });
+    }
+
+    if (client) {
+      const cfgPath = path.join(
+        client.cfgDir,
+        icmpConfigFileName(spec.id, "client"),
+      );
+      // The client needs the SERVER's host, which lives in the node inventory
+      // rather than the tunnel config. Without it there is no `-s` to dial, so a
+      // missing server node is a hard error rather than a config with no peer.
+      const serverHost = spec.serverNode?.host;
+      if (!serverHost) {
+        throw new Error(
+          "ICMP tunnels need a Foreign (server) node: the client must be told which host to reach",
+        );
+      }
+      plan.push({
+        ctx: client,
+        files: [
+          { path: cfgPath, content: buildIcmpClientConfig(c, serverHost), mode: 0o600 },
+        ],
+        spec: processSpec(
+          spec,
+          "client",
+          [this.binPath(client, "pingtunnel"), ...buildIcmpCommand(cfgPath).slice(1)],
+          client,
+        ),
       });
     }
     return plan;

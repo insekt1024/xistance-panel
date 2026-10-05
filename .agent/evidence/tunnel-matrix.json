@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-04T22:22:43.295Z",
+  "generatedAt": "2026-10-05T13:54:27.045Z",
   "contract": "all-method shared regression matrix",
   "disclaimer": "realBinary is false for every method. These results prove local command/config generation and engine lifecycle with an injected process handle. No tunnel binary was executed, no traffic crossed a tunnel, and no remote node was contacted. Release acceptance requires a separate real-binary/VPS pass per method.",
   "methods": [
@@ -66,6 +66,28 @@
       },
       "notes": [
         "partial-deploy cleanup is not applicable to a single-process method",
+        "a deployed tunnel reports a known status"
+      ],
+      "releaseComplete": false
+    },
+    {
+      "method": "ICMP",
+      "suite": "scripts/test-icmp.ts",
+      "metadataOnly": false,
+      "lifecycleExercised": true,
+      "realBinary": false,
+      "evidenceKind": "local_command+injected_process",
+      "checksRun": 21,
+      "checksPassed": 21,
+      "dimensions": {
+        "config": "yes",
+        "lifecycle": "yes",
+        "failure": "referenced",
+        "cleanup": "yes",
+        "resource": "yes",
+        "realBinary": false
+      },
+      "notes": [
         "a deployed tunnel reports a known status"
       ],
       "releaseComplete": false

@@ -36,7 +36,7 @@ export interface WizardNode {
   host: string;
 }
 
-const METHODS: TunnelMethod[] = ["BACKHAUL", "FRP", "GOST", "SSH", "PORT_FORWARD", "DIRECT", "REVERSE", "XRAY", "XUI"];
+const METHODS: TunnelMethod[] = ["BACKHAUL", "FRP", "GOST", "ICMP", "SSH", "PORT_FORWARD", "DIRECT", "REVERSE", "XRAY", "XUI"];
 
 function randomToken(): string {
   return [...crypto.getRandomValues(new Uint8Array(18))]
@@ -106,6 +106,17 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
     forwardHost: "",
     forwardPort: 80,
     remotePort: 5080,
+  });
+  // ICMP (pingtunnel)
+  const [icmp, setIcmp] = React.useState({
+    sock5: false,
+    protocol: "tcp",
+    listenAddr: ":1080",
+    targetHost: "",
+    targetPort: 80,
+    key: 123456,
+    encryption: "none",
+    encryptionKey: "",
   });
   // SSH
   const [ssh, setSsh] = React.useState({
@@ -241,6 +252,30 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
             bufferSize: 65536,
             ttl: 60,
             udpDataBufferSize: 65536,
+          },
+        };
+      case "ICMP":
+        return {
+          method: "ICMP",
+          icmp: {
+            sock5: icmp.sock5,
+            protocol: icmp.protocol as "tcp" | "udp",
+            listenAddr: icmp.listenAddr,
+            // SOCKS5 mode must NOT carry a target: the schema refuses one
+            // because pingtunnel ignores it, and sending it anyway would make
+            // the wizard's own validation reject a config it just built.
+            ...(icmp.sock5
+              ? {}
+              : { targetHost: icmp.targetHost, targetPort: icmp.targetPort }),
+            key: icmp.key,
+            encryption: icmp.encryption as
+              | "none" | "aes128" | "aes256" | "chacha20",
+            ...(icmp.encryption === "none"
+              ? {}
+              : { encryptionKey: icmp.encryptionKey }),
+            maxConn: 0,
+            icmpListen: "0.0.0.0",
+            timeoutSecs: 60,
           },
         };
       case "SSH":
@@ -404,6 +439,35 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
           if (p.remotePort && !isPort(p.remotePort)) {
             return fail(t("invalidPort", { field: `${t("proxyRemotePort")} (#${i + 1})` }));
           }
+        }
+        return true;
+      }
+      case "ICMP": {
+        // pingtunnel takes the listen address as ONE `-l` token, so the port is
+        // validated from that string rather than from a separate field.
+        const m = /:(\d{1,5})$/.exec(icmp.listenAddr.trim());
+        if (!m) return fail(t("invalidPort", { field: t("listenAddr") }));
+        if (!isPort(Number(m[1]))) {
+          return fail(t("invalidPort", { field: t("listenAddr") }));
+        }
+        if (!icmp.sock5) {
+          if (!icmp.targetHost.trim()) {
+            return fail(t("fieldRequired", { field: t("targetHost") }));
+          }
+          if (!isPort(icmp.targetPort)) {
+            return fail(t("invalidPort", { field: t("targetPort") }));
+          }
+        }
+        if (!Number.isInteger(icmp.key) || icmp.key < 0 || icmp.key > 2147483647) {
+          return fail(t("fieldRequired", { field: t("key") }));
+        }
+        // Refuse a half-configured cipher here rather than letting the schema
+        // reject it server-side with a less specific message.
+        if (icmp.encryption !== "none" && !icmp.encryptionKey.trim()) {
+          return fail(t("fieldRequired", { field: t("encryptionKey") }));
+        }
+        if (icmp.encryption === "none" && icmp.encryptionKey.trim()) {
+          return fail(t("fieldRequired", { field: t("encryption") }));
         }
         return true;
       }
@@ -1004,6 +1068,108 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
                       }
                     />
                   </Field>
+                </div>
+              </div>
+            )}
+
+            {method === "ICMP" && (
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  {t("methods.ICMP_DESC")}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={icmp.sock5}
+                    onCheckedChange={(c) => setIcmp({ ...icmp, sock5: c })}
+                  />
+                  <Label>{t("sock5Mode")}</Label>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <Field label={t("listenAddr")} hint={t("listenAddrHint")}>
+                    <Input
+                      value={icmp.listenAddr}
+                      onChange={(e) =>
+                        setIcmp({ ...icmp, listenAddr: e.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label={t("key")} hint={t("keyHint")}>
+                    <Input
+                      type="number"
+                      value={icmp.key}
+                      onChange={(e) =>
+                        setIcmp({ ...icmp, key: Number(e.target.value) })
+                      }
+                    />
+                  </Field>
+                  <Field label={t("protocol")}>
+                    <Select
+                      value={icmp.protocol}
+                      onValueChange={(v) => setIcmp({ ...icmp, protocol: v })}
+                      disabled={icmp.sock5}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="tcp">{t("tcp")}</SelectItem>
+                        <SelectItem value="udp">UDP</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                {/* SOCKS5 mode takes no target: pingtunnel ignores it, and the
+                    schema refuses one, so showing the inputs would invite a
+                    config the panel then rejects. */}
+                {!icmp.sock5 && (
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <Field label={t("targetHost")}>
+                      <Input
+                        value={icmp.targetHost}
+                        onChange={(e) =>
+                          setIcmp({ ...icmp, targetHost: e.target.value })
+                        }
+                      />
+                    </Field>
+                    <Field label={t("targetPort")}>
+                      <Input
+                        type="number"
+                        value={icmp.targetPort}
+                        onChange={(e) =>
+                          setIcmp({ ...icmp, targetPort: Number(e.target.value) })
+                        }
+                      />
+                    </Field>
+                  </div>
+                )}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <Field label={t("encryption")}>
+                    <Select
+                      value={icmp.encryption}
+                      onValueChange={(v) => setIcmp({ ...icmp, encryption: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">{t("encryptionNone")}</SelectItem>
+                        <SelectItem value="aes128">AES-128</SelectItem>
+                        <SelectItem value="aes256">AES-256</SelectItem>
+                        <SelectItem value="chacha20">ChaCha20</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  {icmp.encryption !== "none" && (
+                    <Field label={t("encryptionKey")} hint={t("encryptionKeyHint")}>
+                      <Input
+                        type="password"
+                        value={icmp.encryptionKey}
+                        onChange={(e) =>
+                          setIcmp({ ...icmp, encryptionKey: e.target.value })
+                        }
+                      />
+                    </Field>
+                  )}
                 </div>
               </div>
             )}
