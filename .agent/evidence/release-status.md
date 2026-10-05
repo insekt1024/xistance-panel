@@ -849,3 +849,85 @@ Also verified for the docs change alone:
   exits `0`
 - `README_FA.md` is valid UTF-8, LF-only, and structurally parallel to the
   English (every new section present in both)
+
+## 2026-10-05 — `--port` bug (user report), release workflow repair, v1.2.3 published
+
+### The reported failure
+`curl -fsSL <bootstrap.sh> -o /tmp/xp-install.sh && sudo bash /tmp/xp-install.sh --release --version v1.2.0 --port 8085 --admin-email ...`
+died with `Unknown option: --port`.
+
+Root cause, three layers:
+1. `release-install.sh` never parsed `--port`, `--admin-email`, `--admin-password`,
+   although `bootstrap.sh`'s own header and `README.md` advertise them for release
+   installs. All three values already existed downstream — this was pure wiring.
+2. The deeper defect: the env-file template hardcoded `PORT=8080` and nothing ever
+   overwrote it. `PANEL_PORT` was only read back for the health check, so a release
+   install could not listen on any port but 8080 — and the `XT_PORT` escape hatch
+   silently did nothing.
+3. Documenting `--port` in the usage text introduced `XT_PORT: unbound variable`
+   under `set -u`: that heredoc is unquoted by design. Fixed to reference the
+   already-defaulted `$PANEL_PORT`.
+
+First attempt placed the validation block above `die()`, so bash printed
+`die: command not found` and skipped validation while still exiting 0 on the happy
+path. Moved below the function definitions.
+
+### Verified
+- Live Ubuntu 24.04 target: installing with `--port 8085` writes `PORT=8085`; with
+  `--port 8097` writes `PORT=8097`. v1.2.3 installed over the live paths and serves
+  `{"ok":true,...,"version":"1.2.3","database":"ok","engine":"ok"}`.
+- Five admin-email/port precedence cases all resolve (flag, `XT_ADMIN_EMAIL`, neither,
+  flag-beats-env, `XT_PORT` without unbound-variable).
+- `test-release-installer` 62/62 (8 new), including a non-vacuity check that port
+  65535 is still accepted so the guard is not blanket-refusing.
+- Published v1.2.3 installer runs the exact reported command with `--dry-run` rc=0.
+
+### Release-workflow defects found and fixed (commit `f5a4f40`, `7417405`, `34ff699`, `f165c86`)
+1. **Invalid refspec.** `git push origin "tag v1.2.1"` — not a refspec; git rejects
+   it. It failed on run `37252340061` *after* the version-bump commit had already
+   been pushed, leaving the repo at 1.2.1 with no tag and no release. Now
+   `refs/tags/v$(...)`.
+2. **ENOSPC misreported as tar.** Run `37254378970` died with
+   `tar: Cannot write: Broke` on both architectures. The browser gate
+   (`playwright install --with-deps`, ~1.5GB) ran *before* the archive step;
+   `ci.yml` had always archived first. Reordered, plus a disk guard that fails with
+   `::error::only N MiB free` instead of surfacing inside tar.
+3. **Missing mkdir (self-inflicted).** Moving the archive earlier traded one failure
+   for another: `Cannot open: No such file or directory`, because nothing else writes
+   to `dist/<arch>`. `tar` cannot create the parent directory; `ci.yml` always had
+   `mkdir -p`.
+4. **Prune destroyed a later input.** My own prune deleted `dist/artifact`, but
+   "Verify manifest provenance" runs after the browser gate and copies
+   `dist/artifact/release-manifest.json` beside the archive. The prune now preserves
+   that file and asserts it survived.
+
+### Two latent stale-version defects in tests
+- `test-documented-install-command.ts` hardcoded `const TAG = "v1.2.0"`, so it
+  blamed the docs after every bump. Now reads `package.json`.
+- `test-embedded-manifest-provenance.ts` built its archive path as
+  `xistance-panel-v1.2.0-${arch}.tar.gz` — failing on both architectures on CI
+  `37255797986` while the real archive sat next to it. Now reads
+  `manifest.artifact.name`.
+
+All four workflow mutations are proven non-vacuous: reverting the refspec, the
+ordering, the mkdir, and the manifest preservation each fail with their own
+assertion message.
+
+### v1.2.3 publication
+Published on the already-pushed `v1.2.3` tag (commit `d6fec72`), 11 assets, public,
+non-draft, non-prerelease. amd64 built locally; arm64 taken from the native
+`ubuntu-24.04-arm` runner (run `37255797986`), carrying
+`libquery_engine-linux-arm64-openssl-3.0.x.so.node`.
+
+Provenance note: the amd64 manifest had to be rebuilt from the **staged** tree
+(`dist/artifact`) rather than the build tree, exactly as CI does — otherwise it
+declares digest `486fdf54` while the archive extracts to `7646abd5`, and
+`test-embedded-manifest-provenance` correctly refuses.
+
+One staging mistake caught by verification: the first `release-install.sh.sha256`
+recorded the path `dist/release-install.sh`, so `sha256sum -c` could not find the
+file on a fresh download. The digest was correct; only the embedded path was wrong.
+Replaced that single asset — all 5 sidecars now verify on a clean download.
+
+Tags `v1.2.2` and `v1.2.3` both exist; `v1.2.2` remains without a release. Neither
+the tag nor any asset was mutated to make a check pass.
