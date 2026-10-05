@@ -328,8 +328,47 @@ async function main(): Promise<void> {
     assert.ok(permissions, `job ${name} must declare explicit permissions`);
   }
 
+
   console.log("✅ Release workflow: architecture matrix, staging, inspection, manifest, checksum, and publish order verified");
   testCiVerdictRunsAgainstAStagedPayload();
+
+  function testTagPushUsesAValidRefspec(): void {
+    const versionJob = workflow.jobs?.version;
+    assert.ok(versionJob, "the workflow must have a version job");
+    const steps: WorkflowStep[] = versionJob.steps ?? [];
+    const pushStep = steps.find((s: WorkflowStep) =>
+      (s.run ?? "")
+        .split("\n")
+        .some((l) => /git push\s+origin\s+"[^"]*(?:tag)/.test(l)),
+    );
+    assert.ok(pushStep, "a step must push the release tag");
+
+    const run: string = pushStep.run ?? "";
+    const tagPushes = run
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => /^git push\s+origin\s+"[^"]*tag/.test(l));
+
+    assert.ok(tagPushes.length > 0, "the push step must actually push a tag");
+
+    for (const line of tagPushes) {
+      // Extract the quoted refspec argument.
+      const m = line.match(/git push origin "([^"]+)"/);
+      assert.ok(m, `tag push must quote a refspec, got: ${line}`);
+      const refspec = m![1]!;
+      // A tag refspec is refs/tags/<name>. The bare phrase "tag v1.2.1" (as this
+      // workflow once had) is not a refspec at all and git rejects it -- but
+      // only AFTER the version-bump commit has already been pushed to master.
+      assert.match(
+        refspec,
+        /^refs\/tags\//,
+        `tag push must use a refs/tags/... refspec; git rejects "${refspec}" as an invalid refspec`,
+      );
+    }
+
+    console.log("\u2705 Release workflow: the tag push uses a valid git refspec");
+  }
+  testTagPushUsesAValidRefspec();
 }
 
 /**
@@ -343,6 +382,14 @@ async function main(): Promise<void> {
  * and 0/1 suites passed. Asserting the ORDER is what stops it coming back,
  * because a present-but-misordered step is just as broken as a missing one.
  */
+  /*
+   * Found the hard way: a release run pushed the version-bump commit and then
+   * died on `git push origin "tag v1.2.1"`. That is not a refspec -- git
+   * rejects it with "fatal: invalid refspec 'tag v1.2.1'". The bump commit had
+   * already landed on master, so the repo was left at 1.2.1 with no tag and no
+   * release. Nothing asserted the workflow's push commands were valid git, so
+   * the publish path stayed untested until a real release needed it.
+   */
 function testCiVerdictRunsAgainstAStagedPayload(): void {
   const ciPath = path.join(repoRoot, ".github", "workflows", "ci.yml");
   const ci = load(fs.readFileSync(ciPath, "utf8")) as Workflow;

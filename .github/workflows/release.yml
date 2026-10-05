@@ -87,7 +87,7 @@ jobs:
         run: |
           BRANCH="${GITHUB_REF#refs/heads/}"
           git push origin "HEAD:${BRANCH}"
-          git push origin "tag v$(node scripts/version.mjs --show)"
+          git push origin "refs/tags/v$(node scripts/version.mjs --show)"
 
   artifact:
     name: Artifact ${{ matrix.architecture }}
