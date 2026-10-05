@@ -247,6 +247,11 @@ const SUITES: Suite[] = [
   // with a reason on any host that lacks root/CAP_NET_RAW, iproute2, or the
   // pingtunnel binary -- a skip is never widened into an allowlist to look green.
   SH("test-real-icmp-tunnel.sh"),
+  // The systemd half: `User=root` in the generated unit is what lets
+  // pingtunnel open its raw ICMP socket. The two-node suite starts both
+  // halves from a shell and never touches the unit, so without this a unit
+  // that lost the privilege would fail at runtime with every test green.
+  SH("test-icmp-systemd-unit.sh"),
   TS("test-real-binary-evidence.ts"),
   TS("test-backhaul.ts"),
   TS("test-frp.ts"),

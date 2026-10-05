@@ -160,11 +160,13 @@
         "the backend answered on the FOREIGN node as a pre-tunnel baseline",
         "carried real TCP bytes across the ICMP hop: ns-cli:18108 -> FOREIGN -> :18109 returned the backend body HELLO-ICMP",
         "both halves logged real ICMP traffic and neither crashed while carrying it",
-        "both halves still running after the transfer"
+        "both halves still running after the transfer",
+        "the generated systemd unit runs pingtunnel as root and opens its raw ICMP socket with no permission error (scripts/test-icmp-systemd-unit.sh: 4/4)"
       ],
       "reconnect": false,
       "reconnectNote": "not claimed: this suite proves a single continuous transfer, not that the tunnel recovers after a restart",
-      "evidence": ".agent/evidence/task-icmp-real-tunnel.md"
+      "evidence": ".agent/evidence/task-icmp-real-tunnel.md",
+      "evidenceNote": "scripts/test-real-icmp-tunnel.sh on xt24: 14 passed, 0 failed across 4 consecutive runs, plus scripts/test-icmp-systemd-unit.sh: 4 passed, 0 failed (User=root mutation fails it). Mutation: removing the client half (no ICMP bridge) fails the transfer check (12 passed, 2 failed), so the pass is not vacuous. Limits: the hop is a veth link inside one container, so this proves ICMP raw-socket transport end to end between two real nodes but NOT that a given internet path permits ping. SOCKS5 mode and UDP forwarding remain untested. The systemd privilege path IS now proven: scripts/test-icmp-systemd-unit.sh starts the exact unit buildUnit() emits and confirms pingtunnel runs as root and opens its raw socket (4/4; mutating User=root to User=nobody fails it)."
     }
   ],
   "methodsWithoutRealBinaryEvidence": [

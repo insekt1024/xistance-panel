@@ -77,6 +77,30 @@ Restoring it returns 14/14. The pass therefore depends on the tunnel existing.
   put a SOCKS5 tunnel on the datagram path. `scripts/test-icmp.ts` asserts this,
   and a mutation removing the line fails the suite.
 
+## The systemd half — `scripts/test-icmp-systemd-unit.sh`
+
+The two-node suite starts both halves from an interactive root shell, so it
+never touches the unit file the panel actually writes. That leaves one specific
+risk untested: `User=root` in the generated unit is what lets `pingtunnel` open
+its raw ICMP socket. A unit that lost that privilege would start, log an EPERM,
+and fail at runtime with every other test still green.
+
+So the unit is written exactly as `buildUnit()` emits it and started for real on
+`xt24`: **4 passed, 0 failed.**
+
+1. the generated unit starts and stays active
+2. the unit runs pingtunnel as root, which is what allows the raw socket
+3. pingtunnel opened its raw ICMP socket with no permission error
+4. the unit log shows pingtunnel reached `Server start`
+
+Non-vacuous: mutating `User=root` to `User=nobody` fails it.
+
+One test defect found and fixed here: the check originally read
+`journalctl -u <unit> -n 40`, but the journal is cumulative per unit *name*, so a
+permission error from an earlier run was attributed to a clean rerun — a green
+build reported a failure it did not have. The suite now rotates and vacuums the
+unit's journal immediately before `systemctl start`.
+
 ## Limits — stated, not papered over
 
 - The hop is a veth link inside one container. This proves ICMP raw-socket
