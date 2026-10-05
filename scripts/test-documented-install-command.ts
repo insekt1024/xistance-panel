@@ -76,14 +76,41 @@ const DEV_ONLY = /\/bootstrap\.sh$/;
 
 function curlPairs(md: string): Cmd[] {
   const out: Cmd[] = [];
-  const re = /curl\s+-fsSL?\s+(\S+)/g;
+  // Split on whitespace, tracking backslash line-continuations so a command
+  // wrapped over two lines reads as one token stream. Regex-per-shape kept
+  // misfiring: `curl -fsSL -O <url>` yielded "-O" as the URL, and `--retry 3`
+  // yielded "3". A token walk has no such ambiguity.
+  const flat = md.replace(/\\\n\s*/g, " ");
+  const re = /\bcurl\b([^\n;|&]*)/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(md)) !== null) {
-    // A bounded forward window for the -o, so it cannot be borrowed from a
-    // LATER curl in the same fenced block.
-    const window = md.slice(m.index + m[0].length, m.index + m[0].length + 200);
-    const o = /-o\s+(\S+)/.exec(window.split(/\n\s*curl\s/)[0] ?? "");
-    out.push({ url: m[1]!, dest: o ? o[1]! : "" });
+  while ((m = re.exec(flat)) !== null) {
+    const tokens = (m[1] ?? "").split(/\s+/).filter(Boolean);
+    let url = "";
+    let dest = "";
+    for (let i = 0; i < tokens.length; i += 1) {
+      const tok = tokens[i]!;
+      if (tok === "-o" || tok === "--output") {
+        dest = tokens[i + 1] ?? "";
+        i += 1;
+        continue;
+      }
+      if (tok.startsWith("-")) {
+        if (!tok.includes("=")) {
+          // Flags that take a SEPARATE value must swallow it, or the value
+          // ("3" in --retry 3) is picked up as the URL.
+          if (/^(?:-o|--output|--retry|--retry-delay|--connect-timeout|--max-time|-m|-C)$/.test(tok)) i += 1;
+        }
+        continue;
+      }
+      // Only an http(s) URL is a download; anything else (a stray backtick, a
+      // trailing shell word) is not an install command and must not be asserted
+      // about -- otherwise the pin check fails on prose.
+      // NOTE: do NOT break here. `curl -fsSL <url> -o <dest>` puts -o AFTER the
+      // URL, and breaking first lost the destination and failed three
+      // "-o destination" assertions. Keep walking to pick it up.
+      if (/^https?:\/\//.test(tok) && !url) url = tok;
+    }
+    if (url) out.push({ url, dest });
   }
   return out.filter((c) => !DEV_ONLY.test(c.url));
 }
@@ -108,10 +135,37 @@ check(
 
 // --- 2. Every documented URL is version-pinned --------------------------------
 // "There is no floating `latest`" is a promise; a future edit could break it.
+//
+// A pinned URL names the tag in EITHER of the two shapes GitHub serves:
+//   raw.githubusercontent.com/<repo>/<TAG>/<path>
+//   github.com/<repo>/releases/download/<TAG>/<path>
+// The release-download shape was added for the release-asset install command,
+// and requiring the raw-only spelling made that command fail as "unpinned"
+// even though it names v1.2.0 explicitly. Both are immutable refs; neither is
+// floating. The guard below still rejects `latest` in any spelling.
+// The "no floating ref" promise is about REPO artifacts. A documented
+// localhost health check (http://127.0.0.1:8080/api/health) is not a
+// versioned artifact and is deliberately not pinned to a tag.
+const isRepoUrl = (url: string): boolean =>
+  /raw\.githubusercontent\.com\//.test(url) ||
+  /github\.com\/[^/]+\/[^/]+\/(releases|archive|blob)\//.test(url);
+
+const pinned = (url: string): boolean =>
+  url.includes(`/${TAG}/`) && !/\/latest\//.test(url);
+
 for (const c of en) {
+  if (!isRepoUrl(c.url)) continue;
   check(
-    `${path.basename(c.dest)} is pinned to ${TAG}`,
-    c.url.includes(`/${TAG}/`) && !/\/latest\//.test(c.url),
+    `${path.basename(c.dest) || "command"} is pinned to ${TAG}`,
+    pinned(c.url),
+    `unpinned or floating: ${c.url}`,
+  );
+}
+for (const c of fa) {
+  if (!isRepoUrl(c.url)) continue;
+  check(
+    `README_FA ${path.basename(c.dest) || "command"} is pinned to ${TAG}`,
+    pinned(c.url),
     `unpinned or floating: ${c.url}`,
   );
 }

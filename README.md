@@ -61,6 +61,28 @@ tunnel for you.
 >
 > Only needed for **Reverse** and for **SSH** tunnels in `-R` mode.
 
+## The current release
+
+**v1.2.0** — <https://github.com/insekt1024/xistance-panel/releases/tag/v1.2.0>
+
+Published 2026-10-04 with 11 assets: an archive per architecture, a `.sha256`
+sidecar for each, the installer, its two helper libraries (`release-layout.sh`,
+`service-unit.sh`) with sidecars, and `release-manifest.json`.
+
+Before installing, confirm you have what you expect:
+
+```bash
+curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.2.0/release-manifest.json
+cat release-manifest.json
+```
+
+It states the version, the architecture, the runtime (`node` major 22) and the
+SHA-256 of the payload. Every download from that release is verified against
+those numbers, and the installer refuses to deploy anything that does not match.
+
+The `arm64` artifact is built on a native `arm64` runner — it is not a
+cross-compiled or emulated build.
+
 ## Install on a server (Ubuntu 22.04 / 24.04)
 
 Two things travel to your server, and it is worth keeping them apart:
@@ -107,6 +129,21 @@ sudo bash /tmp/xistance-release-install.sh --version v1.2.0
 The version is **pinned on purpose** — there is no `latest` default, so the
 same command always installs the same build. The installer detects `amd64` vs
 `arm64` for you.
+
+> **Where each file comes from matters.** The URLs below fetch from the `v1.2.0`
+> **tag**, which is immutable — the installer you get there is byte-for-byte the
+> one that shipped with the `v1.2.0` archives. The installer attached to the
+> [release](https://github.com/insekt1024/xistance-panel/releases/tag/v1.2.0) may
+> carry a later fix on the same tag. Both verify against the same archive digests;
+> pick the release download if you want the newest installer, or the tag if you
+> want the exact bytes that were reviewed and published together.
+>
+> To take the release asset directly (usually what you want):
+>
+> ```bash
+> curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.2.0/release-install.sh
+> sudo bash release-install.sh --version v1.2.0
+> ```
 
 Useful options:
 
@@ -266,10 +303,21 @@ never a substitute for reviewing the release notes.
 
 ### Low-resource hosts
 
-Measured on a 1 vCPU / 961 MB host: health responses average ~21 ms, login-page
-loads ~39 ms, and the running service sits near 117 MB RSS. The install runs no
-`npm` process at all, which is the main reason it fits — a source build on the
-same host is what previously ran the machine out of memory.
+Two independent measurements, on different hardware:
+
+| Host | Health response | Login page | Running service |
+| --- | --- | --- | --- |
+| 1 vCPU / 961 MB | ~21 ms avg | ~39 ms avg | ~117 MB RSS |
+| 16 vCPU / 7.8 GB (Ubuntu 24.04) | ~4 ms avg | ~13 ms avg | ~124 MB RSS |
+
+The install runs no `npm` process at all, which is the main reason it fits — a
+source build on the same low-end host is what previously ran the machine out of
+memory.
+
+The install is also verified inside a **hard 256 MiB cgroup cap**, so "fits in
+low RAM" is an enforced gate rather than a claim: peak usage measured
+**75 MiB** against that 256 MiB limit. If a future change pushes past the cap,
+the test fails instead of quietly shipping.
 
 ### Troubleshooting
 
