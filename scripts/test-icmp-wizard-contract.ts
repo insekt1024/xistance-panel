@@ -105,7 +105,10 @@ function deriveMethod(cfg) {
   return null;
 }
 
-const pasted = { method: "ICMP", icmp: { ...(withTarget as any).icmp } };
+// r1.success is asserted above, so its narrowed `data` is the validated config.
+// Rebuilding the paste from it keeps this typed without an `any` cast.
+if (!r1.success) throw new Error("the ICMP wizard payload must validate");
+const pasted = { method: "ICMP", icmp: r1.data.icmp };
 check("a pasted ICMP config derives ICMP from its shape", deriveMethod(pasted) === "ICMP");
 check("a pasted ICMP config validates against the same union", TunnelConfigSchema.safeParse(pasted).success);
 
