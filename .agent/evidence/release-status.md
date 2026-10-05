@@ -953,3 +953,41 @@ Local gates on the final tree: version:check / typecheck / lint all rc=0;
 Open item, stated rather than hidden: tag `v1.2.2` exists with no release. It is a
 bump commit whose run died before publishing. Deleting it would rewrite published
 refs, so it is left in place; `v1.2.3` is the release to install.
+
+### Tracked release-manifest.json was stale at 1.2.0 (fixed in `bfa515f`)
+The committed file declared `version 1.2.0`, `releaseTag v1.2.0`, artifact
+`xistance-panel-v1.2.0-amd64.tar.gz`, commit `8fb9a48` while every package in
+the tree was `1.2.3`. `stage-release-artifact.ts` COPIES this file into the
+payload instead of generating one, so the committed value is what a local
+staging run ships.
+
+CI could not see it: `ci.yml:105` regenerates the manifest immediately before
+staging, overwriting the committed bytes. The local docs contract does check it
+and exits 1 on the committed value — proved by restoring those bytes — but it
+only ever read green locally because staging had already overwritten the
+worktree copy. A dirty worktree masked a committed inconsistency.
+
+Regenerated with the CI order and payload root, then committed. Re-verified: the
+docs contract, the freshness suite, the provenance suite, the workflow suite and
+the 62-case installer suite all pass, worktree clean, LF-clean single trailing
+newline.
+
+### Digest confusion resolved, not a defect
+The published manifest declares `artifact.sha256 = 7646abd5…` while the
+published `.sha256` sidecar says `60a616e6…`. They are different quantities and
+both are correct:
+
+- `7646abd5…` = `stagedPayloadDigest(dist/artifact)` — the hash of the payload
+  TREE, i.e. what the archive extracts to, excluding `release-manifest.json`
+  itself (a file cannot contain its own hash).
+- `60a616e6…` = `sha256sum` of the `.tar.gz` — the transport checksum.
+
+`release-manifest.ts:388` documents exactly this trap after an earlier round of
+it. Independently confirmed: `test-embedded-manifest-provenance.ts --stage <pubv>
+--arch amd64`, fed the PUBLISHED archive and the PUBLISHED manifest, recomputed
+the payload digest from the extracted tree and agreed, 3/3.
+
+Windows note that cost a probe: `tar -xzf` on a native `C:/...` path fails with
+`Cannot connect to C: resolve failed` — tar reads `C:` as a REMOTE HOST spec. The
+suites pass `--force-local` for this reason; ad-hoc verification must pass
+`cygpath -u` or `--force-local`.
