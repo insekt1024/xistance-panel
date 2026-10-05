@@ -359,6 +359,30 @@ async function main(): Promise<void> {
         "playwright install --with-deps pulls ~1.5GB and tar then fails with ENOSPC reported as 'Cannot write: Broke'",
     );
 
+    // tar cannot create the parent directory, and nothing else in this job writes
+    // to dist/<arch>: on run 37255292217 that failed with "Cannot open: No such
+    // file or directory" on both architectures. ci.yml has always had this mkdir.
+    const archiveStep = (artifactJob.steps ?? []).find((s: WorkflowStep) =>
+      /create archive/i.test(String(s.name ?? "")),
+    );
+    assert.match(
+      String(archiveStep?.run ?? ""),
+      /mkdir -p\s+"?dist\/\$\{\{\s*matrix\.architecture\s*\}\}"?/,
+      "Create archive must mkdir dist/<arch> first; tar cannot create the parent directory",
+    );
+
+    // The prune must not destroy dist/artifact: "Verify manifest provenance"
+    // runs after the browser gate and copies that file beside the archive.
+    const reclaim = (artifactJob.steps ?? []).find((s: WorkflowStep) =>
+      /reclaim/i.test(String(s.name ?? "")),
+    );
+    const reclaimRun = String(reclaim?.run ?? "");
+    assert.ok(
+      /release-manifest\.json/.test(reclaimRun) && /cp .*dist\/artifact\/release-manifest/.test(reclaimRun),
+      "the disk prune deletes dist/artifact, but a later step copies dist/artifact/release-manifest.json " +
+        "beside the archive; the prune must preserve that file",
+    );
+
     // A guard must exist so the failure names disk space rather than surfacing
     // three steps later inside tar.
     const hasDiskGuard = (artifactJob.steps ?? []).some((s: WorkflowStep) =>

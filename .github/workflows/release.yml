@@ -205,6 +205,11 @@ jobs:
       # must not be recorded as having run.
       - name: Create archive
         run: |
+          # tar cannot create the parent directory, and nothing else in this job
+          # writes to dist/<arch>: on run 37255292217 that produced
+          # "Cannot open: No such file or directory" on both architectures. ci.yml
+          # has always had this mkdir.
+          mkdir -p "dist/${{ matrix.architecture }}"
           tar -czf "dist/${{ matrix.architecture }}/xistance-panel-v${{ needs.version.outputs.version }}-${{ matrix.architecture }}.tar.gz" \
             -C dist/artifact .
 
@@ -228,7 +233,14 @@ jobs:
           set -euo pipefail
           avail_kb="$(df -k . | awk 'NR==2 {print $4}')"
           echo "  free space before prune: $((avail_kb / 1024)) MiB"
+          # Keep dist/artifact/release-manifest.json: "Verify manifest provenance
+          # against the archive" runs AFTER the browser gate and copies that exact
+          # file beside the archive. Pruning the whole tree would break that step.
+          keep="$(mktemp)"; cp dist/artifact/release-manifest.json "$keep"
           rm -rf dist/artifact node_modules/.cache .next/cache 2>/dev/null || true
+          mkdir -p dist/artifact && cp "$keep" dist/artifact/release-manifest.json && rm -f "$keep"
+          test -s dist/artifact/release-manifest.json || {
+            echo "::error::prune destroyed the staged manifest later steps need"; exit 1; }
           after_kb="$(df -k . | awk 'NR==2 {print $4}')"
           echo "  free space after prune:  $((after_kb / 1024)) MiB"
           # Fail loudly here rather than three steps later inside tar.
