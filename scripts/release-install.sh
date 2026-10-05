@@ -22,6 +22,12 @@ C_RED=$'\e[31m'; C_GRN=$'\e[32m'; C_YEL=$'\e[33m'; C_RST=$'\e[0m'
 VERSION=""
 ARCH=""
 INSTALL_DIR="${XT_INSTALL_DIR:-/opt/xistance}"
+PANEL_PORT="${XT_PORT:-8080}"
+PORT_OVERRIDE=""
+# Declared here so a --admin-email/--admin-password flag survives; the later
+# XT_* lookups must not overwrite an explicit flag with the environment default.
+ADMIN_EMAIL="${XT_ADMIN_EMAIL:-}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-${XT_ADMIN_PASSWORD:-}}"
 DATA_DIR="${XT_DATA_DIR:-/var/lib/xistance}"
 ETC_DIR="${XT_ETC_DIR:-/etc/xistance}"
 ENV_FILE=""
@@ -52,6 +58,9 @@ Options:
   --data-dir <DIR>      Mutable data/logs/binaries (default: /var/lib/xistance)
   --etc-dir <DIR>       Config directory (default: /etc/xistance)
   --env-file <FILE>     Environment file path (default: <etc-dir>/xistance.env)
+  --port <PORT>         Panel HTTP port (default: $PANEL_PORT)
+  --admin-email <EMAIL>  Admin login email (default: admin@xistance.local)
+  --admin-password <PW>  Admin password (generated and printed if omitted)
   --repo <SLUG>         GitHub repo slug (default: $REPO_SLUG)
   --archive <FILE>      Install a pre-downloaded artifact instead of fetching
                         one from GitHub. Its .sha256 sidecar must sit beside
@@ -80,6 +89,12 @@ while [[ $# -gt 0 ]]; do
     --env-file=*) ENV_FILE="${1#*=}"; shift;;
     --repo) REPO_SLUG="${2:-}"; shift 2;;
     --repo=*) REPO_SLUG="${1#*=}"; shift;;
+    --port) PANEL_PORT="${2:-}"; PORT_OVERRIDE=1; shift 2;;
+    --port=*) PANEL_PORT="${1#*=}"; PORT_OVERRIDE=1; shift;;
+    --admin-email) ADMIN_EMAIL="${2:-}"; shift 2;;
+    --admin-email=*) ADMIN_EMAIL="${1#*=}"; shift;;
+    --admin-password) ADMIN_PASSWORD="${2:-}"; shift 2;;
+    --admin-password=*) ADMIN_PASSWORD="${1#*=}"; shift;;
     --archive) LOCAL_ARCHIVE="${2:-}"; shift 2;;
     --archive=*) LOCAL_ARCHIVE="${1#*=}"; shift;;
     --dry-run) DRY_RUN=1; shift;;
@@ -94,6 +109,12 @@ say()  { printf '%s\n' "$1"; }
 info() { printf '%s→ %s%s\n' "$C_YEL" "$1" "$C_RST"; }
 ok()   { printf '%s✓ %s%s\n' "$C_GRN" "$1" "$C_RST"; }
 die()  { printf '%s✗ %s%s\n' "$C_RED" "$1" "$C_RST" >&2; exit "${2:-1}"; }
+
+# --port must be a real TCP port before anything is written, so a typo cannot
+# leave a half-configured host behind. install.sh validates the same way.
+if [[ ! "$PANEL_PORT" =~ ^[0-9]+$ ]] || [[ "$PANEL_PORT" -lt 1 ]] || [[ "$PANEL_PORT" -gt 65535 ]]; then
+  die "Invalid --port: $PANEL_PORT (expected 1-65535)." 2
+fi
 
 [[ -n "$ENV_FILE" ]] || ENV_FILE="${ETC_DIR}/xistance.env"
 
@@ -529,13 +550,13 @@ fi
 # The password is generated here and shown once; an existing admin is never
 # overwritten, so re-running the installer does not rotate a live credential.
 # ---------------------------------------------------------------------------
-ADMIN_EMAIL="${XT_ADMIN_EMAIL:-admin@xistance.local}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-${XT_ADMIN_EMAIL:-admin@xistance.local}}"
 if [[ ! -f "$CANDIDATE_DIR/create-admin.mjs" ]]; then
   die "The artifact does not include create-admin.mjs; refusing to activate a
 release with no way to create the first account." 7
 fi
 
-ADMIN_PASSWORD="${XT_ADMIN_PASSWORD:-}"
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-${XT_ADMIN_PASSWORD:-}}"
 GENERATED_ADMIN_PASSWORD=0
 if [[ -z "$ADMIN_PASSWORD" ]]; then
   ADMIN_PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -d '=+/' | head -c 20)"
@@ -573,7 +594,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
   cat > "$ENV_FILE" <<EOF
 # Xistance Panel environment. Keep this file readable only by root.
 NODE_ENV=production
-PORT=8080
+PORT=${PANEL_PORT}
 HOSTNAME=0.0.0.0
 XT_DATA_DIR=${DATA_DIR}
 XT_ETC_DIR=${ETC_DIR}
@@ -583,6 +604,16 @@ EOF
   chmod 600 "$ENV_FILE" 2>/dev/null || true
 else
   info "Reusing existing ${ENV_FILE}"
+  # An explicit --port must win over whatever the existing env file says,
+  # otherwise the flag is accepted and then silently discarded.
+  if [[ -n "$PORT_OVERRIDE" ]]; then
+    if grep -q "^PORT=" "$ENV_FILE"; then
+      sed -i -E "s|^PORT=.*|PORT=${PANEL_PORT}|" "$ENV_FILE"
+    else
+      printf 'PORT=%s\n' "$PANEL_PORT" >>"$ENV_FILE"
+    fi
+    info "Port set to ${PANEL_PORT} in ${ENV_FILE}"
+  fi
 fi
 
 # ---------------------------------------------------------------------------

@@ -578,5 +578,95 @@ else
       "no systemctl restart; the old process would keep serving the old code"
 fi
 
+# --- --port is honoured by a release install -----------------------------------
+# Reported from a real server: `--release --version v1.2.0 --port 8085` died with
+# "Unknown option: --port", because bootstrap.sh's own header and the README both
+# advertise --port for release installs while release-install.sh rejected it. The
+# deeper defect was quieter still: even via XT_PORT, nothing ever WROTE the port
+# to the env file -- the template hardcoded PORT=8080 and PANEL_PORT was only read
+# back for the health check. So a release install could only ever listen on 8080.
+if grep -qE '^\s+--port\)' "$RELEASE_INSTALL_SH"; then
+  ok "release-install.sh accepts --port"
+else
+  bad "release-install.sh accepts --port" \
+      "bootstrap.sh and the README document --port for release installs; rejecting it is a dead end"
+fi
+
+if grep -qE '^\s+--port=\*\)' "$RELEASE_INSTALL_SH"; then
+  ok "release-install.sh accepts --port=N as well as --port N"
+else
+  bad "release-install.sh accepts --port=N as well as --port N" \
+      "only the space-separated form is parsed, so --port=8085 still fails"
+fi
+
+if grep -qE '^PORT=\$\{PANEL_PORT\}$' "$RELEASE_INSTALL_SH"; then
+  ok "the env file template writes the requested PORT instead of a hardcoded 8080"
+else
+  bad "the env file template writes the requested PORT instead of a hardcoded 8080" \
+      "PORT=8080 in the template means --port is accepted and then silently ignored"
+fi
+
+# Validation must run AFTER die() is defined. Getting this wrong leaves the
+# script running with the check skipped, because bash resolves the function at
+# call time -- the guard below is a comment-only marker, so grep the real order.
+die_line="$(grep -nE '^die\(\)' "$RELEASE_INSTALL_SH" | head -1 | cut -d: -f1)"
+port_check_line="$(grep -nE '^if \[\[ ! "\$PANEL_PORT" =~' "$RELEASE_INSTALL_SH" | head -1 | cut -d: -f1)"
+if [[ -n "$die_line" && -n "$port_check_line" && "$port_check_line" -gt "$die_line" ]]; then
+  ok "the --port guard runs after die() is defined"
+else
+  bad "the --port guard runs after die() is defined" \
+      "die at line ${die_line:-none}, guard at ${port_check_line:-none}: 'die: command not found' and no validation"
+fi
+
+if grep -qE 'Invalid --port' "$RELEASE_INSTALL_SH"; then
+  ok "an out-of-range --port is refused instead of deployed"
+else
+  bad "an out-of-range --port is refused instead of deployed" \
+      "no port validation; a typo would leave a half-configured host"
+fi
+
+# Behavioural proof, not just a grep. --dry-run exercises the parse+validate path
+# without touching the host, so the bad values must actually be rejected.
+port_sandbox="$(mktemp -d)"
+trap 'rm -rf -- "$port_sandbox"' EXIT
+
+if bash "$RELEASE_INSTALL_SH" --version v9.9.9 --port 99999 --dry-run \
+     --install-dir "$port_sandbox/opt" --data-dir "$port_sandbox/data" \
+     --etc-dir "$port_sandbox/etc" >/dev/null 2>&1; then
+  bad "--port 99999 is rejected at runtime" \
+      "the installer accepted a port outside 1-65535"
+else
+  ok "--port 99999 is rejected at runtime"
+fi
+
+if bash "$RELEASE_INSTALL_SH" --version v9.9.9 --port notanumber --dry-run \
+     --install-dir "$port_sandbox/opt" --data-dir "$port_sandbox/data" \
+     --etc-dir "$port_sandbox/etc" >/dev/null 2>&1; then
+  bad "--port notanumber is rejected at runtime" \
+      "a non-numeric port was accepted"
+else
+  ok "--port notanumber is rejected at runtime"
+fi
+
+if bash "$RELEASE_INSTALL_SH" --version v9.9.9 --port 8085 --dry-run \
+     --install-dir "$port_sandbox/opt" --data-dir "$port_sandbox/data" \
+     --etc-dir "$port_sandbox/etc" >/dev/null 2>&1; then
+  ok "--port 8085 is accepted at runtime"
+else
+  bad "--port 8085 is accepted at runtime" \
+      "a perfectly valid port was refused"
+fi
+
+# Non-vacuity: a value that IS a port must not be refused. Without this the
+# three checks above could all be satisfied by a guard that rejects everything.
+if bash "$RELEASE_INSTALL_SH" --version v9.9.9 --port 65535 --dry-run \
+     --install-dir "$port_sandbox/opt" --data-dir "$port_sandbox/data" \
+     --etc-dir "$port_sandbox/etc" >/dev/null 2>&1; then
+  ok "NON-VACUITY: the boundary port 65535 is accepted, so the guard is not blanket-refusing"
+else
+  bad "NON-VACUITY: the boundary port 65535 is accepted, so the guard is not blanket-refusing" \
+      "the guard rejects valid ports too; the earlier refusals prove nothing"
+fi
+
 printf '\n--- %d passed, %d failed ---\n\n' "$PASS" "$FAIL"
 [[ "$FAIL" -eq 0 ]] || exit 1
