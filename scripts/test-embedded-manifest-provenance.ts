@@ -49,14 +49,28 @@ interface Manifest {
 async function checkArch(arch: "amd64" | "arm64"): Promise<void> {
   const stage = path.join(REPO, "dist", arch);
   const manifestPath = path.join(stage, "release-manifest.json");
-  const archivePath = path.join(stage, `xistance-panel-v1.2.0-${arch}.tar.gz`);
 
-  if (!fs.existsSync(manifestPath) || !fs.existsSync(archivePath)) {
-    check(`${arch}: archive and embedded manifest are present`, false, `missing under dist/${arch}`);
+  if (!fs.existsSync(manifestPath)) {
+    check(`${arch}: archive and embedded manifest are present`, false, `missing dist/${arch}/release-manifest.json`);
     return;
   }
 
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as Manifest;
+
+  // The manifest already names its own artifact. Building the filename from a
+  // hardcoded "v1.2.0" made this suite fail with "archive and embedded manifest
+  // are present" on every version bump -- it looked for an archive the release
+  // had not built, and the real one sitting next to it went unchecked.
+  const archivePath = path.join(stage, manifest.artifact.name);
+
+  if (!fs.existsSync(archivePath)) {
+    check(
+      `${arch}: archive and embedded manifest are present`,
+      false,
+      `manifest names ${manifest.artifact.name} but it is not under dist/${arch}`,
+    );
+    return;
+  }
 
   // Extract the ARCHIVE to a scratch dir, then recompute the digest over exactly
   // what the installer would end up with. This is the only tree a downstream
