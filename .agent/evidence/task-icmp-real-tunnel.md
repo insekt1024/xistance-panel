@@ -72,10 +72,23 @@ Restoring it returns 14/14. The pass therefore depends on the tunnel existing.
 
 - **UDP is real**, and there is no `-udp` flag. `server.go` dials `tcp` when
   `Tcpmode > 0` and `udp` otherwise, so `-tcp 0` is how UDP is requested.
-- **SOCKS5 needs `tcp=1`.** SOCKS5 is a TCP control protocol; upstream's USAGE.md
-  says `-sock5 1` "automatically enables TCP". Leaving it unset would silently
-  put a SOCKS5 tunnel on the datagram path. `scripts/test-icmp.ts` asserts this,
-  and a mutation removing the line fails the suite.
+- **SOCKS5 is set to `tcp=1` explicitly.** SOCKS5 is a TCP control protocol and
+  upstream's USAGE.md says `-sock5 1` "automatically enables TCP", so the builder
+  states it rather than relying on that.
+
+  **Correction to what I first claimed here.** I wrote that omitting `tcp` "would
+  silently put a SOCKS5 tunnel on the datagram path". Executing it says otherwise:
+  with `tcp` removed from the SOCKS5 config, pingtunnel 2.10 **still served a
+  SOCKS5 request over TCP** (`test-real-icmp-modes.sh`: the proxy carried a
+  request to a loopback-only backend, only the config assertion failed, 11/12).
+  So the line is belt-and-braces that pins intent against a stricter future
+  upstream, not a fix for an observed failure. The assertion stays.
+
+  A related process note: the first mutation run appeared to SURVIVE, which was a
+  harness defect, not a result — `docker cp` of a `dist` directory nests a second
+  copy instead of replacing it, so the container kept a stale build (mtime hours
+  old). After replacing the directory and confirming the mtime moved, the mutation
+  failed as expected. A surviving mutant is a reason to distrust the harness.
 
 ## The systemd half — `scripts/test-icmp-systemd-unit.sh`
 

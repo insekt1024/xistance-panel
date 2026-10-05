@@ -252,6 +252,10 @@ const SUITES: Suite[] = [
   // halves from a shell and never touches the unit, so without this a unit
   // that lost the privilege would fail at runtime with every test green.
   SH("test-icmp-systemd-unit.sh"),
+  // The two transport modes the forward-mode suite does not claim:
+  // SOCKS5 (reaches ANY target the proxy can see) and UDP (a real
+  // datagram round trip, not a TCP payload on a UDP socket).
+  SH("test-real-icmp-modes.sh"),
   TS("test-real-binary-evidence.ts"),
   TS("test-backhaul.ts"),
   TS("test-frp.ts"),

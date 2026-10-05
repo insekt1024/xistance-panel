@@ -1,6 +1,6 @@
 # All-method regression matrix
 
-Generated 2026-10-05T22:03:38.442Z by `scripts/test-method-matrix.ts`.
+Generated 2026-10-05T22:32:56.359Z by `scripts/test-method-matrix.ts`.
 
 > **This harness runs every method with an INJECTED process handle. Its own**
 > **`realBinary` column is therefore `false` for all methods: no tunnel binary is**

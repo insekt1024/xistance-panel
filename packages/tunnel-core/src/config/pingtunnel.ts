@@ -109,8 +109,13 @@ export function buildIcmpClientConfig(cfg: IcmpConfig, serverHost: string): stri
   };
   if (cfg.sock5) {
     doc.sock5 = 1;
-    // SOCKS5 rides on TCP: upstream's server dials "udp" whenever Tcpmode is 0,
-    // so leaving it unset would put a SOCKS5 tunnel on the datagram path.
+    // SOCKS5 is a TCP control protocol, and upstream USAGE.md says -sock5 1
+    // "automatically enables TCP", so set it explicitly rather than relying on
+    // that. Measured: with `tcp` omitted, pingtunnel 2.10 STILL served a SOCKS5
+    // request over TCP (scripts/test-real-icmp-modes.sh), so this line is
+    // belt-and-braces rather than a fix for an observed failure. It is asserted
+    // anyway, so a future upstream that honours Tcpmode strictly cannot silently
+    // put a SOCKS5 tunnel on the datagram path.
     doc.tcp = 1;
   } else {
     // Refuse a half-pair here too. The schema forbids it, but emitting

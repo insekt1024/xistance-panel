@@ -217,8 +217,10 @@ async function main(): Promise<void> {
     const socks = JSON.parse(buildIcmpClientConfig(cfg({ sock5: true }), "203.0.113.10"));
     check("SOCKS5 mode sets sock5=1", socks.sock5 === 1, JSON.stringify(socks));
     check("SOCKS5 mode carries no target", socks.target === undefined, JSON.stringify(socks));
-    // SOCKS5 is a TCP control protocol, so upstream forces TCP mode on
-    // (USAGE.md: "automatically enables TCP").
+    // SOCKS5 is a TCP control protocol and upstream USAGE.md says -sock5 1
+    // "automatically enables TCP", so the builder states it explicitly. Executing
+    // it showed pingtunnel 2.10 serves SOCKS5 over TCP even when this is absent,
+    // so the assertion pins intent rather than recording a fixed bug.
     check("SOCKS5 mode still sets tcp=1", socks.tcp === 1, JSON.stringify(socks));
   }
 
