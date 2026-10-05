@@ -86,3 +86,14 @@ Restoring it returns 14/14. The pass therefore depends on the tunnel existing.
   grant it (root vs `CAP_NET_RAW`), SOCKS5 mode, and UDP forwarding.
 - Reconnect is **not** claimed: this suite proves one continuous transfer, not
   recovery after a restart.
+- The **installer download path was not exercised end to end**. `xt24` reached
+  `github.com` but timed out mid-transfer on the 3.7 MB asset
+  (`curl: (28)`, 931 KB of 3 674 152 received) and has no `unzip`. What *is*
+  proven: the pinned URL resolves (HTTP 200) from the host, and the sha256 of
+  the real `2.10` `pingtunnel_linux_amd64.zip` downloaded from upstream
+  (`2a4902f6…05a897`) equals the value pinned in `scripts/install.sh`.
+  `scripts/test-release-installer.sh` additionally asserts the pinned branch
+  names a concrete version and never resolves a floating one (64/64).
+
+  To close this: run `scripts/install.sh` on a host with working egress, or
+  pre-stage the two zips and install offline.
