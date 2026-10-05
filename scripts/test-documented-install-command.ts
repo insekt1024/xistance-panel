@@ -22,7 +22,11 @@ import fs from "node:fs";
 import path from "node:path";
 
 const REPO = path.resolve(import.meta.dirname, "..");
-const TAG = "v1.2.0";
+// Read the version instead of hardcoding a tag. This suite asserts that the
+// READMEs pin to the tag the tree is about to be released as; a literal here
+// went stale on every bump and the failures it produced ("pinned to v1.2.0")
+// pointed at the test rather than at the docs.
+const TAG = `v${(JSON.parse(fs.readFileSync(path.join(REPO, "package.json"), "utf8")) as { version: string }).version}`;
 const RAW = `https://raw.githubusercontent.com/insekt1024/xistance-panel/${TAG}`;
 
 let pass = 0;
