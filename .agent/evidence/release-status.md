@@ -991,3 +991,79 @@ Windows note that cost a probe: `tar -xzf` on a native `C:/...` path fails with
 `Cannot connect to C: resolve failed` — tar reads `C:` as a REMOTE HOST spec. The
 suites pass `--force-local` for this reason; ad-hoc verification must pass
 `cygpath -u` or `--force-local`.
+
+## ICMP tunnel method (esrrhs/pingtunnel) — 2026-10-05
+
+**Commit `223d37d`.** `v1.2.3` was not touched and remains 11 assets at its
+original tag.
+
+### Real execution, not fixture inspection
+
+`scripts/test-real-icmp-tunnel.sh` is the only suite in this repo that runs a
+real binary over a real raw socket. On `xt24` (Ubuntu 24.04.5, uid 0,
+`CAP_NET_RAW`): **14 passed, 0 failed, three consecutive runs.**
+
+Two network namespaces joined by a veth link, not two processes on loopback:
+
+```
+curl ---> ns-cli (IRAN,    pingtunnel -type client)
+              |  ICMP echo, raw socket
+         veth 10.99.0.2 <-> 10.99.0.1
+              |
+         ns-srv (FOREIGN, pingtunnel -type server) ---> TCP backend
+```
+
+Real TCP bytes (`HELLO-ICMP`) crossed a real ICMP hop. The backend is confirmed
+reachable on the FOREIGN node *before* either half starts, so a pass cannot come
+from a shortcut.
+
+**Why namespaces:** with both halves on `127.0.0.1` pingtunnel 2.10 dies on the
+first data packet — `crash runtime error: invalid memory address` at
+`server.go:357`, because the server's peer table cannot separate the client from
+itself. That killed the first two loopback attempts before the topology was
+fixed.
+
+### Non-vacuity
+
+Removing the client half (no ICMP bridge at all) fails the transfer check:
+**12 passed, 2 failed**. Restoring it returns 14/14.
+
+### Upstream audit — two corrections from reading the source
+
+- **UDP is real, and there is no `-udp` flag.** `server.go` dials `"tcp"` when
+  `Tcpmode > 0` and `"udp"` otherwise, so `-tcp 0` is how UDP is requested.
+- **SOCKS5 requires `tcp=1`.** SOCKS5 is a TCP control protocol; upstream
+  `USAGE.md` states `-sock5 1` "automatically enables TCP". The first
+  implementation left `tcp` unset in SOCKS mode, which would have silently put a
+  SOCKS5 tunnel on the datagram path. Fixed, with a mutation test that fails when
+  the line is removed.
+
+### Installer
+
+`scripts/install.sh` installs `pingtunnel` for both arches with digests pinned to
+the real upstream 2.10 assets:
+
+| arch | asset | sha256 |
+| --- | --- | --- |
+| amd64 | `pingtunnel_linux_amd64.zip` | `2a4902f62ffc2eae7fefde97a6edbc3db9f2d63a53cd17501c2dc4277b05a897` |
+| arm64 | `pingtunnel_linux_arm64.zip` | `e4b4ee5e208eac377a2308883ac75a592b02cc56c45de11d331c85ee25e4e8b7` |
+
+Upstream is MIT, so redistribution is permitted. `scripts/test-release-installer.sh`
+covers the pinned branch (64/64). The pinned-version assertion was widened from
+`v[0-9]+\.[0-9]+` to an optional prefix, because upstream tags `2.10`, not `v2.10`.
+
+### Security
+
+- Key and passphrase live in per-role JSON configs, written `0600`, passed with
+  `-c`. Neither ever appears in argv; asserted directly.
+- `CONFIG_SECRET_FIELDS` gained `encryptionkey` and `encryptkey`, so a
+  passphrase cannot leak into an export or backup.
+- The FOREIGN node needs root or `CAP_NET_RAW`. The installer does **not** grant
+  this automatically — it is called out in the warning text instead.
+
+### Not claimed
+
+Whether a given internet path permits ping; the systemd raw-socket privilege
+setup; SOCKS5 mode and UDP forwarding (untested here). Only a real
+IRAN→FOREIGN deployment settles path reachability.
+

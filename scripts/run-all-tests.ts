@@ -252,6 +252,7 @@ const SUITES: Suite[] = [
   TS("test-frp.ts"),
   TS("test-gost.ts"),
   TS("test-icmp.ts"),
+  TS("test-icmp-wizard-contract.ts"),
   TS("test-ssh.ts"),
   TS("test-port-forward.ts"),
   TS("test-port-forward-datapath.ts"),
