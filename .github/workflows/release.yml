@@ -237,10 +237,25 @@ jobs:
           # against the archive" runs AFTER the browser gate and copies that exact
           # file beside the archive. Pruning the whole tree would break that step.
           keep="$(mktemp)"; cp dist/artifact/release-manifest.json "$keep"
-          rm -rf dist/artifact node_modules/.cache .next/cache 2>/dev/null || true
+          # The staged PAYLOAD must survive too, not just its manifest: the
+          # browser gate's `artifact-assets` case boots dist/artifact (the
+          # candidate list in scripts/test-artifact-assets.ts) and falls back to
+          # dist/artifact-local, which this workflow never builds. Pruning the
+          # tree on run 37499689138 left it with no candidate at all, so the case
+          # exited 1 in 0.2s with no result summary -- a prune that broke the very
+          # thing it runs next, in order to free disk for it.
+          #
+          # Prune the CACHES instead: those are what actually reclaim the ~1.5
+          # GiB Chromium needs. The disk check below still fails loudly if that
+          # leaves too little, so this does not trade one failure for another.
+          rm -rf node_modules/.cache .next/cache 2>/dev/null || true
           mkdir -p dist/artifact && cp "$keep" dist/artifact/release-manifest.json && rm -f "$keep"
           test -s dist/artifact/release-manifest.json || {
             echo "::error::prune destroyed the staged manifest later steps need"; exit 1; }
+          # Fail HERE with a cause if the payload the browser gate boots is gone,
+          # rather than there with an opaque exit code and no result summary.
+          test -s dist/artifact/apply-migrations.mjs || {
+            echo "::error::staged payload is missing apply-migrations.mjs; artifact-assets would fail"; exit 1; }
           after_kb="$(df -k . | awk 'NR==2 {print $4}')"
           echo "  free space after prune:  $((after_kb / 1024)) MiB"
           # Fail loudly here rather than three steps later inside tar.
@@ -303,7 +318,14 @@ jobs:
           ARCHIVE="${candidates[0]}"
           # The archive is already checksum-verified; re-verify here so the
           # installer is given a payload proven identical to the one published.
-          sha256sum -c "$ARCHIVE.sha256"
+          # Run it from the archive's OWN directory: the sidecar deliberately
+          # records a BARE filename (correct once published, where archive and
+          # sidecar sit side by side), so `sha256sum -c` resolves the name
+          # against the CURRENT directory. From the repo root it fails with
+          # "No such file or directory" on run 37499689138 even though the
+          # digest is right. The Publish job's own check already `cd dist`
+          # first for this reason.
+          ( cd "$(dirname "$ARCHIVE")" && sha256sum -c "$(basename "$ARCHIVE").sha256" )
           # Stage the libraries BESIDE the installer, as `$SCRIPT_DIR/lib`.
           #
           # Putting them in `$WORK/scripts/lib` does NOT work: the installer
