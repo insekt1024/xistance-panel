@@ -1291,3 +1291,107 @@ now enumerated and run before calling a tree releasable.
 gitignored with 0 tracked files, so CI stages fresh and never sees the staleness.
 Clear the staging rather than relaxing the check.
 
+## v1.3.4 shipped -- and installing it found what CI could not
+
+Release run `37518383788`: **all jobs green, the release exists.** Seven assets,
+amd64 + arm64, both verifying on a clean download:
+
+    xistance-panel-v1.3.4-amd64.tar.gz: OK
+    xistance-panel-v1.3.4-arm64.tar.gz: OK
+
+Both archives carry a self-describing manifest naming themselves, version and tag.
+This is the first release in the whole series with a published artifact.
+
+### Installing it failed twice. Neither was caught by a gate.
+
+**The release never published `release-manifest.json`.** The installer fetches it
+and dies without it, so the real install gave:
+
+    curl: (22) The requested URL returned error: 404
+    x Manifest download failed: .../releases/download/v1.3.4/release-manifest.json
+
+after every archive and sidecar verified. I had verified the archives and the
+installer's **dry run**; I had not installed. That gap is the finding.
+
+**It shipped a panel one version behind its own tag.** With the manifest uploaded,
+the install succeeded and `/api/health` answered:
+
+    {"ok":true,"status":"healthy","version":"1.3.3",...}
+
+on a v1.3.4 release. The artifact job checked out the SHA the run was dispatched
+at -- the PRE-bump tree -- and only NAMED the archives after the bump. Confirmed in
+the shipped bytes of BOTH architectures: `APP_VERSION","0","1.3.3"`. The tag,
+archive names, sidecars and embedded manifests all agreed with each other, so
+every checksum verified and every gate passed.
+
+### The two guards that were missing
+
+1. **The install gate checked only that `/api/health` answered 200.** A 200 says
+   the app boots; it says nothing about WHICH app. It now asserts the reported
+   version equals the release version.
+2. **No suite asked what the installer DOWNLOADS.** The asset suite checked the
+   assets it knew about. `test-release-installer-assets.ts` now cross-reads
+   `release-install.sh` and the workflow, so every asset the installer fetches is
+   one the release publishes. 37/37; removing the manifest upload fails it.
+
+Plus `test-release-workflow.ts` now requires the artifact job to check out
+`needs.version.outputs.commit` -- verified to fail by name.
+
+### What I did to v1.3.4 itself
+
+I uploaded the missing `release-manifest.json` to the published v1.3.4 so that tag
+became installable. That is a deliberate mutation of a published release rather
+than a new tag: a working v1.3.4 beat a fourth tag with no release behind it. It
+still reports 1.3.3 internally, so **v1.3.5 is the first internally consistent
+release** and the first to be verified by installing it.
+
+## v1.3.5: released, installed, and internally consistent
+
+Run `37534172971`: both artifact jobs succeeded -- including the install gate's
+new version assertion -- and Publish release succeeded. Only "Build and push
+image" failed, at **Set up job**: a runner-capacity failure, not a code failure
+(the log shows runner provisioning, no build step ran).
+
+### One more manifest bug, one fix short of solved
+
+v1.3.5 published **7 assets and no manifest**. The upload list already named
+`dist/release-manifest.json` and the previous fix added it there -- but nothing
+ever PUT it there: the tracked manifest lives at the **repo root** while `dist/`
+is staging. `softprops/action-gh-release` **skips a `files:` entry that matches
+nothing**, so the run published quietly without it and every gate passed.
+
+The lesson is the one the suite had already been told once and did not check: an
+entry in `files:` is not the same as a staged file. The publish job now copies it
+into `dist/` and asserts it arrived, and the asset suite asserts the staging copy
+(38/38; removing the `cp` fails by name).
+
+### Verification, in the order that matters
+
+1. **Clean download**: all 8 assets; both sidecars `OK`.
+2. **Shipped bytes** (the check v1.3.4 failed):
+
+       amd64: manifest 1.3.5 | shipped 1.3.5 | CONSISTENT
+       arm64: manifest 1.3.5 | shipped 1.3.5 | CONSISTENT
+
+   Read from `APP_VERSION",0,"..."` in the bundled server chunks, not from a
+   filename.
+3. **Real install on `xt24`** from the published release: migrations up to date,
+   admin preserved, previous release retained, service active.
+4. **The live panel reports its own version**:
+
+       {"ok":true,"status":"healthy","version":"1.3.5",
+        "checks":{"database":"ok","engine":"ok","managedTunnels":"0"}}
+
+   `/api/tunnels` unauthenticated still 401. Database preserved (172032 bytes).
+
+### ICMP, in the shipped artifact
+
+The new-tunnel page on the running 1.3.5 install renders:
+
+    "ICMP":"ICMP (pingtunnel)"
+    "ICMP_DESC":"Carries TCP, UDP or a SOCKS5 p... where only ping gets through.
+                 The server needs root for raw ICMP sockets."
+
+alongside the other nine methods. Real-traffic evidence remains from the
+namespace suite: 14/14 forward, 12/12 SOCKS5 + UDP, 4/4 systemd unit.
+
