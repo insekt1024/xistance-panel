@@ -375,20 +375,28 @@ jobs:
           scratch="$(mktemp -d)"
           trap 'rm -rf "$scratch"' EXIT
           tar -xzf "$archive" -C "$scratch"
-          npx tsx scripts/test-embedded-manifest-provenance.ts \
-            --extract-dir "$scratch" --manifest "dist/$arch/release-manifest.json" \
-            --expect-version "$version" --expect-arch "$arch"
-          # Put the manifest CI actually built BESIDE the archive it describes.
+          # Put the manifest CI actually built BESIDE the archive it describes --
+          # BEFORE anything reads it.
           #
           # This used to be `cp dist/$arch/release-manifest.json
           # dist/$arch/release-manifest.json 2>/dev/null || true` -- a file copied
           # onto itself, with every failure discarded. So in CI this path never
-          # existed, and `test-embedded-manifest-provenance.ts` was pointed at a
-          # manifest that had not been written: the one step that proves the
-          # published archive's embedded digest describes its own contents could
-          # not have run. Found because the local copy was dated Oct 1 while the
-          # archive it described was newer.
+          # existed. The fix put the real copy AFTER the provenance check instead
+          # of before it, so on run 37506411852 the check read a file the same step
+          # had not yet written:
+          #   ENOENT: no such file or directory, open 'dist/amd64/release-manifest.json'
+          # and the step that proves the published archive's embedded digest
+          # describes its own contents could not run at all.
+          mkdir -p "dist/$arch"
           cp dist/artifact/release-manifest.json "dist/$arch/release-manifest.json"
+          test -s "dist/$arch/release-manifest.json" || {
+            echo "::error::the manifest beside the archive is missing; provenance cannot be checked"
+            exit 1
+          }
+
+          npx tsx scripts/test-embedded-manifest-provenance.ts \
+            --extract-dir "$scratch" --manifest "dist/$arch/release-manifest.json" \
+            --expect-version "$version" --expect-arch "$arch"
           npx tsx scripts/verify-artifact.ts verify \
             --artifact "$archive" \
             --checksum "$archive.sha256" \
