@@ -396,6 +396,48 @@ async function main(): Promise<void> {
     console.log("\u2705 Release workflow: the archive is created before the disk-heavy browser gate");
   }
 
+  function testArtifactBuildsTheBumpedTree(): void {
+    // The artifact job must build the tree that carries the BUMPED version.
+    //
+    // Without `ref:` it builds whatever SHA the run was dispatched at -- the
+    // PRE-bump tree -- and only NAMES the archives after the bump. That shipped:
+    // the published v1.3.4 installed a panel whose /api/health reported the
+    // previous version, verified in the shipped bytes of both architectures. The
+    // tag, archive names, sidecars and embedded manifests all agreed with each
+    // other, so every checksum verified and every other gate passed.
+    const versionJob = workflow.jobs?.version;
+    const artifactJob = workflow.jobs?.artifact;
+    assert.ok(versionJob, "the workflow must have a version job");
+    assert.ok(artifactJob, "the workflow must have an artifact job");
+
+    // The SHA has to be published as an output, and actually produced.
+    const outputs = versionJob.outputs ?? {};
+    assert.ok(
+      /steps\.commit\.outputs\.sha/.test(String(outputs.commit ?? "")),
+      "the version job must expose the bumped SHA as a `commit` output, so the " +
+        "artifact job can build that tree rather than the pre-bump one",
+    );
+
+    const bump = (versionJob.steps ?? []).find((st: WorkflowStep) => st.id === "commit");
+    assert.ok(bump, "the bump step needs id: commit to record its own SHA");
+    assert.ok(
+      /git rev-parse HEAD/.test(bump.run ?? ""),
+      "the bump step must record its resulting SHA, or the commit output is empty",
+    );
+
+    // The artifact job's checkout must actually use it.
+    const checkout = (artifactJob.steps ?? []).find(
+      (st: WorkflowStep) => (st.uses ?? "").includes("actions/checkout"),
+    );
+    assert.ok(checkout, "the artifact job must check out its source");
+    assert.ok(
+      /needs\.version\.outputs\.commit/.test(String(checkout.with?.ref ?? "")),
+      "the artifact job must check out the BUMPED commit " +
+        "(needs.version.outputs.commit); without it the release ships the " +
+        "pre-bump tree under the new version's name",
+    );
+  }
+
   function testTagPushUsesAValidRefspec(): void {
     // The tag is created by the PUBLISH job, not the version job. Reaching it
     // means both architectures built, were checksum-verified, inspected and
@@ -461,6 +503,7 @@ async function main(): Promise<void> {
 
     console.log("\u2705 Release workflow: the tag push uses a valid git refspec");
   }
+  testArtifactBuildsTheBumpedTree();
   testTagPushUsesAValidRefspec();
   testArchivePrecedesTheDiskHeavyBrowserGate();
 }

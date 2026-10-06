@@ -462,6 +462,54 @@ check(
   );
 }
 
+// ---------------------------------------------------------------------------
+// The installer fetches release-manifest.json from the release and DIES without
+// it ("A release without a manifest cannot be verified"). So the workflow's
+// upload list has to include it. It did not, and that shipped: the published
+// v1.3.4 had seven assets, every archive and sidecar verified, and installing it
+// failed with a 404 on
+//   .../releases/download/v1.3.4/release-manifest.json
+//
+// Nothing caught it because this suite checked the assets it KNEW about, and
+// never asked what the installer actually requests. This check cross-reads the
+// installer and the workflow, so the two cannot drift apart again.
+{
+  // `installer` and `workflow` are already read at module scope; `filesBody` is
+  // the Create GitHub Release step's files: block, already extracted above.
+  const requested = [...installer.matchAll(
+    /^(?:MANIFEST_URL|ARCHIVE_URL|CHECKSUM_URL)=.*\$\{DOWNLOAD_BASE\}\/([A-Za-z0-9._-]+)/gm,
+  )].map((m) => m[1]);
+
+  check(
+    "the installer requests assets (so the cross-check has something to verify)",
+    requested.length > 0,
+    "no ${DOWNLOAD_BASE}/... URL found in release-install.sh; this check is vacuous",
+  );
+
+  const uploaded = new Set(
+    filesBody
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("dist/")),
+  );
+
+  for (const asset of requested) {
+    // A glob in the upload list covers the asset (dist/*.tar.gz, and the
+    // installer appends .sha256 to the archive name it builds itself).
+    const covered = [...uploaded].some(
+      (u) => u === `dist/${asset}` || u.endsWith("*"),
+    );
+    check(
+      `the release publishes ${asset}, which the installer downloads`,
+      covered,
+      `release-install.sh downloads ` +
+        `\${DOWNLOAD_BASE}/${asset} but the Create GitHub Release step's ` +
+        `files: block does not upload it. Every other asset can verify and the\n` +
+        `  install still fails, because the installer dies without its manifest.`,
+    );
+  }
+}
+
 // Exit 0 even with a readiness finding: an untracked file is the maintainer's
 // call, not a product defect, and this worktree is intentionally dirty. What
 // matters is that it is reported loudly here and in release-status.md -- the
