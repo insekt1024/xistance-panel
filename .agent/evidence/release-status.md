@@ -1067,3 +1067,67 @@ Whether a given internet path permits ping; the systemd raw-socket privilege
 setup; SOCKS5 mode and UDP forwarding (untested here). Only a real
 IRAN→FOREIGN deployment settles path reachability.
 
+## Release attempt for ICMP — run 37395663211 (failed, two real defects)
+
+The first attempt to ship ICMP was a `minor` bump, 1.2.3 → 1.3.0, with a
+`dry-run` first to confirm the bump validated without pushing anything.
+
+**The dry run behaved correctly**: `Bump and verify version` succeeded, every
+downstream job skipped, and no commit or tag appeared. That is the fail-safe
+behaviour the input exists for.
+
+**The real run failed in two places, both genuine defects:**
+
+### arm64 — `Install the archive on this architecture`
+
+```
+installing as v1.3.0
+ls: cannot access 'dist/*.tar.gz': No such file or directory
+##[error]Process completed with exit code 2.
+```
+
+One step *after* `Create archive` had succeeded. That step writes
+`dist/<arch>/xistance-panel-v*.tar.gz`; the install step still globbed the top
+level. The Publish job legitimately globs `dist/*.tar.gz` because it downloads
+artifacts flattened, but the Artifact job runs before any download.
+
+Fixed to read `dist/<arch>/`, failing closed unless exactly one archive is
+present rather than `ls | head -1`.
+
+### amd64 — Browser gate, on `artifact-assets`
+
+```
+FAIL artifact-assets: fail (exit 1, 0.2s)
+=== gate verdict: FAIL ===
+2 passed, 1 failed, 0 skipped
+```
+
+That check was **vacuous for two independent reasons**:
+
+1. It hardcoded `dist/amd64/xistance-panel-v1.2.0-amd64.tar.gz`, a name that no
+   longer exists.
+2. `tar ... 2>/dev/null | head -4000` then swallowed tar's error, so an empty
+   listing was read as *"the archive carries no libraries"* — exactly the
+   property under test. A skipped check and a satisfied check were identical.
+
+It now discovers the archive and reports a non-zero tar exit as a failure.
+
+### The line ending that hid all of it
+
+Fixing the above turned 8 assertions red on a workflow that satisfies all of
+them. The suite matches `release.yml` with `/\n/` anchors, and my patch had
+rewritten the file as **CRLF** — every regex stopped matching and captured bodies
+came back empty. `release.yml` is LF by convention; the suite now asserts that
+convention by name, verified non-vacuous (CRLF → 27 passed / 9 failed).
+
+### State left behind
+
+`v1.3.0` exists as a **tag with no release**, exactly like `v1.2.2`, and is not
+moved. Its tree differs from the tested `b7a216e` by 7 version strings and
+nothing else. The workflow's `chore: release v1.3.0` commit had been pushed to
+master before the artifact jobs failed, so the fixes were merged rather than
+rebased — no history discarded.
+
+Next attempt must be a `patch` bump (1.3.0 → 1.3.1), since the version in the
+tree is already 1.3.0.
+
