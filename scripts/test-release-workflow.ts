@@ -397,15 +397,44 @@ async function main(): Promise<void> {
   }
 
   function testTagPushUsesAValidRefspec(): void {
+    // The tag is created by the PUBLISH job, not the version job. Reaching it
+    // means both architectures built, were checksum-verified, inspected and
+    // installed. When the version job pushed the tag itself it did so before any
+    // of that, so a failed build burned a version number: v1.3.0 and v1.3.1 both
+    // exist as permanent tags with no release. A tag is irreversible; a version
+    // bump is a two-minute re-run. The order must not be inverted back.
     const versionJob = workflow.jobs?.version;
+    const publishJob = workflow.jobs?.publish;
     assert.ok(versionJob, "the workflow must have a version job");
-    const steps: WorkflowStep[] = versionJob.steps ?? [];
-    const pushStep = steps.find((s: WorkflowStep) =>
-      (s.run ?? "")
+    assert.ok(publishJob, "the workflow must have a publish job");
+
+    const versionSteps: WorkflowStep[] = versionJob.steps ?? [];
+    const versionPushesTag = versionSteps.some((st: WorkflowStep) =>
+      (st.run ?? "")
         .split("\n")
-        .some((l) => /git push\s+origin\s+"[^"]*(?:tag)/.test(l)),
+        .some((l) => /git push\s+origin\s+"[^"]*refs\/tags/.test(l)),
     );
-    assert.ok(pushStep, "a step must push the release tag");
+    assert.ok(
+      !versionPushesTag,
+      "the version job must NOT push the tag; it runs before the artifacts are proven",
+    );
+
+    // ...and publish must actually gate on the artifacts, or "publish" could
+    // still run first and the ordering above would be theatre.
+    const publishNeeds = JSON.stringify(publishJob.needs ?? []);
+    assert.ok(
+      /artifact/.test(publishNeeds),
+      "publish must need the artifact job, so the tag follows a proven build",
+    );
+
+    const publishSteps: WorkflowStep[] = publishJob.steps ?? [];
+    const tagPushStep = publishSteps.find((st: WorkflowStep) =>
+      (st.run ?? "")
+        .split("\n")
+        .some((l) => /git push\s+origin\s+"[^"]*refs\/tags/.test(l)),
+    );
+    assert.ok(tagPushStep, "the publish job must push the release tag");
+    const pushStep = tagPushStep;
 
     const run: string = pushStep.run ?? "";
     const tagPushes = run

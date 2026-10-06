@@ -82,12 +82,21 @@ jobs:
           npx tsx scripts/test-optimizations.ts
           npm run build
 
-      - name: Push commit + tag (only after green build)
+      - name: Push the version commit (NOT the tag yet)
         if: ${{ !inputs.dry-run }}
         run: |
+          # Only the COMMIT is pushed here. The tag is created by the publish
+          # job, after both architectures have built, been inspected, and been
+          # installed successfully.
+          #
+          # This step used to push the tag too, inside the job that runs FIRST
+          # -- so its name ("only after green build") asserted a guarantee the
+          # job graph did not provide. Three attempts then each burned a tag:
+          # v1.3.0 and v1.3.1 exist as tags with no release, because the
+          # artifact and browser-gate jobs failed after the tag was already
+          # permanent. A failed build must not cost a version number.
           BRANCH="${GITHUB_REF#refs/heads/}"
           git push origin "HEAD:${BRANCH}"
-          git push origin "refs/tags/v$(node scripts/version.mjs --show)"
 
   artifact:
     name: Artifact ${{ matrix.architecture }}
@@ -421,6 +430,30 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+
+      # The tag is created HERE, not in the version job. Reaching this point means
+      # both architectures built, were checksum-verified, inspected, and
+      # INSTALLED successfully -- so a failure anywhere earlier costs no version
+      # number. That inversion is the whole point: v1.3.0 and v1.3.1 both exist as
+      # permanent tags with no release because the tag used to be pushed by the
+      # job that ran first.
+      #
+      # Annotated, and idempotent-safe: `git tag` fails if the ref exists, which
+      # is the correct outcome -- a tag is immutable and must never be re-pointed.
+      - name: Create the release tag (only now, after proven artifacts)
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.version.outputs.release-tag }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin "refs/tags/$TAG" || true
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::$TAG already exists; a release tag is immutable and is never re-pointed"
+            exit 1
+          fi
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "refs/tags/$TAG"
+          echo "    tagged $TAG at $(git rev-parse --short HEAD)"
 
       # PRD section 9 requires a ONE-LINE install command. That command curls
       # `release-install.sh` from the release tag, and the installer in turn
