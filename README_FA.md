@@ -55,7 +55,7 @@
 
 ## نسخهٔ فعلی
 
-**v1.3.0** — <https://github.com/insekt1024/xistance-panel/releases/tag/v1.3.0>
+**v1.3.1** — <https://github.com/insekt1024/xistance-panel/releases/tag/v1.3.1>
 
 منتشرشده در ۲۰۲۶-۱۰-۰۵ با ۱۱ فایل: یک آرشیو برای هر معماری، فایل `.sha256` برای
 هر کدام، نصب‌کننده، دو کتابخانهٔ کمکی آن (`release-layout.sh` و `service-unit.sh`)
@@ -64,7 +64,7 @@
 پیش از نصب، مطمئن شوید همان چیزی را می‌گیرید که انتظار دارید:
 
 ```bash
-curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.3.0/release-manifest.json
+curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.3.1/release-manifest.json
 cat release-manifest.json
 ```
 
@@ -75,7 +75,7 @@ cat release-manifest.json
 آرتیفکت `arm64` روی یک رانر بومی `arm64` ساخته می‌شود — نه کراس‌کامپایل و نه
 شبیه‌سازی.
 
-### تغییرات v1.3.0
+### تغییرات v1.3.1
 
 **ICMP اکنون یک روش تونل است.** وقتی پورت‌های معمولی فیلتر می‌شوند، ترافیک
 می‌تواند داخل بسته‌های echo پروتکل ICMP بین دو گرهٔ شما جابه‌جا شود، با
@@ -128,21 +128,21 @@ TCP یا UDP، پروکسی SOCKS5 که به هر هدفی که سرور بتو�
 ### پیشنهادی — بدون بیلد، با آرتیفکت آماده
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.3.0/scripts/release-install.sh \
+curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.3.1/scripts/release-install.sh \
   -o /tmp/xistance-release-install.sh
-curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.3.0/scripts/lib/release-layout.sh \
+curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.3.1/scripts/lib/release-layout.sh \
   -o /tmp/release-layout.sh
-curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.3.0/scripts/lib/service-unit.sh \
+curl -fsSL https://raw.githubusercontent.com/insekt1024/xistance-panel/v1.3.1/scripts/lib/service-unit.sh \
   -o /tmp/service-unit.sh
-sudo bash /tmp/xistance-release-install.sh --version v1.3.0
+sudo bash /tmp/xistance-release-install.sh --version v1.3.1
 ```
 
 نسخه **عمداً پین شده** — حالت `latest` وجود ندارد، پس همین دستور همیشه
 همان نسخه را نصب می‌کند. معماری `amd64` و `arm64` خودکار تشخیص داده می‌شود.
 
-> **منبع هر فایل مهم است.** دستورهای بالا از تگ **`v1.3.0`** فایل می‌گیرند و تگ
+> **منبع هر فایل مهم است.** دستورهای بالا از تگ **`v1.3.1`** فایل می‌گیرند و تگ
 > تغییرناپذیر است — یعنی نصب‌کننده‌ای که از آنجا می‌گیرید دقیقاً همان است که همراه
-> آرشیوهای `v1.3.0` منتشر شد. نصب‌کنندهٔ پیوست‌شده به [نسخهٔ انتشار](https://github.com/insekt1024/xistance-panel/releases/tag/v1.3.0)
+> آرشیوهای `v1.3.1` منتشر شد. نصب‌کنندهٔ پیوست‌شده به [نسخهٔ انتشار](https://github.com/insekt1024/xistance-panel/releases/tag/v1.3.1)
 > ممکن است اصلاحی جدیدتر روی همان تگ داشته باشد. هر دو با یک هش آرشیو راستی‌آزمایی
 > می‌شوند؛ اگر جدیدترین نصب‌کننده را می‌خواهید دانلود از نسخهٔ انتشار، و اگر
 > دقیقاً همان بایت‌های بازبینی‌شده و منتشرشده را می‌خواهید، از تگ بگیرید.
@@ -150,15 +150,15 @@ sudo bash /tmp/xistance-release-install.sh --version v1.3.0
 > برای گرفتن مستقیم فایل نسخهٔ انتشار (که معمولاً همین را می‌خواهید):
 >
 > ```bash
-> curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.3.0/release-install.sh
-> sudo bash release-install.sh --version v1.3.0
+> curl -fsSL -O https://github.com/insekt1024/xistance-panel/releases/download/v1.3.1/release-install.sh
+> sudo bash release-install.sh --version v1.3.1
 > ```
 
 گزینه‌های پرکاربرد:
 
 | گزینه | کارش |
 | --- | --- |
-| `--version <TAG>` | **اجباری.** تگ دقیق نسخه، مثلاً `v1.3.0`. |
+| `--version <TAG>` | **اجباری.** تگ دقیق نسخه، مثلاً `v1.3.1`. |
 | `--arch <ARCH>` | تشخیص معماری را دستی تعیین کنید (`amd64` یا `arm64`). |
 | `--archive <FILE>` | نصب یک آرتیفکت از پیش دانلودشده به‌جای دانلود. فایل `.sha256` باید کنارش باشد. مناسب شبکه‌های بدون اینترنت. |
 | `--install-dir <DIR>` | ریشهٔ نسخه‌ها (پیش‌فرض `/opt/xistance`). |
@@ -169,7 +169,7 @@ sudo bash /tmp/xistance-release-install.sh --version v1.3.0
 برای دیدن طرح کار بدون اجرا:
 
 ```bash
-sudo bash /tmp/xistance-release-install.sh --version v1.3.0 --dry-run
+sudo bash /tmp/xistance-release-install.sh --version v1.3.1 --dry-run
 ```
 
 ### نصب‌کننده دقیقاً چه می‌کند
@@ -218,7 +218,7 @@ curl -s http://127.0.0.1:8080/api/health
 برای رفتن به نسخهٔ جدیدتر، همان نصب‌کننده را با **تگ جدید** اجرا کنید:
 
 ```bash
-sudo bash /tmp/xistance-release-install.sh --version v1.3.0
+sudo bash /tmp/xistance-release-install.sh --version v1.3.1
 ```
 
 هیچ `latest` شناوری وجود ندارد: همیشه دقیقاً همان نسخه‌ای را که می‌خواهید
@@ -275,7 +275,7 @@ sha256sum --check xistance-panel-v<version>-<arch>.tar.gz.sha256
 می‌توانید آرتیفکت را پیش از نصب، بدون استقرار آن، راستی‌آزمایی کنید:
 
 ```bash
-npx tsx scripts/verify-artifact.ts xistance-panel-v1.3.0-amd64.tar.gz
+npx tsx scripts/verify-artifact.ts xistance-panel-v1.3.1-amd64.tar.gz
 ```
 
 این دستور checksum، مانیفست و ساختار آرشیو را بررسی می‌کند و مسیرهای مطلق،
