@@ -1219,3 +1219,75 @@ Two high-severity advisories in the shipped tree, published mid-session:
 (GHSA-wq5f-xc86-pv6w, CVE-2026-96889, librsvg). Both via `npm audit fix` without
 `--force`, touching nothing else.
 
+## Release attempts after the structural fix (2026-10-06)
+
+With the tag created by `publish`, failures stopped costing version numbers. Two
+further attempts, each buying a fix rather than a version.
+
+### Run 37506411852 — first attempt that burned nothing
+
+Both artifact jobs failed, and **`v1.3.2` was never created**; publish was skipped.
+The failure was the provenance step reading
+`dist/$arch/release-manifest.json` eleven lines BEFORE the `cp` that creates it:
+
+```
+ENOENT: no such file or directory, open 'dist/amd64/release-manifest.json'
+```
+
+Reordered, with `mkdir -p` and an explicit `test -s`.
+
+### Run 37511565200 — both artifacts green for the first time
+
+amd64 and arm64 built, checksum-verified, inspected **and installed**. The tag
+was created by publish. Two failures remained, both after that point:
+
+**Attestation.** `subject-checksums: dist/*.tar.gz.sha256` names a GLOB, but
+`actions/attest` calls `fs.access()` on its input: a glob is not a path, that
+throws, and it then parses the input as checksum CONTENT. The literal glob has no
+`<digest> <name>` record, so it found zero subjects:
+
+```
+Failed to persist attestation: Invalid Argument - invalid statement: no statement subjects
+```
+
+The two sidecars had verified **PASS one step earlier**. It takes one file; the
+step now concatenates them into `dist/ATTESTATION_SUBJECTS.sha256` and fails
+closed if there are none.
+
+**Docker.** `platforms: linux/amd64,linux/arm64` with no emulator registered:
+
+```
+ERROR: failed to build: Multi-platform build is not supported for the docker driver.
+```
+
+The message blames buildx, not the missing QEMU. Added `setup-qemu-action`.
+
+### A rerun that bought nothing — and proved the guard
+
+Re-running the failed jobs to reuse the already-proven artifacts executes the
+workflow **as of that run's commit**, which predates the fixes. So it hit the same
+two failures, and the tag step then correctly REFUSED because the tag already
+existed:
+
+```
+::error::v1.3.3 already exists; a release tag is immutable and is never re-pointed
+```
+
+That refusal is the immutability guard working. Fresh runs only.
+
+### The local gate set was not the suite set
+
+My QEMU step broke `test-docker-image-architecture` — a suite I never ran locally.
+Its mutation used a non-global `replace(/^\s*platforms:.*$/m)`, so with two
+`platforms:` lines it stripped the QEMU one instead of the build step's, and the
+control stopped biting. The aggregate, typecheck, lint and both release suites were
+all green; CI caught it. Fixed with `/gm`, and the whole subsystem suite list is
+now enumerated and run before calling a tree releasable.
+
+### Two suites that fail locally for a benign reason
+
+`test-release-version-commit-parity` and `test-embedded-manifest-provenance` read
+`dist/`, which holds whatever the last local staging left behind. `dist/` is
+gitignored with 0 tracked files, so CI stages fresh and never sees the staleness.
+Clear the staging rather than relaxing the check.
+
