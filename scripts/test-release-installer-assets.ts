@@ -83,15 +83,43 @@ check(
   "installer does not source it, so it would not be a required asset",
 );
 
+function topLevelHasEntries(stdout: string): boolean {
+  return stdout.split("\n").some((l) => l.trim().length > 0);
+}
+
 // --- 2. Neither library is inside the artifact -------------------------------
 // This is why they must be release assets. If the archive ever starts carrying
 // them, the upload list can be simplified -- and this check tells you.
+// Discover the archive instead of hardcoding one. The hardcoded name had two
+// defects that combined into a FALSE PASS on run 37395663211: it pinned v1.2.0
+// (so the file did not exist), and `2>/dev/null` then swallowed tar's error, so
+// an empty listing was read as "the archive carries no libraries" -- exactly the
+// property under test. A skipped check and a satisfied check look identical here.
+function findAmd64Archive(): string | null {
+  const dir = path.join(REPO, "dist", "amd64");
+  if (!fs.existsSync(dir)) return null;
+  const hit = fs.readdirSync(dir).find((f) => f.endsWith(".tar.gz"));
+  return hit ? path.join(dir, hit) : null;
+}
+const amd64Archive = findAmd64Archive();
 const { stdout: topLevel } = (() => {
+  if (!amd64Archive) return { stdout: "" };
   const r = spawnSync(
     "bash",
-    ["-lc", `tar --force-local -tzf ${JSON.stringify(path.join(REPO, "dist/amd64/xistance-panel-v1.2.0-amd64.tar.gz"))} 2>/dev/null | head -4000`],
+    ["-lc", `tar --force-local -tzf ${JSON.stringify(amd64Archive)} | head -4000`],
     { cwd: REPO, encoding: "utf8", timeout: 300_000 },
   );
+  // A non-zero exit here means the archive is unreadable, which is a failure to
+  // report -- never an empty listing to interpret as a satisfied check.
+  if (r.status !== 0) {
+    check(
+      "the amd64 release archive could be listed",
+      false,
+      `tar exited ${r.status} on ${path.basename(amd64Archive)}`,
+    );
+    return { stdout: "" };
+  }
+  check("the amd64 release archive could be listed", topLevelHasEntries(r.stdout ?? ""));
   return { stdout: r.stdout ?? "" };
 })();
 const artifactCarriesLib = /(^|\/)(release-layout|service-unit)\.sh$/m.test(topLevel);
@@ -113,6 +141,22 @@ for (const asset of REQUIRED_ASSETS) {
     "not in the publish job's `files:` list, so the one-line install would 404",
   );
 }
+
+// Every assertion below matches the workflow with /\n/ anchors. If the file is
+// committed CRLF, every one of those regexes fails to match, the captured bodies
+// come back empty, and the whole section reports a wall of failures that look
+// like a broken workflow rather than a broken LINE ENDING. It happened here: a
+// patch that rewrote release.yml as CRLF turned 8 assertions red on a workflow
+// that satisfied all of them. Assert the convention explicitly so the next
+// occurrence names itself.
+// `workflow` is the module-level binding holding this file's text; the
+// loop-scoped `yaml` / `WF_DIR` above do not exist at this point.
+const releaseWorkflowIsLf = !/\r\n/.test(workflow);
+check(
+  "release.yml uses LF line endings (the assertions below anchor on /\\n/)",
+  releaseWorkflowIsLf,
+  "convert the file to LF; CRLF makes every regex here vacuously fail",
+);
 
 // --- 4. The publish job stages them and fails closed --------------------------
 const stageStep = /- name: Stage the one-line installer assets\n([\s\S]*?)(?=\n\s*- name:|\n\s{2}\w:)/.exec(workflow);

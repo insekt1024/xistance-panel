@@ -289,7 +289,18 @@ jobs:
           # under its real name rather than a hardcoded one.
           RELEASE_TAG="${{ needs.version.outputs.release-tag }}"
           echo "installing as $RELEASE_TAG"
-          ARCHIVE=$(ls dist/*.tar.gz | head -1)
+          # Must match where "Create archive" wrote it: dist/<arch>/. Globbing the
+          # top level here failed on run 37395663211 with "ls: cannot access
+          # dist/*.tar.gz" one step after Create archive had succeeded -- the
+          # Publish job may glob dist/*.tar.gz because it downloads artifacts
+          # flattened, but this job runs before any download.
+          shopt -s nullglob
+          candidates=(dist/${{ matrix.architecture }}/*.tar.gz)
+          if [ ${#candidates[@]} -ne 1 ]; then
+            echo "::error::expected exactly one archive in dist/${{ matrix.architecture }}/, found ${#candidates[@]}" >&2
+            exit 1
+          fi
+          ARCHIVE="${candidates[0]}"
           # The archive is already checksum-verified; re-verify here so the
           # installer is given a payload proven identical to the one published.
           sha256sum -c "$ARCHIVE.sha256"
