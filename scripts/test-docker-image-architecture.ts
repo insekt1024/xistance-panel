@@ -92,7 +92,14 @@ check(
 // assertion distinguishes the two shapes.
 // ---------------------------------------------------------------------------
 {
-  const stripped = job.replace(/^\s*platforms:.*$/m, "");
+  // Strip EVERY `platforms:` line, not just the first. The docker job now also
+  // carries `platforms: arm64` on its docker/setup-qemu-action step (needed, or
+  // the multi-platform build fails with "Multi-platform build is not supported
+  // for the docker driver"). With a single non-global replace the mutation
+  // removed the QEMU line instead of the build step's, so the stripped copy
+  // STILL matched the multi-arch pattern and this control stopped biting --
+  // failing on run 37514215168 as "the stripped copy still matched".
+  const stripped = job.replace(/^\s*platforms:.*$/gm, "");
   const hadPlatforms = stripped !== job;
   check(
     "the mutant differs from the original (a platforms key existed to remove)",
