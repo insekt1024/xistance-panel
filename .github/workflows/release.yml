@@ -534,12 +534,38 @@ jobs:
           cat RELEASE_NOTES.txt
 
       - name: Attest build provenance
-        # subject-checksums attests every artifact named in the sidecar files we
-        # already publish, so provenance is bound to the same digests the
-        # installer verifies. A failure here blocks release creation on purpose.
+        # subject-checksums binds provenance to the same digests the installer
+        # verifies. A failure here blocks release creation on purpose.
+        #
+        # It takes ONE checksum FILE, not a glob. `subject-checksums: dist/*.tar.gz.sha256`
+        # failed on run 37511565200 with
+        #   Failed to persist attestation: Invalid Argument - invalid statement: no statement subjects
+        # because actions/attest does `fs.access(<input>)` first: a glob is not a
+        # path, that throws, and it then parses the input as checksum CONTENT. The
+        # literal glob has no "<digest> <name>" record in it, so it found zero
+        # subjects -- and the error named nothing about the real cause.
+        #
+        # So concatenate the per-architecture sidecars into the one file the
+        # action expects. Each sidecar already records a BARE archive name, which
+        # is what the action wants as the subject name.
+        #
+        # Fail closed if the concatenation is empty, so a future change that stops
+        # producing sidecars says so here rather than as "no statement subjects".
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          sidecars=(dist/*.tar.gz.sha256)
+          if [ ${#sidecars[@]} -eq 0 ]; then
+            echo "::error::no dist/*.tar.gz.sha256 sidecars to attest; refusing to publish unproven artifacts" >&2
+            exit 1
+          fi
+          cat "${sidecars[@]}" > dist/ATTESTATION_SUBJECTS.sha256
+          echo "  attesting $(wc -l < dist/ATTESTATION_SUBJECTS.sha256) subject(s):"
+          cat dist/ATTESTATION_SUBJECTS.sha256
+      - name: Attest build provenance (sign)
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-checksums: dist/*.tar.gz.sha256
+          subject-checksums: dist/ATTESTATION_SUBJECTS.sha256
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
@@ -589,6 +615,20 @@ jobs:
           tags: |
             type=semver,pattern={{version}},value=${{ needs.version.outputs.release-tag }}
             type=raw,value=latest
+
+      # Register QEMU for the non-native architecture BEFORE the build. Without it
+      # the multi-platform build failed on run 37511565200 with
+      #
+      #   ERROR: failed to build: Multi-platform build is not supported for the
+      #   docker driver. Switch to a different driver, or turn on the containerd
+      #   image store.
+      #
+      # which names neither QEMU nor binfmt as the missing piece: the message is
+      # about buildx, and points at a driver switch that would not fix it.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@3b52da861b9eeb5f677b929dd11280627a2d1971 # v3.2.0
+        with:
+          platforms: arm64
 
       - name: Build + push Docker image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
