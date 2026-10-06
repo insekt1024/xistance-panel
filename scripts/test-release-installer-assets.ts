@@ -508,6 +508,24 @@ check(
         `  install still fails, because the installer dies without its manifest.`,
     );
   }
+
+  // Listing an asset in `files:` is not the same as publishing it.
+  // softprops/action-gh-release SKIPS a glob that matches nothing, so an entry
+  // whose file was never staged yields a quiet release that is missing it --
+  // which is exactly how v1.3.5 published 7 assets and no manifest, and how
+  // v1.3.4 shipped an installer that died on a 404.
+  //
+  // The tracked manifest lives at the REPO ROOT; dist/ is staging. So the
+  // publish job must COPY it into dist/ before the upload. Assert the copy
+  // exists, not just the upload entry.
+  check(
+    "the publish job stages release-manifest.json into dist/ before uploading it",
+    /cp -f release-manifest\.json dist\/release-manifest\.json/.test(workflow),
+    "release-manifest.json is tracked at the repo root but listed as\n" +
+      "  dist/release-manifest.json in the upload list. Nothing puts it there, so\n" +
+      "  softprops skips the unmatched entry and the release publishes WITHOUT the\n" +
+      "  manifest the installer fetches. Add the cp to the asset staging step.",
+  );
 }
 
 // Exit 0 even with a readiness finding: an untracked file is the maintainer's

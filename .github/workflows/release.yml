@@ -518,6 +518,22 @@ jobs:
           done
           cp -f scripts/release-install.sh dist/release-install.sh
           cp -f scripts/lib/release-layout.sh scripts/lib/service-unit.sh dist/lib/
+          # The tracked manifest has to be staged into dist/ like the scripts above.
+          # The upload list names dist/release-manifest.json, but nothing put it
+          # there: the tracked file sits at the REPO ROOT. softprops skips a files:
+          # entry that matches nothing, so the run published v1.3.5 with 7 assets and
+          # no manifest -- the same 404 the v1.3.4 install hit, still unguarded,
+          # because the suite only checks that the entry EXISTS in the list, not that
+          # the file is ever staged. Assert it here so a missing stage fails loudly.
+          if [ ! -s release-manifest.json ]; then
+            echo "::error::release-manifest.json is missing from the checkout; the release cannot be verified" >&2
+            exit 1
+          fi
+          cp -f release-manifest.json dist/release-manifest.json
+          test -s dist/release-manifest.json || {
+            echo "::error::the manifest was not staged into dist/, so the release would publish without it" >&2
+            exit 1
+          }
           chmod +x dist/release-install.sh
           ( cd dist && sha256sum release-install.sh lib/release-layout.sh lib/service-unit.sh > INSTALLER_ASSETS.sha256 )
 
