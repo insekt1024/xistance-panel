@@ -1131,3 +1131,91 @@ rebased — no history discarded.
 Next attempt must be a `patch` bump (1.3.0 → 1.3.1), since the version in the
 tree is already 1.3.0.
 
+## The release path: four defects, then the structural fix
+
+Cutting a release is what finally exercised the pipeline. Four real defects, each
+invisible to every green gate until a live run hit it. Then the structural cause.
+
+### 1. The install step read the wrong path
+
+`Create archive` writes `dist/<arch>/xistance-panel-v*.tar.gz`; the install step
+globbed `dist/*.tar.gz`. It failed **one step after the archive succeeded**, with
+
+```
+ls: cannot access 'dist/*.tar.gz': No such file or directory
+```
+
+which reads like the archive step silently did nothing. The Publish job
+legitimately globs the top level because it downloads artifacts flattened; the
+Artifact job runs before any download. It now reads `dist/<arch>/` and fails
+closed unless exactly one archive is there.
+
+### 2. `sha256sum -c` resolved a bare name from the wrong directory
+
+```
+xistance-panel-v1.3.1-arm64.tar.gz: FAILED open or read
+```
+
+The sidecar deliberately records a **bare** filename — correct once published,
+where archive and sidecar sit side by side — but `sha256sum -c` resolves that
+name against the *current* directory, and this step ran from the repo root. The
+digest was right; the lookup was not. It now runs from the archive's own
+directory, as the Publish job's check already did.
+
+### 3. The disk reclaim deleted the payload the browser gate boots
+
+The reclaim step ran `rm -rf dist/artifact` to free space for Chromium, then the
+gate's `artifact-assets` case exited 1 in 0.2s with no result summary. That
+case boots `dist/artifact`, falling back to `dist/artifact-local`, which this
+workflow never builds — so the prune destroyed the payload **in order to free
+disk for the gate that needs it**, leaving no candidate at all.
+
+It now prunes the caches (which is what actually reclaims the ~1.5 GiB), keeps
+the payload, and asserts `apply-migrations.mjs` is present so a regression fails
+there with a cause instead of there with an opaque exit.
+
+### 4. The provenance step read its input before creating it
+
+```
+ENOENT: no such file or directory, open 'dist/amd64/release-manifest.json'
+```
+
+The step read `dist/$arch/release-manifest.json` and ran the `cp` that creates it
+**eleven lines later**. An earlier fix for a self-copy no-op had put the copy in
+the step but after the consumer. Reordered, with `mkdir -p` and an explicit
+`test -s`. Verified locally with a real 40 MB archive: 3/3.
+
+### The structural cause: the tag was pushed by the job that runs first
+
+The version job pushed `refs/tags/v$VERSION` and it is the **first** job — so the
+tag existed before a single artifact was built. Its step name read *"Push commit
++ tag (only after green build)"*, asserting a guarantee the `needs:` graph never
+provided.
+
+Consequence: `v1.3.0` and `v1.3.1` are permanent tags with no release, each
+burned by a failed attempt, and each one forced the same five documentation
+problems again (READMEs naming the previous version, tracked manifest naming a
+stale artifact).
+
+**Fix:** the version job pushes only the commit. The publish job — which
+`needs: artifact`, so it runs after both architectures are built,
+checksum-verified, inspected **and installed** — creates the annotated tag and
+refuses if the ref already exists.
+
+`test-release-workflow.ts` asserted *"a step must push the release tag"* scoped to
+the version job, so the test encoded the defect. It now asserts the ordering:
+version must NOT push a tag, publish must need artifact, publish must push it.
+Verified non-vacuous — re-adding the push fails with *"the version job must NOT
+push the tag; it runs before the artifacts are proven"*.
+
+**Proven working:** run `37506411852` failed on both architectures and **no tag
+was created**; `v1.3.2` does not exist on the remote and publish was skipped.
+Retries are now free.
+
+### Also fixed along the way
+
+Two high-severity advisories in the shipped tree, published mid-session:
+`source-map-js` 1.2.1 -> 1.2.2, and `sharp` 0.35.4 -> 0.35.5
+(GHSA-wq5f-xc86-pv6w, CVE-2026-96889, librsvg). Both via `npm audit fix` without
+`--force`, touching nothing else.
+
