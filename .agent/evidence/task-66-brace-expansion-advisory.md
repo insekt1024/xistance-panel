@@ -72,3 +72,62 @@ release branch, not because it was exploitable here.
 
 The 218 pre-existing dirty worktree paths were not reset, and `package-lock.json`
 was the only tracked file this change touched.
+
+## Closed 2026-10-07: the advisory is resolved, verified against the shipped artifact
+
+Re-verified rather than assumed, because a security task closing on a stale note
+is worth nothing.
+
+**The production tree is clean.**
+
+    $ npm audit --omit=dev --audit-level=high
+    found 0 vulnerabilities
+
+**`brace-expansion` is genuinely absent from the production tree**, checked
+independently of the waiver's own reasoning:
+
+    $ npm ls brace-expansion --omit=dev
+    xistance-panel@1.3.5
+    └── (empty)
+
+Both copies in the tree (`node_modules/brace-expansion` 1.1.18 via eslint, and
+`@typescript-eslint/typescript-estree/node_modules/brace-expansion` 5.0.9) are
+dev-only lint tooling.
+
+**Verified against the actual published release, not just the local tree** — this is
+the check that makes the waiver a fact rather than a claim. Unpacked
+`xistance-panel-v1.3.5-amd64.tar.gz` from the GitHub release:
+
+    brace-expansion entries in the published archive: 0
+    eslint entries:                                0
+
+So the waiver's stated basis ("dev-only lint chain, absent from BOTH shipped
+artifacts") holds for the artifact users actually download.
+
+## Independent-review requirement (AC1) is satisfied
+
+`task-66-independent-security-review.md` records a delegated read-only review whose
+findings were **reproduced by execution before being acted on** -- one real high
+(SSRF relay via `destHost`, raised from MEDIUM after verification), one claim
+refuted against source. A later, fuller report carried a **CRITICAL** finding:
+SSH destination-token injection, i.e. RCE on the panel host. That file's own
+earlier "zero critical" verdict is explicitly marked superseded rather than quietly
+kept.
+
+The critical finding is fixed in three layers with `assertSafeSshDestination`
+called from both, one mutant per layer, and two of the author's own bugs caught by
+the tests written to catch them. Re-run now:
+
+    scripts/test-ssh-destination-injection.ts   37 passed, 0 failed   (rc=0)
+    scripts/test-ssrf-guard.ts                  rc=0
+    scripts/test-ssh.ts                         rc=0
+    scripts/test-xui.ts                         rc=0
+    scripts/test-origin-csrf.ts                 rc=0
+
+The 37 assertions include the X-UI probe refusing cloud metadata (`169.254.169.254`),
+IPv6 link-local (`[fe80::1]`) and `0.0.0.0`.
+
+**No unresolved critical or high finding remains.** The remaining open items in the
+main review file are not security findings: a committed baseline for
+`resource-gate.ts` (tracked under TASK-70) and the VPS runs (TASK-62/63/64/65).
+
