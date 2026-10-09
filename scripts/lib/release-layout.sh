@@ -151,6 +151,15 @@ xt_remove_candidate() {
 # ---------------------------------------------------------------------------
 xt_rollback() {
   local release_dir="${1:-}"
+  # Capture the CURRENT release BEFORE any pointer moves.
+  #
+  # Reading it after xt_activate_release returns the candidate itself, so the
+  # recovery path "restores" the broken release it was rolling back from. Caught
+  # by running the first version of this fix against a real broken release: it
+  # reported rc=1 correctly, but then printed "restored /opt/xistance/releases/
+  # v9.9.9-broken" and left the panel down, because previous == the candidate.
+  local previous
+  previous="$(xt_current_release || true)"
   if [[ -z "$release_dir" ]]; then
     printf 'usage: xt-rollback <release-dir>\n' >&2
     printf '  e.g. xt-rollback /opt/xistance/releases/v1.1.2\n' >&2
@@ -177,6 +186,49 @@ xt_rollback() {
     printf 'failed to restart %s; the pointer moved but the old process is still running.\n' "$unit" >&2
     return 1
   fi
+
+  # A restart that returns 0 is NOT proof the release serves. Proven by
+  # execution: activating a release whose server.js exits immediately made
+  # systemctl restart succeed, this function print "rolled back ... and
+  # restarted", and exit 0 -- while /api/health gave no response at all and the
+  # unit sat in "activating". A rollback that leaves the panel DOWN while
+  # reporting success is worse than one that refuses: it destroys the working
+  # release and then claims it worked.
+  #
+  # update.sh routes through xt_cutover_with_health_check and restores the
+  # previous release on readiness failure. xt_rollback did not, so the same
+  # failure was silent here. Probe, and put the previous release back if the
+  # candidate never becomes ready.
+  local readiness=0
+
+  if command -v xt_wait_for_health >/dev/null 2>&1; then
+    if xt_wait_for_health; then
+      readiness=1
+    fi
+  else
+    # No probe available (unit tests, non-systemd hosts): fall back to a bounded
+    # poll so this still refuses to claim success it cannot see.
+    local i code
+    for i in $(seq 1 30); do
+      code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 \
+        "${XT_HEALTH_URL:-http://127.0.0.1:${XT_PORT:-8080}/api/health}" 2>/dev/null || true)"
+      [[ "$code" == "200" ]] && { readiness=1; break; }
+      sleep 1
+    done
+  fi
+
+  if [[ "$readiness" != "1" ]]; then
+    printf 'rolled-back release %s never became healthy; restoring the previous release.\n' "$release_dir" >&2
+    if [[ -n "$previous" && -d "$previous" ]]; then
+      xt_activate_release "$previous" || true
+      systemctl restart "$unit" >/dev/null 2>&1 || true
+      printf 'restored %s; the panel is serving the last known-good release.\n' "$previous" >&2
+    else
+      printf 'no previous release on disk to restore; the panel needs manual attention.\n' >&2
+    fi
+    return 1
+  fi
+
   printf 'rolled back to %s and restarted %s\n' "$release_dir" "$unit"
 }
 

@@ -118,3 +118,76 @@ Container evidence on the exact release OS, not a remote VPS. The rollback
 command is installed at `/usr/local/bin/xt-rollback` and works as both READMEs
 document (`sudo xt-rollback <release-dir>`); Persian parity suite 66/66
 independently requires the same command name.
+
+## 2026-10-07: a THIRD rollback defect, found by executing the failure it protects against
+
+TASK-64's ACs are about the update/rollback mechanics, not Ubuntu 22.04
+specifically, so they were exercised for real on the running install.
+
+### Explicit rollback works, and independently re-confirmed a shipping defect
+
+Rolling back to the `v1.3.4` release and polling health:
+
+    current -> v1.3.4   health -> "version":"1.3.3"
+
+The release directory says `v1.3.4`, the application reports `1.3.3`, and the
+database is byte-identical (172032). That is the pre-bump-artifact defect seen
+again through a completely different path -- the rollback machinery faithfully
+restored a release whose payload is mislabelled. Data intact, `/api/tunnels` 401.
+Roll-forward to `v1.3.5` restored `1.3.5`.
+
+### The new defect: xt_rollback reported success while leaving the panel DOWN
+
+Staged a deliberately broken release (valid layout, `server.js` replaced with
+`process.exit(1)`) and rolled back to it:
+
+    $ xt-rollback /opt/xistance/releases/v9.9.9-broken
+    rolled back to /opt/xistance/releases/v9.9.9-broken and restarted xistance.service
+    rc=0                      <-- claims success
+
+    current : v9.9.9-broken
+    health  : <no response>
+    service : activating
+
+`systemctl restart` returns 0 for a unit that then dies, and `xt_rollback` never
+probed. `update.sh` routes through `xt_cutover_with_health_check`, which takes a
+real readiness result and restores the previous release when it is false --
+`xt_rollback` bypassed all of it. **A rollback that leaves the panel down while
+reporting success is worse than one that refuses: it destroys the working
+release and then claims it worked.**
+
+### My first fix was also wrong, and only execution caught it
+
+First attempt captured `previous` after `xt_activate_release` had already moved
+the pointer, so it read the candidate itself. Result: `rc=1` correctly, but
+
+    restored /opt/xistance/releases/v9.9.9-broken   <-- the broken one
+    current : v9.9.9-broken   health: <no response>  <-- still down
+
+`previous` is now captured at the top of the function, before any pointer moves.
+Re-run against the identical broken release:
+
+    rolled-back release ... never became healthy; restoring the previous release.
+    restored /opt/xistance/releases/v1.3.5; the panel is serving the last known-good release.
+    rc=1
+
+    current : v1.3.5   health: "version":"1.3.5"   service: active
+    db: 172032 bytes (data intact)   /api/tunnels: 401
+
+A green `rc` and a correct "restored" line are not the same as a working panel;
+only the post-state health check distinguishes them, which is why the second run
+proves the fix and the first did not.
+
+### Regression guard
+
+`scripts/test-rollback-drill.ts` now stages the same broken release and asserts
+three things: the command FAILS rather than reporting success, the pointer lands
+back on the working release, and the panel serves again afterwards.
+
+## Status
+
+AC "explicit rollback returns to the prior verified release and passes
+health/readiness": **met by execution**, plus one real defect found and fixed on
+the way. The injected-failure AC for the *update* path (`update.sh`) still needs
+its own run; TASK-62/65 remain open for want of the real VPS.
+

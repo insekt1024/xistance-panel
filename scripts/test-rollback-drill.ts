@@ -163,6 +163,51 @@ for (const target of TARGETS) {
   const rolled = sh(target, `xt-rollback ${previous} 2>&1 | tail -1; echo "rc=\${PIPESTATUS[0]}"`);
   check(`${target}: rollback to ${previousName} succeeds`, /rc=0/.test(rolled.out), rolled.out.trim());
 
+  // 2b. A rollback to a release that CANNOT serve must not report success.
+  //
+  // Proven by execution, not assumed: activating a release whose server.js exits
+  // immediately made `systemctl restart` succeed, made xt_rollback print
+  // "rolled back ... and restarted", and made it exit 0 -- while /api/health gave
+  // no response and the unit sat in "activating". update.sh routes through
+  // xt_cutover_with_health_check and restores the previous release; xt_rollback did
+  // not, so the identical failure was silent there. A rollback that leaves the
+  // panel down while claiming success destroys the working release and then
+  // reports that it worked.
+  {
+    const broken = "/opt/xistance/releases/v-drill-broken";
+    const good = "/opt/xistance/current";
+    sh(
+      target,
+      `rm -rf ${broken}; cp -a ${good} ${broken} && ` +
+        `mv ${broken}/apps/web/server.js ${broken}/apps/web/server.js.bak && ` +
+        `printf '#!/usr/bin/env node\nprocess.exit(1);\n' > ${broken}/apps/web/server.js && ` +
+        `chmod +x ${broken}/apps/web/server.js`,
+    );
+    const beforeBroken = sh(target, 'basename "$(readlink -f /opt/xistance/current)"').out.trim();
+    const res = sh(target, `xt-rollback ${broken} 2>&1 | tail -2; echo "rc=\${PIPESTATUS[0]}"`);
+    check(
+      `${target}: a rollback to a release that cannot serve FAILS instead of claiming success`,
+      !/rc=0/.test(res.out),
+      `expected a non-zero rc, got: ${res.out.trim().replace(/\n/g, " | ")}`,
+    );
+
+    const landed = sh(target, 'basename "$(readlink -f /opt/xistance/current)"').out.trim();
+    check(
+      `${target}: the panel is restored to a working release after a failed rollback`,
+      landed !== "v-drill-broken" && landed === beforeBroken,
+      `expected ${beforeBroken}, got ${landed}`,
+    );
+    const recovered = sh(
+      target,
+      'sleep 8; curl -s -o /dev/null -w %{http_code} --max-time 8 http://127.0.0.1:8080/api/health',
+    ).out.trim();
+    check(
+      `${target}: the panel serves again after refusing the broken release`,
+      recovered === "200",
+      `health ${recovered}`,
+    );
+    sh(target, `rm -rf ${broken}`);
+  }
   // 3. The pointer moved and the API recovered.
   const afterCurrent = sh(target, 'basename "$(readlink -f /opt/xistance/current)"').out.trim();
   check(
