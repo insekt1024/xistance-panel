@@ -296,7 +296,7 @@ jobs:
 
       - name: Upload browser gate evidence
         if: ${{ always() && matrix.architecture == 'amd64' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: browser-gate-${{ needs.version.outputs.version }}
           path: .agent/tmp-smoke/gate-*/
@@ -437,7 +437,7 @@ jobs:
             --version "$version" --arch "$arch"
 
       - name: Upload inspected artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: xistance-panel-${{ needs.version.outputs.version }}-${{ matrix.architecture }}
           path: |
