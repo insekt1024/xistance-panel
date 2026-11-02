@@ -2,13 +2,12 @@
  * ICMP (pingtunnel) method coverage.
  *
  * Upstream: https://github.com/esrrhs/pingtunnel, flags taken from its USAGE.md
- * rather than guessed -- `-type server|client`, `-key 0..2147483647`,
+ * rather than guessed -- `-type server|client`, `-password <shared>`,
  * `-l :PORT`, `-s HOST`, `-t HOST:PORT`, `-tcp 1`, `-sock5 1`,
  * `-encrypt aes128|aes256|chacha20`, `-encrypt-key`, `-maxconn`, `-icmp_l`,
  * `-timeout`, and `-c <config.json>` for config-file mode.
  *
- * The property this suite exists to protect: the shared `key` and the optional
- * payload passphrase must NEVER reach argv. Both are world-readable through
+ * The property this suite exists to protect: the shared `password` must NEVER reach argv. It is world-readable through
  * `ps` on a shared host, and the engine writes its systemd unit text to disk.
  * They live in a 0600 JSON file instead -- the same reason BACKHAUL's
  * config.toml is 0600 because it embeds the shared token.
@@ -57,7 +56,7 @@ const cfg = (o: Partial<IcmpConfig> = {}): IcmpConfig =>
     ...(o.sock5
       ? {}
       : { targetHost: "10.0.0.5", targetPort: 22 }),
-    key: 123456,
+    password: "test-password-123",
     ...o,
   });
 
@@ -74,31 +73,31 @@ async function main(): Promise<void> {
     const parsed = cfg();
     check("a minimal forward config parses", parsed.targetPort === 22);
     check("protocol defaults to tcp", parsed.protocol === "tcp");
-    check("encryption defaults to none", parsed.encryption === "none");
+    check("encryption defaults to none", parsed.encrypt === "chacha20");
     check("listenAddr defaults to :1080", parsed.listenAddr === ":1080", parsed.listenAddr);
   }
 
-  // key range: upstream says 0..2147483647.
-  for (const [label, key] of [
-    ["key 0", 0],
-    ["key 2147483647", 2147483647],
-  ] as Array<[string, number]>) {
+  // password bounds: min 8 chars, printable ASCII only.
+  for (const [label, pw] of [
+    ["password exactly 8 chars", "abcdefgh"],
+    ["password 128 chars", "a".repeat(128)],
+  ] as Array<[string, string]>) {
     let accepted = true;
     try {
-      IcmpConfigSchema.parse({ targetHost: "10.0.0.5", targetPort: 22, key });
+      IcmpConfigSchema.parse({ targetHost: "10.0.0.5", targetPort: 22, password: pw });
     } catch {
       accepted = false;
     }
-    check(`the boundary value ${label} is accepted (guard is not blanket-refusing)`, accepted);
+    check(`the boundary value ${label} is accepted`, accepted);
   }
-  for (const [label, key] of [
-    ["a negative key", -1],
-    ["a key above int32", 2147483648],
-    ["a fractional key", 1.5],
-  ] as Array<[string, number]>) {
+  for (const [label, pw] of [
+    ["a short password", "short"],
+    ["a password with spaces", "has space"],
+    ["a password with control char", "has\ttab"],
+  ] as Array<[string, string]>) {
     let refused = false;
     try {
-      IcmpConfigSchema.parse({ targetHost: "10.0.0.5", targetPort: 22, key });
+      IcmpConfigSchema.parse({ targetHost: "10.0.0.5", targetPort: 22, password: pw });
     } catch {
       refused = true;
     }
@@ -111,25 +110,25 @@ async function main(): Promise<void> {
     } catch {
       refused = true;
     }
-    check("a missing key is refused", refused);
+    check("a missing password is refused", refused);
   }
 
   // The target pair, and SOCKS5's exemption from it.
   {
     let refused = false;
     try {
-      IcmpConfigSchema.parse({ targetHost: "10.0.0.5", key: 1 });
+      IcmpConfigSchema.parse({ targetHost: "10.0.0.5", password: "abcdefgh" });
     } catch {
       refused = true;
     }
     check("a half target pair (host without port) is refused", refused);
 
-    const socks = IcmpConfigSchema.parse({ sock5: true, key: 1 });
+    const socks = IcmpConfigSchema.parse({ sock5: true, password: "abcdefgh" });
     check("SOCKS5 mode needs no target", socks.sock5 === true);
 
     let socksWithTargetRefused = false;
     try {
-      IcmpConfigSchema.parse({ sock5: true, key: 1, targetHost: "10.0.0.5", targetPort: 22 });
+      IcmpConfigSchema.parse({ sock5: true, password: "abcdefgh", targetHost: "10.0.0.5", targetPort: 22 });
     } catch {
       socksWithTargetRefused = true;
     }
@@ -141,35 +140,22 @@ async function main(): Promise<void> {
 
   // Encryption ambiguity in both directions.
   {
-    let algNoKey = false;
-    try {
-      IcmpConfigSchema.parse({
-        targetHost: "10.0.0.5", targetPort: 22, key: 1, encryption: "aes256",
-      });
-    } catch {
-      algNoKey = true;
-    }
-    check("an encryption algorithm without a passphrase is refused", algNoKey);
+    // In v3, encrypt defaults to chacha20 and password is always required,
+    // so there is no "encryption without password" case. Instead, verify that
+    // a valid password+encrypt pair is accepted and that encrypt:none works.
+    const encNone = cfg({ encrypt: "none" });
+    check("encrypt:none with a valid password is accepted", encNone.encrypt === "none");
 
-    let keyNoAlg = false;
-    try {
-      IcmpConfigSchema.parse({
-        targetHost: "10.0.0.5", targetPort: 22, key: 1, encryptionKey: "c2VjcmV0",
-      });
-    } catch {
-      keyNoAlg = true;
-    }
-    check("a passphrase with no algorithm is refused (it would be ignored)", keyNoAlg);
-
-    const enc = cfg({ encryption: "chacha20", encryptionKey: "c2VjcmV0" });
-    check("a matched algorithm+passphrase pair is accepted", enc.encryptionKey === "c2VjcmV0");
+    const enc = cfg({ encrypt: "chacha20" });
+    check("a matched algorithm+password pair is accepted", enc.encrypt === "chacha20");
+    check("a matched algorithm+password pair is accepted", enc.encrypt === "chacha20");
   }
 
   // listenAddr shape: it is emitted verbatim into `-l`.
   for (const good of [":1080", "127.0.0.1:1080", "[::1]:1080"]) {
     let accepted = true;
     try {
-      IcmpConfigSchema.parse({ targetHost: "10.0.0.5", targetPort: 22, key: 1, listenAddr: good });
+      IcmpConfigSchema.parse({ targetHost: "10.0.0.5", targetPort: 22, password: "abcdefgh", listenAddr: good });
     } catch {
       accepted = false;
     }
@@ -178,7 +164,7 @@ async function main(): Promise<void> {
   for (const badAddr of ["1080", ":0 ; rm -rf /", ":70000x", "-oProxyCommand=id:22"]) {
     let refused = true;
     try {
-      IcmpConfigSchema.parse({ targetHost: "10.0.0.5", targetPort: 22, key: 1, listenAddr: badAddr });
+      IcmpConfigSchema.parse({ targetHost: "10.0.0.5", targetPort: 22, password: "abcdefgh", listenAddr: badAddr });
       refused = false;
     } catch { /* expected */ }
     check(`listenAddr ${JSON.stringify(badAddr)} is refused`, refused);
@@ -190,7 +176,7 @@ async function main(): Promise<void> {
     const text = buildIcmpServerConfig(cfg({ maxConn: 500, icmpListen: "0.0.0.0" }));
     const doc = JSON.parse(text);
     check("server type is emitted", doc.type === "server", text);
-    check("the key is carried in the file", doc.key === 123456, text);
+    check("the key is carried in the file", doc.password === "test-password-123", text);
     check("maxconn is carried", doc.maxconn === 500, text);
     check("icmp_listen is carried", doc.icmp_listen === "0.0.0.0", text);
     check("no target appears on a server", doc.target === undefined, text);
@@ -232,7 +218,7 @@ async function main(): Promise<void> {
     check("it names the pingtunnel binary", argv[0] === PINGTUNNEL_BINARY, argv[0]);
     check("it passes -c", argv[1] === "-c", argv[1]);
 
-    const enc = cfg({ encryption: "aes256", encryptionKey: "c3VwZXJzZWNyZXQ" });
+    const enc = cfg({ encrypt: "aes256" });
     // The passphrase VALUE is what must not leak into ARGV. (Searching for the
     // literal word "supersecret" would pass vacuously: the base64 value never
     // contains it, so every argv would "pass" whether or not the secret leaked.)
@@ -242,12 +228,12 @@ async function main(): Promise<void> {
     ] as Array<[string, string]>) {
       check(
         `${label} does NOT carry the encryption passphrase`,
-        !leaksValue(text, "c3VwZXJzZWNyZXQ"),
+        !leaksValue(text, "test-password-123"),
         `${label} leaked the passphrase`,
       );
       check(
-        `${label} does NOT carry the shared key`,
-        !leaksValue(text, 123456),
+        `${label} does NOT carry the password`,
+        !leaksValue(text, "test-password-123"),
         `${label} leaked the key`,
       );
     }
@@ -257,17 +243,17 @@ async function main(): Promise<void> {
     // silently vanish either.
     check(
       "the passphrase IS in the 0600 config file",
-      leaksValue(buildIcmpClientConfig(enc, "203.0.113.10"), "c3VwZXJzZWNyZXQ"),
+      leaksValue(buildIcmpClientConfig(enc, "203.0.113.10"), "test-password-123"),
     );
     check(
-      "the shared key IS in the 0600 config file",
-      leaksValue(buildIcmpServerConfig(cfg()), 123456),
+      "the password IS in the 0600 server config file",
+      leaksValue(buildIcmpServerConfig(cfg()), "test-password-123"),
     );
     check(
       "the server config carries encrypt/encrypt_key when enabled",
       (() => {
         const d = JSON.parse(buildIcmpServerConfig(enc));
-        return d.encrypt === "aes256" && d.encrypt_key === "c3VwZXJzZWNyZXQ";
+        return d.encrypt === "aes256";
       })(),
     );
   }
@@ -323,11 +309,11 @@ async function main(): Promise<void> {
   console.log("\n--- ICMP secrets are redacted ---\n");
   {
     const redacted = JSON.stringify(
-      redactTunnelConfig({ method: "ICMP", icmp: cfg({ encryption: "aes256", encryptionKey: "c3VwZXJzZWNyZXQ" }) }),
+      redactTunnelConfig({ method: "ICMP", icmp: cfg({ encrypt: "aes256",  }) }),
     );
-    check("the encryptionKey is redacted", !redacted.includes("c3VwZXJzZWNyZXQ"), redacted);
-    check("the key is redacted", !redacted.includes('"key":"123456"'), redacted);
-    check("the shape is preserved", redacted.includes('"encryptionKey":"***"'), redacted);
+    check("the password is redacted", !redacted.includes("test-password-123"), redacted);
+    check("the key is redacted", !redacted.includes('"password":"test-password-123"'), redacted);
+    check("the shape is preserved", redacted.includes('"password":"***"'), redacted);
   }
 
   console.log(

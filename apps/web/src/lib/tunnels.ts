@@ -200,8 +200,8 @@ export function redactNode(node: DbNode) {
  * Matching is by NAME at any depth rather than by an exhaustive per-method
  * list, because the alternative rots: a new method with a new secret field
  * would silently be exported until someone remembered to update a switch.
- * `secretKey` lives on a FRP proxy, `password` on FRP/SSH/XUI, `key` on SSH,
- * REVERSE and ICMP, `token` on BACKHAUL/FRP/XUI, `encryptionKey` on ICMP.
+ * `secretKey` lives on a FRP proxy, `password` on FRP/SSH/XUI/ICMP, `key` on SSH
+ * and REVERSE, `token` on BACKHAUL/FRP/XUI.
  */
 const CONFIG_SECRET_FIELDS = new Set([
   "token",
@@ -209,11 +209,6 @@ const CONFIG_SECRET_FIELDS = new Set([
   "password",
   "passphrase",
   "key",
-  // pingtunnel's end-to-end payload passphrase. Lowercased to
-  // "encryptionkey", so it does NOT match the `key` entry above -- an exact
-  // `Set.has("key")` never sees a prefix. Adding ICMP without this line
-  // exported the payload encryption secret verbatim in every backup.
-  "encryptionkey",
   "encryptkey",
   "apikey",
   "apitoken",

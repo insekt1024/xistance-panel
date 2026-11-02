@@ -114,9 +114,8 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
     listenAddr: ":1080",
     targetHost: "",
     targetPort: 80,
-    key: 123456,
-    encryption: "none",
-    encryptionKey: "",
+    password: "",
+    encrypt: "chacha20",
   });
   // SSH
   const [ssh, setSsh] = React.useState({
@@ -267,12 +266,8 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
             ...(icmp.sock5
               ? {}
               : { targetHost: icmp.targetHost, targetPort: icmp.targetPort }),
-            key: icmp.key,
-            encryption: icmp.encryption as
-              | "none" | "aes128" | "aes256" | "chacha20",
-            ...(icmp.encryption === "none"
-              ? {}
-              : { encryptionKey: icmp.encryptionKey }),
+            password: icmp.password,
+            encrypt: icmp.encrypt as "none" | "chacha20" | "aes256" | "aes128",
             maxConn: 0,
             icmpListen: "0.0.0.0",
             timeoutSecs: 60,
@@ -458,16 +453,11 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
             return fail(t("invalidPort", { field: t("targetPort") }));
           }
         }
-        if (!Number.isInteger(icmp.key) || icmp.key < 0 || icmp.key > 2147483647) {
+        if (!icmp.password.trim()) {
           return fail(t("fieldRequired", { field: t("key") }));
         }
-        // Refuse a half-configured cipher here rather than letting the schema
-        // reject it server-side with a less specific message.
-        if (icmp.encryption !== "none" && !icmp.encryptionKey.trim()) {
-          return fail(t("fieldRequired", { field: t("encryptionKey") }));
-        }
-        if (icmp.encryption === "none" && icmp.encryptionKey.trim()) {
-          return fail(t("fieldRequired", { field: t("encryption") }));
+        if (icmp.password.length < 8) {
+          return fail(t("fieldTooShort", { field: t("key"), min: 8 }));
         }
         return true;
       }
@@ -1095,10 +1085,10 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
                   </Field>
                   <Field label={t("key")} hint={t("keyHint")}>
                     <Input
-                      type="number"
-                      value={icmp.key}
+                      type="password"
+                      value={icmp.password}
                       onChange={(e) =>
-                        setIcmp({ ...icmp, key: Number(e.target.value) })
+                        setIcmp({ ...icmp, password: e.target.value })
                       }
                     />
                   </Field>
@@ -1145,8 +1135,8 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field label={t("encryption")}>
                     <Select
-                      value={icmp.encryption}
-                      onValueChange={(v) => setIcmp({ ...icmp, encryption: v })}
+                      value={icmp.encrypt}
+                      onValueChange={(v) => setIcmp({ ...icmp, encrypt: v })}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -1159,17 +1149,6 @@ export function TunnelWizard({ nodes }: { nodes: WizardNode[] }) {
                       </SelectContent>
                     </Select>
                   </Field>
-                  {icmp.encryption !== "none" && (
-                    <Field label={t("encryptionKey")} hint={t("encryptionKeyHint")}>
-                      <Input
-                        type="password"
-                        value={icmp.encryptionKey}
-                        onChange={(e) =>
-                          setIcmp({ ...icmp, encryptionKey: e.target.value })
-                        }
-                      />
-                    </Field>
-                  )}
                 </div>
               </div>
             )}

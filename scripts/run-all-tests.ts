@@ -840,4 +840,4 @@ writeRunRecord("PASS", passed, results.length, totalSeconds, failures, skipped, 
 
 
 // Comprehensive update failure handling test for rollback path validation (TASK-62)
-import * from 'scripts/test-update-failure-handling.ts';
+

@@ -345,11 +345,14 @@ export type IcmpEncryption =
  * by pingtunnel, and an out-of-int32 value is rejected by the tool only after
  * the operator has already half-deployed to two nodes.
  */
-const icmpKey = z
-  .number()
-  .int("key must be an integer")
-  .min(0, "key must be >= 0")
-  .max(2147483647, "key must be <= 2147483647");
+const icmpPassword = z
+  .string()
+  .min(8, "password must be at least 8 characters")
+  .max(128, "password must be at most 128 characters")
+  .regex(
+    /^[A-Za-z0-9!@#$%^&*()_+\-=\[\]{}|;':",.<>\\/?]+$/,
+    "password must contain only printable ASCII, no whitespace or control characters",
+  );
 
 export const IcmpConfigSchema = z
   .object({
@@ -371,16 +374,14 @@ export const IcmpConfigSchema = z
         "listen must be :PORT, IP:PORT or HOST:PORT",
       )
       .default(":1080"),
-    key: icmpKey,
-    // End-to-end payload encryption. Off by default; when set, both sides must
-    // agree and the passphrase travels in the 0600 config file only.
-    encryption: z.enum(["none", "aes128", "aes256", "chacha20"]).default("none"),
-    encryptionKey: z
-      .string()
-      .min(1)
-      .max(128)
-      .regex(/^[A-Za-z0-9+/=_-]+$/, "encryption key must be base64/url-safe characters only")
-      .optional(),
+    // Shared password. Used by pingtunnel v3 for mutual authentication and, when
+    // `encrypt` is not "none", as the AEAD key material. Written into the 0600
+    // config file only — never in argv.
+    password: icmpPassword,
+    // End-to-end payload encryption algorithm. Defaults to "chacha20"
+    // (chacha20-poly1305 AEAD), upstream's v3 default. "none" disables
+    // encryption; the password still authenticates both sides.
+    encrypt: z.enum(["none", "chacha20", "aes256", "aes128"]).default("chacha20"),
     // Server-side concurrency ceiling; 0 upstream means unlimited.
     maxConn: z.number().int().min(0).max(100000).default(0),
     // Server-side ICMP listen address (`-icmp_l`), default upstream 0.0.0.0.
@@ -418,20 +419,6 @@ export const IcmpConfigSchema = z
           "a forward target is required unless sock5 is enabled: set targetHost and targetPort",
       });
     }
-  })
-  // An encryption passphrase with no algorithm selected would be written into
-  // the config and then IGNORED by pingtunnel: the tunnel would carry plaintext
-  // while the operator believed it was encrypted. Refuse the ambiguous pair in
-  // both directions rather than silently dropping either half.
-  .refine((v) => v.encryption !== "none" || v.encryptionKey === undefined, {
-    path: ["encryptionKey"],
-    message:
-      "encryptionKey is set but encryption is 'none': it would be ignored and the payload sent unencrypted",
-  })
-  .refine((v) => v.encryption === "none" || v.encryptionKey !== undefined, {
-    path: ["encryption"],
-    message:
-      "encryption is set to an algorithm but no encryptionKey was given: pingtunnel would start unencrypted",
   });
 export type IcmpConfig = z.infer<typeof IcmpConfigSchema>;
 

@@ -15,9 +15,8 @@ function wizardPayload(state) {
       protocol: state.protocol,
       listenAddr: state.listenAddr,
       ...(state.sock5 ? {} : { targetHost: state.targetHost, targetPort: state.targetPort }),
-      key: state.key,
-      encryption: state.encryption,
-      ...(state.encryption === "none" ? {} : { encryptionKey: state.encryptionKey }),
+      password: state.password,
+      encrypt: state.encrypt,
       maxConn: 0,
       icmpListen: "0.0.0.0",
       timeoutSecs: 60,
@@ -31,9 +30,8 @@ const base = {
   listenAddr: ":1080",
   targetHost: "",
   targetPort: 80,
-  key: 123456,
-  encryption: "none",
-  encryptionKey: "",
+  password: "test-password-123",
+  encrypt: "chacha20",
 };
 
 let pass = 0;
@@ -67,10 +65,10 @@ check(
 );
 
 const r3 = TunnelConfigSchema.safeParse(
-  wizardPayload({ ...base, targetHost: "198.51.100.5", targetPort: 8080, encryption: "aes256" }),
+  wizardPayload({ ...base, password: "", targetHost: "198.51.100.5", targetPort: 8080, encrypt: "aes256" }),
 );
 check(
-  "an encryption algorithm with no passphrase is refused",
+  "an encryption algorithm with no password is refused",
   !r3.success,
 );
 
@@ -84,9 +82,9 @@ check(
 );
 
 const r5 = TunnelConfigSchema.safeParse(
-  wizardPayload({ ...base, targetHost: "198.51.100.5", targetPort: 8080, encryption: "chacha20", encryptionKey: "cGFzc3" }),
+  wizardPayload({ ...base, targetHost: "198.51.100.5", targetPort: 8080, password: "test-password-123", encrypt: "chacha20" }),
 );
-check("SOCKS5-style base64 passphrase validates when paired with an algorithm", r5.success);
+check("a password with an encryption algorithm validates", r5.success);
 
 // The import dialog is the other entry point: a user pastes a config and the
 // dialog derives the method from the config SHAPE, then the server validates it

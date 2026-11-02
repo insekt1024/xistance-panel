@@ -8,12 +8,12 @@ import type { IcmpConfig } from "@xistance/types";
 // <server host> -t <target>` and carries the traffic inside ICMP echo packets,
 // so it works when everything except ping is filtered.
 //
-// Why the key never appears in argv:
-//   `-key` and `-encrypt-key` are both secrets shared by the two nodes. argv is
-//   world-readable through `ps` on a shared host, and the systemd unit text the
-//   engine writes to disk is too. Both go into a JSON config file passed with
-//   `-c` and written 0600 — the same reason BACKHAUL's config.toml is 0600
-//   because it embeds the shared token.
+// Why the password never appears in argv:
+//   The shared password (and, when enabled, the AEAD encryption derived from it)
+//   is world-readable through `ps` on a shared host if passed on the command line,
+//   and the systemd unit text the engine writes to disk is too. Both go into a
+//   JSON config file passed with `-c` and written 0600 — the same reason
+//   BACKHAUL's config.toml is 0600 because it embeds the shared token.
 // ---------------------------------------------------------------------------
 
 export const PINGTUNNEL_BINARY = "pingtunnel";
@@ -21,16 +21,15 @@ export const PINGTUNNEL_BINARY = "pingtunnel";
 /** JSON keys, verbatim from pingtunnel's USAGE.md config-file mode. */
 type ServerConfigJson = {
   type: "server";
-  key: number;
+  password: string;
   icmp_listen: string;
   maxconn: number;
   encrypt?: string;
-  encrypt_key?: string;
 };
 
 type ClientConfigJson = {
   type: "client";
-  key: number;
+  password: string;
   listen: string;
   server: string;
   target?: string;
@@ -38,7 +37,6 @@ type ClientConfigJson = {
   sock5?: number;
   timeout: number;
   encrypt?: string;
-  encrypt_key?: string;
 };
 
 /**
@@ -70,22 +68,20 @@ function assertSafeHost(value: string, field: string): void {
 /**
  * Server config file contents.
  *
- * `key` is emitted as a JSON NUMBER because USAGE.md types it as a number and
- * pingtunnel parses it as one; emitting a string would make `-key "123456"`
- * compare unequal to a numeric 123456 in some Go paths and, at worst, silently
- * read as zero.
+ * `password` is emitted as a JSON STRING because USAGE.md types it as a string
+ * and pingtunnel v3 parses it as one. Emitting a number would produce an empty
+ * password and fail mutual authentication on both nodes.
  */
 export function buildIcmpServerConfig(cfg: IcmpConfig): string {
   assertSafeHost(cfg.icmpListen, "icmpListen");
   const doc: ServerConfigJson = {
     type: "server",
-    key: cfg.key,
+    password: cfg.password,
     icmp_listen: cfg.icmpListen,
     maxconn: cfg.maxConn,
   };
-  if (cfg.encryption !== "none") {
-    doc.encrypt = cfg.encryption;
-    doc.encrypt_key = cfg.encryptionKey;
+  if (cfg.encrypt !== "none") {
+    doc.encrypt = cfg.encrypt;
   }
   return `${JSON.stringify(doc, null, 2)}\n`;
 }
@@ -102,7 +98,7 @@ export function buildIcmpClientConfig(cfg: IcmpConfig, serverHost: string): stri
   assertSafeHost(cfg.listenAddr, "listenAddr");
   const doc: ClientConfigJson = {
     type: "client",
-    key: cfg.key,
+    password: cfg.password,
     listen: cfg.listenAddr,
     server: serverHost,
     timeout: cfg.timeoutSecs,
@@ -137,9 +133,8 @@ export function buildIcmpClientConfig(cfg: IcmpConfig, serverHost: string): stri
     // enables TCP"). So: SOCKS5 -> TCP, else the caller's choice.
     doc.tcp = cfg.sock5 || cfg.protocol === "tcp" ? 1 : 0;
   }
-  if (cfg.encryption !== "none") {
-    doc.encrypt = cfg.encryption;
-    doc.encrypt_key = cfg.encryptionKey;
+  if (cfg.encrypt !== "none") {
+    doc.encrypt = cfg.encrypt;
   }
   return `${JSON.stringify(doc, null, 2)}\n`;
 }
