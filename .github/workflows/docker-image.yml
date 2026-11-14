@@ -1,0 +1,64 @@
+# Push the GHCR image for an already-published release tag, without re-running
+# the full release pipeline (which would bump the version again). Exists as a
+# recovery path: the docker job of a release run can fail on its own (a bad
+# action SHA pin cost v1.3.7 its image) while the GitHub release and its
+# archives are already published and immutable.
+name: Docker image
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build from (e.g. v1.3.7)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    name: Build and push image for ${{ inputs.tag }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      # inputs.tag is dispatcher-supplied (not issue/PR user content) and only
+      # ever used as a checkout ref; GitHub rejects non-existent refs.
+      - name: Checkout ${{ inputs.tag }}
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.tag }}
+          fetch-depth: 0
+
+      - name: Login to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}},value=${{ inputs.tag }}
+            type=raw,value=latest
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
+        with:
+          platforms: arm64
+
+      # platforms must be stated explicitly: a single-arch runner cannot infer
+      # a multi-arch image, and the release ships both architectures.
+      - name: Build + push Docker image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
