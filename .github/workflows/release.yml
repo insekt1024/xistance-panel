@@ -115,7 +115,11 @@ jobs:
     # ("Prisma payload has no native query engine for arm64"). runner_arch was
     # declared in the matrix but never referenced, so both cells ran on
     # ubuntu-latest/x64 and the arm64 cell was guaranteed to fail.
-    runs-on: ${{ matrix.runner_arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    # ubuntu-latest must never be used here: it now floats to 26.04, which the
+    # installer rejects ("Unsupported Ubuntu release"), while arm64 already
+    # pins 24.04. Pin amd64 to the same supported series. ("Prisma payload has
+    # no native query engine for arm64" is why the engine is native per arch.)
+    runs-on: ${{ matrix.runner_arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
     timeout-minutes: 45
     permissions:
       contents: read
